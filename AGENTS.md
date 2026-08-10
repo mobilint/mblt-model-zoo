@@ -114,6 +114,10 @@ truth when this snapshot becomes stale.
 - Keep the Cityscapes organizer ZIP-only and validation-only: select exactly 500 paired images and `gtFine_labelIds`
   masks from the official `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` packages, then install lossless
   flat `images/` and `annotations/` PNG pairs.
+- Reject symlinked dense dataset files and metadata from local extracted sources, and require every
+  resolved copy source to remain within the resolved dataset root. Do not reuse dense managed roots
+  containing symlinked data, metadata, or layout directories, or roots reached through a symlinked
+  ancestor. Organizers must reject those output paths before writing.
 - Reuse an organized validation or calibration root only when its taxonomy-specific layout,
   required metadata and targets, and full official validation sample count are all valid. Apply
   this consistently to ImageNet, COCO, DOTAv1, WiderFace, and dense datasets.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -31,12 +32,41 @@ WIDERFACE_EVENT_PATTERN = re.compile(r"\d+--\S.*")
 CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$")
 
 
-def _files_by_stem(directory: Path, suffixes: set[str]) -> dict[str, Path] | None:
-    """Collect direct child files with supported suffixes by stem."""
+def _path_has_symlink_component(path: Path) -> bool:
+    """Return whether a path traversal or its normalized ancestors contain a symlink."""
 
-    if not directory.is_dir():
+    expanded_path = path.expanduser()
+    traversal_path = expanded_path if expanded_path.is_absolute() else Path.cwd() / expanded_path
+    normalized_path = Path(os.path.abspath(expanded_path))
+    candidates = (traversal_path, *traversal_path.parents, normalized_path, *normalized_path.parents)
+    return any(component.is_symlink() for component in candidates)
+
+
+def _files_by_stem(
+    directory: Path,
+    suffixes: set[str],
+    *,
+    reject_symlinks: bool = False,
+) -> dict[str, Path] | None:
+    """Collect direct child files with supported suffixes by stem.
+
+    Args:
+        directory: Directory containing candidate files.
+        suffixes: Accepted lowercase file suffixes.
+        reject_symlinks: Whether any symlinked directory or entry invalidates
+            the file collection.
+
+    Returns:
+        Files keyed by stem, an empty mapping for a missing directory, or
+        ``None`` for duplicate stems or rejected symlinks.
+    """
+
+    if (reject_symlinks and directory.is_symlink()) or not directory.is_dir():
         return {}
-    paths = [path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in suffixes]
+    entries = list(directory.iterdir())
+    if reject_symlinks and any(path.is_symlink() for path in entries):
+        return None
+    paths = [path for path in entries if path.is_file() and path.suffix.lower() in suffixes]
     files = {path.stem: path for path in paths}
     return files if len(files) == len(paths) else None
 
@@ -213,10 +243,12 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
     """
 
     root = Path(data_path).expanduser()
+    if _path_has_symlink_component(root) or not root.is_dir():
+        return False
     normalized = dataset.lower()
     if normalized == "nyu-depth":
-        images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"})
-        depths = _files_by_stem(root / "depth", {".npy"})
+        images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"}, reject_symlinks=True)
+        depths = _files_by_stem(root / "depth", {".npy"}, reject_symlinks=True)
         if images is None or depths is None:
             return False
         return (
@@ -225,8 +257,8 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             and images.keys() == depths.keys()
         )
 
-    images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"})
-    annotations = _files_by_stem(root / "annotations", {".png"})
+    images = _files_by_stem(root / "images", {".jpg", ".jpeg", ".png"}, reject_symlinks=True)
+    annotations = _files_by_stem(root / "annotations", {".png"}, reject_symlinks=True)
     if images is None or annotations is None or images.keys() != annotations.keys():
         return False
 
@@ -235,7 +267,10 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             len(images) == ADE20K_VALIDATION_SAMPLE_COUNT
             and all(stem.startswith("ADE_val_") for stem in images)
             and all(path.suffix.lower() in {".jpg", ".jpeg"} for path in images.values())
-            and all((root / file_name).is_file() for file_name in ADE20K_METADATA_FILES)
+            and all(
+                not (root / file_name).is_symlink() and (root / file_name).is_file()
+                for file_name in ADE20K_METADATA_FILES
+            )
         )
     if normalized == "cityscapes":
         return (

@@ -13,6 +13,7 @@ import tarfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable
+from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
 from time import sleep
 from typing import Protocol, TypeGuard
@@ -32,6 +33,7 @@ from .readiness import (
     CITYSCAPES_VALIDATION_SAMPLE_COUNT,
     DOTAV1_VALIDATION_SAMPLE_COUNT,
     NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
+    _path_has_symlink_component,
     dataset_ready,
 )
 
@@ -535,14 +537,15 @@ def organize_widerface(
         construct_widerface(local_image_dir, local_annotation_dir, output_dir)
 
 
-def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str]:
+def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str, str]:
     """Resolves NYU Depth validation image and depth directories.
 
     Args:
         dataset_dir: Directory containing the NYU Depth root or its parent.
 
     Returns:
-        Paths to the validation image and depth directories.
+        Paths to the selected dataset root, validation image directory, and
+        validation depth directory.
 
     Raises:
         ValueError: If the expected NYU Depth layout is not present.
@@ -557,17 +560,91 @@ def _resolve_nyu_depth_validation_dirs(dataset_dir: str) -> tuple[str, str]:
         )
         for image_dir, depth_dir in candidates:
             if os.path.isdir(image_dir) and os.path.isdir(depth_dir):
-                return image_dir, depth_dir
+                return root, image_dir, depth_dir
     raise ValueError(f"NYU Depth dataset must contain matching images/ and depth/ directories: {dataset_dir}")
 
 
-def _collect_nyu_depth_validation_files(image_dir: str, depth_dir: str) -> tuple[dict[str, str], dict[str, str]]:
+def _validate_dense_source_file(source_path: str, dataset_root: Path) -> str:
+    """Resolve a non-symlink regular file contained by a dense dataset root.
+
+    Args:
+        source_path: Candidate data or metadata file.
+        dataset_root: Resolved root of the extracted dataset.
+
+    Returns:
+        Resolved source path safe to copy.
+
+    Raises:
+        ValueError: If the source is a symlink, is not a regular file, cannot be
+            resolved, or escapes the dataset root.
+    """
+
+    source = Path(source_path)
+    if source.is_symlink():
+        raise ValueError(f"Dense dataset source file must not be a symlink: {source}.")
+    try:
+        resolved_source = source.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"Unable to resolve dense dataset source file {source}: {exc}.") from exc
+    if not resolved_source.is_file():
+        raise ValueError(f"Dense dataset source must be a regular file: {source}.")
+    if not resolved_source.is_relative_to(dataset_root):
+        raise ValueError(f"Dense dataset source must remain within dataset root: {source}.")
+    return str(resolved_source)
+
+
+def _validate_dense_output_root(
+    output_dir: str,
+    dataset_name: str,
+    layout_names: Iterable[str],
+) -> str:
+    """Reject symlinks in a dense managed root before organization.
+
+    Args:
+        output_dir: Requested managed dataset root.
+        dataset_name: Human-readable dataset name for error reporting.
+        layout_names: Dataset-specific directories managed below the root.
+
+    Returns:
+        Expanded absolute output path.
+
+    Raises:
+        ValueError: If the managed root, an ancestor, or a managed layout
+            directory is a symlink.
+    """
+
+    requested_path = Path(output_dir).expanduser()
+    output_path = Path(os.path.abspath(requested_path))
+    if _path_has_symlink_component(requested_path):
+        raise ValueError(
+            f"{dataset_name} output directory and its existing parents must not be symlinks: {output_path}. "
+            "Remove the symlink or choose a path beneath regular directories."
+        )
+    for layout_name in layout_names:
+        layout_path = output_path / layout_name
+        if layout_path.is_symlink():
+            raise ValueError(
+                f"{dataset_name} output layout directories must not be symlinks: {layout_path}. "
+                "Remove the symlink or choose a different output directory."
+            )
+    return str(output_path)
+
+
+def _collect_nyu_depth_validation_files(
+    image_dir: str,
+    depth_dir: str,
+    dataset_root: Path,
+) -> tuple[dict[str, str], dict[str, str]]:
     """Validates and returns matching NYU Depth validation image/depth pairs."""
 
     images = {
-        os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(image_dir, [".jpg", ".jpeg", ".png"])
+        os.path.splitext(os.path.basename(path))[0]: _validate_dense_source_file(path, dataset_root)
+        for path in _iter_files(image_dir, [".jpg", ".jpeg", ".png"])
     }
-    depths = {os.path.splitext(os.path.basename(path))[0]: path for path in _iter_files(depth_dir, [".npy"])}
+    depths = {
+        os.path.splitext(os.path.basename(path))[0]: _validate_dense_source_file(path, dataset_root)
+        for path in _iter_files(depth_dir, [".npy"])
+    }
     missing_depths = sorted(set(images) - set(depths))
     missing_images = sorted(set(depths) - set(images))
     if missing_depths or missing_images:
@@ -593,11 +670,15 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
         output_dir: Directory where the organized dataset will be stored.
     """
 
-    image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
-    images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir)
+    output_dir = _validate_dense_output_root(output_dir, "NYU Depth", ("images", "depth"))
+    selected_root, image_dir, depth_dir = _resolve_nyu_depth_validation_dirs(dataset_dir)
+    try:
+        dataset_root = Path(selected_root).resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"Unable to resolve NYU Depth dataset root {selected_root}: {exc}.") from exc
+    images, depths = _collect_nyu_depth_validation_files(image_dir, depth_dir, dataset_root)
     print(f"Constructing NYU Depth validation dataset from {dataset_dir} to {output_dir}")
 
-    output_dir = os.path.abspath(output_dir)
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".nyu-depth-staging-") as staging_dir:
@@ -628,6 +709,7 @@ def organize_nyu_depth(
         output_dir: Directory to store the organized dataset.
     """
 
+    output_dir = _validate_dense_output_root(output_dir, "NYU Depth", ("images", "depth"))
     with TemporaryDirectory() as temp_dir:
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
@@ -664,14 +746,25 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
         ValueError: If the source does not contain 2,000 matched validation image/mask pairs.
     """
 
+    output_dir = _validate_dense_output_root(output_dir, "ADE20K", ("images", "annotations"))
     dataset_root, image_dir, annotation_dir = _resolve_ade20k_validation_dirs(dataset_dir)
+    try:
+        resolved_dataset_root = Path(dataset_root).resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"Unable to resolve ADE20K dataset root {dataset_root}: {exc}.") from exc
     images = {
-        os.path.splitext(file_name)[0]: os.path.join(image_dir, file_name)
+        os.path.splitext(file_name)[0]: _validate_dense_source_file(
+            os.path.join(image_dir, file_name),
+            resolved_dataset_root,
+        )
         for file_name in os.listdir(image_dir)
         if file_name.startswith("ADE_val_") and file_name.lower().endswith(".jpg")
     }
     annotations = {
-        os.path.splitext(file_name)[0]: os.path.join(annotation_dir, file_name)
+        os.path.splitext(file_name)[0]: _validate_dense_source_file(
+            os.path.join(annotation_dir, file_name),
+            resolved_dataset_root,
+        )
         for file_name in os.listdir(annotation_dir)
         if file_name.startswith("ADE_val_") and file_name.lower().endswith(".png")
     }
@@ -681,13 +774,13 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
         raise ValueError(
             f"ADE20K validation dataset must contain {ADE20K_VALIDATION_SAMPLE_COUNT} pairs, found {len(images)}."
         )
-    missing_metadata = [
-        file_name for file_name in ADE20K_METADATA_FILES if not os.path.isfile(os.path.join(dataset_root, file_name))
-    ]
-    if missing_metadata:
-        raise ValueError(f"ADE20K dataset is missing required metadata files: {', '.join(missing_metadata)}.")
+    metadata: dict[str, str] = {}
+    for file_name in ADE20K_METADATA_FILES:
+        metadata_path = os.path.join(dataset_root, file_name)
+        if not os.path.lexists(metadata_path):
+            raise ValueError(f"ADE20K dataset is missing required metadata files: {file_name}.")
+        metadata[file_name] = _validate_dense_source_file(metadata_path, resolved_dataset_root)
 
-    output_dir = os.path.abspath(output_dir)
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".ade20k-staging-") as staging_dir:
@@ -703,7 +796,7 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
             )
         for file_name in ADE20K_METADATA_FILES:
             shutil.copy2(
-                os.path.join(dataset_root, file_name),
+                metadata[file_name],
                 os.path.join(staged_output_dir, file_name),
             )
 
@@ -722,6 +815,7 @@ def organize_ade20k(
 ) -> None:
     """Organizes ADE20K validation data, downloading and unpacking when necessary."""
 
+    output_dir = _validate_dense_output_root(output_dir, "ADE20K", ("images", "annotations"))
     with TemporaryDirectory() as temp_dir:
         local_dataset_path = _resolve_source(dataset_path, temp_dir)
         if local_dataset_path.endswith(".zip"):
@@ -828,9 +922,9 @@ def organize_cityscapes(
         OSError: If extraction, copying, or atomic installation fails.
     """
 
+    output_dir = _validate_dense_output_root(output_dir, "Cityscapes", ("images", "annotations"))
     image_archive = _validate_cityscapes_zip(image_dir, "image")
     annotation_archive = _validate_cityscapes_zip(annotation_dir, "annotation")
-    output_dir = os.path.abspath(os.path.expanduser(output_dir))
     output_parent_dir = os.path.dirname(output_dir)
     os.makedirs(output_parent_dir, exist_ok=True)
     with TemporaryDirectory(dir=output_parent_dir, prefix=".cityscapes-staging-") as staging_dir:

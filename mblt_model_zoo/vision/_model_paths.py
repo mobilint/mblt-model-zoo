@@ -18,6 +18,71 @@ def framework_from_model_path(model_path: str) -> str | None:
     return None
 
 
+def uses_shifted_engine_model_path_layout(
+    model_path: object,
+    mxq_path: object,
+    dev_no: object,
+    core_mode: object,
+    target_cores: object,
+    postprocess_kwargs: object,
+    framework: object,
+    onnx_providers: object,
+) -> bool:
+    """Return whether engine arguments use the model-path-first layout.
+
+    Public constructor layouts have used the third positional argument for
+    either ``mxq_path`` or ``model_path``. An ONNX suffix identifies the
+    model-path-first layout because it changes runtime routing. For MXQ,
+    remapping is needed only when later values have the types produced by a
+    one-slot positional shift; a path by itself behaves identically as the
+    ``mxq_path`` alias.
+    """
+
+    if not isinstance(mxq_path, str):
+        return False
+    inferred_framework = framework_from_model_path(mxq_path)
+    if inferred_framework not in SUPPORTED_FRAMEWORKS:
+        return False
+    if isinstance(model_path, str) and model_path and model_path.lower() not in SUPPORTED_FRAMEWORKS:
+        return False
+    if inferred_framework == "onnx":
+        return True
+    return (
+        isinstance(dev_no, str)
+        or isinstance(core_mode, int)
+        or isinstance(target_cores, str)
+        or (postprocess_kwargs is not None and not isinstance(postprocess_kwargs, dict))
+        or isinstance(framework, dict)
+        or isinstance(onnx_providers, str)
+        or (model_path is not None and not isinstance(model_path, str))
+        or (isinstance(model_path, str) and model_path.lower() in SUPPORTED_FRAMEWORKS)
+    )
+
+
+def uses_shifted_compat_model_path_layout(
+    model_path: object,
+    mxq_path: object,
+    onnx_path: object,
+    framework: object,
+) -> bool:
+    """Return whether generated-wrapper arguments use a shifted model-path tail."""
+
+    if not isinstance(mxq_path, str):
+        return False
+    inferred_framework = framework_from_model_path(mxq_path)
+    if inferred_framework not in SUPPORTED_FRAMEWORKS:
+        return False
+    if isinstance(model_path, str) and model_path and model_path.lower() not in SUPPORTED_FRAMEWORKS:
+        return False
+    if inferred_framework == "onnx":
+        return True
+    return (
+        (isinstance(model_path, str) and model_path.lower() in SUPPORTED_FRAMEWORKS)
+        or (isinstance(onnx_path, str) and framework_from_model_path(onnx_path) == "mxq")
+        or (isinstance(framework, str) and framework_from_model_path(framework) is not None)
+    )
+
+
 def resolve_framework(framework: str | None, model_path: str = "") -> str:
     """Resolve the execution framework from explicit input and model path."""
 

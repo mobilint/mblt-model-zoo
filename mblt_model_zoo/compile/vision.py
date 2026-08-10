@@ -794,6 +794,7 @@ def compile_vision_model(
         "model_cls": model_cls,
         "model_type": model_type,
         "framework": "onnx",
+        "onnx_providers": ["CPUExecutionProvider"],
     }
     if selected_local_path is not None:
         expanded_local_path = Path(selected_local_path).expanduser()

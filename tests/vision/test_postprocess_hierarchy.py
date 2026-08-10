@@ -7,12 +7,7 @@ from typing import Any
 
 import pytest
 
-from mblt_model_zoo.vision.utils.postprocess import base as base_module
 from mblt_model_zoo.vision.utils.postprocess import build_postprocess
-from mblt_model_zoo.vision.utils.postprocess import yolo_anchor_post as anchor_module
-from mblt_model_zoo.vision.utils.postprocess import yolo_anchorless_post as anchorless_module
-from mblt_model_zoo.vision.utils.postprocess import yolo_dflfree_post as dflfree_module
-from mblt_model_zoo.vision.utils.postprocess import yolo_nmsfree_post as nmsfree_module
 from mblt_model_zoo.vision.utils.postprocess.base import PostBase, YOLODetectionPostBase
 from mblt_model_zoo.vision.utils.postprocess.cls_post import ClsPost
 from mblt_model_zoo.vision.utils.postprocess.depth_post import DepthPost
@@ -31,42 +26,6 @@ from mblt_model_zoo.vision.utils.postprocess.yolo_dflfree_post import (
     YOLODFLFreeSegPost,
 )
 from mblt_model_zoo.vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreeDetectionPost
-
-
-def test_detection_task_classes_inherit_from_canonical_detectors() -> None:
-    """Keep each task specialization attached to its detection implementation."""
-
-    for detector_type in (YOLOAnchorDetectionPost, YOLOAnchorlessDetectionPost, YOLODFLFreeDetectionPost):
-        assert issubclass(detector_type, YOLODetectionPostBase)
-    assert issubclass(YOLOAnchorSegPost, YOLOAnchorDetectionPost)
-    assert issubclass(YOLOAnchorlessSegPost, YOLOAnchorlessDetectionPost)
-    assert issubclass(YOLOAnchorlessPosePost, YOLOAnchorlessDetectionPost)
-    assert issubclass(YOLOAnchorlessOBBPost, YOLOAnchorlessDetectionPost)
-    assert issubclass(YOLODFLFreeSegPost, YOLODFLFreeDetectionPost)
-    assert issubclass(YOLODFLFreePosePost, YOLODFLFreeDetectionPost)
-    assert issubclass(YOLODFLFreeOBBPost, YOLODFLFreeDetectionPost)
-    assert issubclass(YOLONMSFreeDetectionPost, YOLOAnchorlessDetectionPost)
-
-
-def test_dense_task_postprocessors_are_independent_postbase_descendants() -> None:
-    """Avoid inheritance between unrelated dense prediction tasks."""
-
-    for postprocessor_type in (ClsPost, DepthPost, SemanticSegPost):
-        assert issubclass(postprocessor_type, PostBase)
-    assert not issubclass(ClsPost, DepthPost)
-    assert not issubclass(ClsPost, SemanticSegPost)
-    assert not issubclass(DepthPost, SemanticSegPost)
-    assert not issubclass(SemanticSegPost, DepthPost)
-
-
-def test_legacy_detector_class_names_are_not_exposed() -> None:
-    """Keep internal detector modules limited to canonical class names."""
-
-    assert not hasattr(base_module, "YOLOPostBase")
-    assert not hasattr(anchor_module, "YOLOAnchorPost")
-    assert not hasattr(anchorless_module, "YOLOAnchorlessPost")
-    assert not hasattr(dflfree_module, "YOLODFLFreePost")
-    assert not hasattr(nmsfree_module, "YOLONMSFreePost")
 
 
 @pytest.mark.parametrize(

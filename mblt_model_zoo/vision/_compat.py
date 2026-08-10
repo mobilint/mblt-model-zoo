@@ -8,8 +8,9 @@ constructor shape while delegating model loading to ``MBLT_Engine``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence, TypeAlias
+from typing import Any, Callable, Iterable, Sequence, TypeAlias, cast
 
+from ._model_paths import uses_shifted_compat_model_path_layout
 from .wrapper import CoreMode, MBLT_Engine
 
 _MODEL_DIR = Path(__file__).parent / "models"
@@ -27,10 +28,10 @@ class CompatMBLTEngine(MBLT_Engine):
         dev_no: int = 0,
         target_cores: Sequence[str] | None = None,
         target_clusters: Sequence[int] | None = None,
-        model_path: str | None = None,
         mxq_path: str | None = None,
         onnx_path: str | None = None,
         framework: str | None = None,
+        model_path: str | None = None,
     ) -> None:
         """Type-only constructor matching the generated legacy wrappers."""
         del (
@@ -100,10 +101,10 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
         dev_no: int = 0,
         target_cores: Sequence[str] | None = None,
         target_clusters: Sequence[int] | None = None,
-        model_path: str | None = None,
         mxq_path: str | None = None,
         onnx_path: str | None = None,
         framework: str | None = None,
+        model_path: str | None = None,
     ) -> None:
         """Initializes a YAML-backed compatibility wrapper.
 
@@ -118,14 +119,21 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
             dev_no: Accelerator device number.
             target_cores: Optional core selection for single-core mode.
             target_clusters: Optional cluster selection for multi/global modes.
-            model_path: Optional explicit local model path for MXQ or ONNX.
             mxq_path: Optional explicit MXQ path alias.
             onnx_path: Optional explicit ONNX path.
             framework: Execution framework, either ``"mxq"`` or ``"onnx"``. When
                 omitted, ``model_path`` suffix is used first, then MXQ is the fallback.
+            model_path: Optional explicit local model path for MXQ or ONNX.
         """
 
         del product
+        if uses_shifted_compat_model_path_layout(model_path, mxq_path, onnx_path, framework):
+            model_path, mxq_path, onnx_path, framework = (
+                mxq_path,
+                onnx_path,
+                framework,
+                cast(str | None, model_path),
+            )
         MBLT_Engine.__init__(
             self,
             model_cls=yaml_name,
