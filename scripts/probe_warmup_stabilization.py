@@ -256,7 +256,14 @@ def _launch_inner(
 ) -> dict[str, Any]:
     """Run one inner subprocess, print a live status line, and return the parsed payload."""
     cmd = [str(args.python), str(Path(__file__).resolve()), *_inner_cli_args(args, skip_warmup=skip_warmup)]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     if result.returncode != 0:
         print(
             f"{label} run {index + 1}: FAILED with exit code {result.returncode}\n"
@@ -395,6 +402,10 @@ def main() -> int:
     """Dispatch to the inner runner or the outer orchestrator based on ``--inner``."""
     args = _parse_args()
     if bool(args.inner):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass
         return _run_inner(args)
     return _run_outer(args)
 
