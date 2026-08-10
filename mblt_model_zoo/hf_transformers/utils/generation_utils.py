@@ -426,7 +426,7 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     # args contain only model_kwargs in transformers>=4.56.0
     def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintCache:
         configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
-        if not hasattr(self, "_cache"):
+        if not isinstance(getattr(self, "_cache", None), MobilintCache):
             self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
         elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
             self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
@@ -615,7 +615,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
 
     def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintEagle3Cache:
         del cache_implementation, batch_size, max_cache_len, args
-        if not hasattr(self, "_cache"):
+        if not isinstance(getattr(self, "_cache", None), MobilintEagle3Cache):
             base_mxq_model, draft_mxq_model = self.get_cache_mxq_models()
             self._cache = MobilintEagle3Cache(base_mxq_model, draft_mxq_model)
         else:
