@@ -214,8 +214,10 @@ truth when this snapshot becomes stale.
   concise paragraphs. Add `description` and `paths` YAML frontmatter to reusable agent rules or
   workflows.
 - Follow the nearest guide before selecting a test:
-  `tests/vision/TEST.md`, `tests/transformers/TEST.md`, `tests/MeloTTS/TEST.md`,
-  `benchmark/vision/README.md`, or `benchmark/transformers/README.md`.
+  `tests/transformers/TEST.md`, `tests/MeloTTS/TEST.md`,
+  the standalone Vision benchmark guide, or `benchmark/transformers/README.md`. Vision API, dataset-organization,
+  and benchmark-evaluation tests
+  are owned by mblt-vision-python.
 - Run the smallest meaningful validation. For a documentation-only change, check links, headings,
   and `git diff --check`; do not run hardware-bound suites unnecessarily.
 - For Python changes, use the targeted relevant pytest file, then run

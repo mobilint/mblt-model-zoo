@@ -31,6 +31,7 @@ dependencies = [
     "PyYAML",
     "matplotlib",
     "cityscapesScripts",
+    "mblt-npu-python>=0.0.1",
     "mblt-vision-python>=0.0.1",
 ]
 classifiers = [

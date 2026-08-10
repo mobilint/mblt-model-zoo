@@ -7,9 +7,10 @@ import os
 import sys
 from pathlib import Path
 
+from mblt_vision.utils.datasets.readiness import dataset_ready
+
 from mblt_model_zoo.vision._tasks import normalize_vision_task
 from mblt_model_zoo.vision.datasets import get_dataset_config, get_dataset_config_for_task
-from mblt_model_zoo.vision.utils.datasets.readiness import dataset_ready
 
 from ._vision import add_e2e_arg, add_threshold_args, create_vision_engine, parse_target_clusters, parse_target_cores
 
@@ -195,7 +196,7 @@ def _ensure_dataset(args: argparse.Namespace, task: str, dataset: str | None = N
         return data_path
 
     try:
-        from mblt_model_zoo.vision.utils.datasets import (
+        from mblt_vision.utils.datasets import (
             organize_ade20k,
             organize_cityscapes,
             organize_coco,
@@ -268,7 +269,7 @@ def _run_validation(args: argparse.Namespace) -> float:
     """Runs model validation on the dataset associated with the model task."""
 
     try:
-        from mblt_model_zoo.vision.utils.evaluation import (
+        from mblt_vision.utils.evaluation import (
             eval_ade20k,
             eval_cityscapes,
             eval_coco_metrics,
