@@ -7,6 +7,7 @@ historical Model Zoo import path while the implementation is maintained by
 
 from mblt_npu import (
     BACKEND_CLASSES,
+    DEFAULT_TARGET_DEVICE,
     MobilintAriesBackend,
     MobilintNPUBackend,
     MobilintRegulusBackend,
@@ -15,6 +16,7 @@ from mblt_npu import (
 
 __all__ = [
     "BACKEND_CLASSES",
+    "DEFAULT_TARGET_DEVICE",
     "MobilintAriesBackend",
     "MobilintNPUBackend",
     "MobilintRegulusBackend",

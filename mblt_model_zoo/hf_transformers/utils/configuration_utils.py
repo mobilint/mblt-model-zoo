@@ -18,12 +18,25 @@ except ImportError:
 from ...utils.npu_backend import MobilintNPUBackend
 
 
+def _serialized_target_cores(backend: MobilintNPUBackend) -> list[str]:
+    """Return JSON-safe core assignments for a Transformers configuration."""
+
+    return list(backend._target_cores_serialized)
+
+
+def _serialized_target_clusters(backend: MobilintNPUBackend) -> list[int]:
+    """Return JSON-safe cluster assignments for a Transformers configuration."""
+
+    return list(backend._target_clusters_serialized)
+
+
 class MobilintConfigMixin(PretrainedConfig):
     _NPU_SIGNATURE_FIELDS = (
         ("mxq_path", "", str),
         ("dev_no", 0, int),
         ("max_batch_size", 1, int),
         ("core_mode", "single", str),
+        ("target_device", "aries-rb", str),
         ("target_cores", None, Any),
         ("target_clusters", None, Any),
         ("revision", None, Any),
@@ -99,7 +112,7 @@ class MobilintConfigMixin(PretrainedConfig):
 
     @property
     def target_cores(self) -> list:
-        return self.npu_backend.target_cores
+        return _serialized_target_cores(self.npu_backend)
 
     @target_cores.setter
     def target_cores(self, values: list) -> None:
@@ -107,7 +120,7 @@ class MobilintConfigMixin(PretrainedConfig):
 
     @property
     def target_clusters(self) -> list:
-        return self.npu_backend.target_clusters
+        return _serialized_target_clusters(self.npu_backend)
 
     @target_clusters.setter
     def target_clusters(self, values: list) -> None:
@@ -203,7 +216,7 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
 
     @property
     def encoder_target_cores(self) -> list:
-        return self.encoder_npu_backend.target_cores
+        return _serialized_target_cores(self.encoder_npu_backend)
 
     @encoder_target_cores.setter
     def encoder_target_cores(self, values: list) -> None:
@@ -211,7 +224,7 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
 
     @property
     def encoder_target_clusters(self) -> list:
-        return self.encoder_npu_backend.target_clusters
+        return _serialized_target_clusters(self.encoder_npu_backend)
 
     @encoder_target_clusters.setter
     def encoder_target_clusters(self, values: list) -> None:
@@ -251,7 +264,7 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
 
     @property
     def decoder_target_cores(self) -> list:
-        return self.decoder_npu_backend.target_cores
+        return _serialized_target_cores(self.decoder_npu_backend)
 
     @decoder_target_cores.setter
     def decoder_target_cores(self, values: list) -> None:
@@ -259,7 +272,7 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
 
     @property
     def decoder_target_clusters(self) -> list:
-        return self.decoder_npu_backend.target_clusters
+        return _serialized_target_clusters(self.decoder_npu_backend)
 
     @decoder_target_clusters.setter
     def decoder_target_clusters(self, values: list) -> None:
@@ -296,6 +309,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
         "dev_no",
         "max_batch_size",
         "core_mode",
+        "target_device",
         "target_cores",
         "target_clusters",
         "npu_prefill_chunk_size",
@@ -323,9 +337,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
                 vision_kwargs[field] = kwargs.pop(vision_key)
         return text_kwargs, vision_kwargs
 
-    def _apply_sub_backend_kwargs(
-        self, text_kwargs: dict[str, Any], vision_kwargs: dict[str, Any]
-    ) -> None:
+    def _apply_sub_backend_kwargs(self, text_kwargs: dict[str, Any], vision_kwargs: dict[str, Any]) -> None:
         text_config = getattr(self, "text_config", None)
         if text_config is not None:
             for key, value in text_kwargs.items():
@@ -379,7 +391,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
 
     @property
     def vision_target_cores(self) -> list:
-        return self.vision_config.target_cores
+        return _serialized_target_cores(self.vision_config.npu_backend)
 
     @vision_target_cores.setter
     def vision_target_cores(self, values: list) -> None:
@@ -387,7 +399,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
 
     @property
     def vision_target_clusters(self) -> list:
-        return self.vision_config.target_clusters
+        return _serialized_target_clusters(self.vision_config.npu_backend)
 
     @vision_target_clusters.setter
     def vision_target_clusters(self, values: list) -> None:
@@ -427,7 +439,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
 
     @property
     def text_target_cores(self) -> list:
-        return self.text_config.target_cores
+        return _serialized_target_cores(self.text_config.npu_backend)
 
     @text_target_cores.setter
     def text_target_cores(self, values: list) -> None:
@@ -435,7 +447,7 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
 
     @property
     def text_target_clusters(self) -> list:
-        return self.text_config.target_clusters
+        return _serialized_target_clusters(self.text_config.npu_backend)
 
     @text_target_clusters.setter
     def text_target_clusters(self, values: list) -> None:
@@ -498,6 +510,7 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         "dev_no",
         "max_batch_size",
         "core_mode",
+        "target_device",
         "target_cores",
         "target_clusters",
         "revision",
@@ -671,7 +684,7 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @property
     def base_target_cores(self) -> list[str]:
-        return self.base_npu_backend.target_cores
+        return _serialized_target_cores(self.base_npu_backend)
 
     @base_target_cores.setter
     def base_target_cores(self, values: list[str]) -> None:
@@ -679,7 +692,7 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @property
     def draft_target_cores(self) -> list[str]:
-        return self.draft_npu_backend.target_cores
+        return _serialized_target_cores(self.draft_npu_backend)
 
     @draft_target_cores.setter
     def draft_target_cores(self, values: list[str]) -> None:
@@ -687,7 +700,7 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @property
     def fc_target_cores(self) -> list[str]:
-        return self.fc_npu_backend.target_cores
+        return _serialized_target_cores(self.fc_npu_backend)
 
     @fc_target_cores.setter
     def fc_target_cores(self, values: list[str]) -> None:
@@ -695,7 +708,7 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @property
     def base_target_clusters(self) -> list[int]:
-        return self.base_npu_backend.target_clusters
+        return _serialized_target_clusters(self.base_npu_backend)
 
     @base_target_clusters.setter
     def base_target_clusters(self, values: list[int]) -> None:
@@ -703,7 +716,7 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @property
     def draft_target_clusters(self) -> list[int]:
-        return self.draft_npu_backend.target_clusters
+        return _serialized_target_clusters(self.draft_npu_backend)
 
     @draft_target_clusters.setter
     def draft_target_clusters(self, values: list[int]) -> None:
@@ -711,7 +724,7 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @property
     def fc_target_clusters(self) -> list[int]:
-        return self.fc_npu_backend.target_clusters
+        return _serialized_target_clusters(self.fc_npu_backend)
 
     @fc_target_clusters.setter
     def fc_target_clusters(self, values: list[int]) -> None:
