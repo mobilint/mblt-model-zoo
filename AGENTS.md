@@ -41,6 +41,9 @@ Before editing, run `git status --short` and preserve unrelated work.
   Ruff checks.
 - Keep `mblt-model-zoo` CLI help and README examples synchronized. Its Vision subcommands must
   delegate to `mblt_vision.cli`; implement new Vision CLI behavior in `mblt-vision-python` first.
+- Pass board selection through to the standalone Vision/NPU packages with normalized
+  `target_device` values. Do not restore legacy Vision artifact lookup or product-specific backend
+  code in Model Zoo.
 - Keep the Vision facade a thin, documented compatibility layer. Add no new Vision models,
   processing, datasets, evaluation, benchmarks, compilation, or Vision-specific tests here.
 - Use `obb` when a Model Zoo compatibility configuration must name the Vision task.
@@ -65,3 +68,6 @@ Before editing, run `git status --short` and preserve unrelated work.
   changes, run focused pytest and `pre-commit run --files <touched files>` when available.
 - Do not revert, format, or regenerate unrelated files. Do not add generated artifacts, model
   weights, caches, or benchmark output unless explicitly requested.
+- When a significant package change lands (public API, CLI bridge, dependency/runtime, or ownership
+  boundary), update this guide, `.agents/skills/mblt-model-zoo/SKILL.md`, the Claude skill entry
+  point when needed, and the relevant README in the same change.
