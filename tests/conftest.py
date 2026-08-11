@@ -141,6 +141,44 @@ def pytest_addoption(parser):
         help="Override model revision (e.g., W8).",
     )
     parser.addoption(
+        "--run-vision-smoke",
+        action="store_true",
+        default=False,
+        help="Run the hardware-backed Model Zoo Vision compatibility smoke test.",
+    )
+    parser.addoption(
+        "--vision-model",
+        action="store",
+        default="resnet50",
+        help="Vision model name used by tests/vision (default: resnet50).",
+    )
+    parser.addoption(
+        "--vision-model-type",
+        action="store",
+        default="DEFAULT",
+        help="Vision model YAML variant used by tests/vision.",
+    )
+    parser.addoption(
+        "--vision-model-path",
+        action="store",
+        default=None,
+        help="Optional local MXQ or ONNX path used by tests/vision.",
+    )
+    parser.addoption(
+        "--vision-framework",
+        action="store",
+        choices=["mxq", "onnx"],
+        default=None,
+        help="Optional inference framework override used by tests/vision.",
+    )
+    parser.addoption(
+        "--vision-target-device",
+        action="store",
+        choices=["aries-rb", "regulus-ra", "regulus-rb"],
+        default="aries-rb",
+        help="Board target used by tests/vision.",
+    )
+    parser.addoption(
         "--embedding-weight",
         action="store",
         default=None,

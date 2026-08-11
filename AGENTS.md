@@ -45,7 +45,9 @@ Before editing, run `git status --short` and preserve unrelated work.
   `target_device` values. Do not restore legacy Vision artifact lookup or product-specific backend
   code in Model Zoo.
 - Keep the Vision facade a thin, documented compatibility layer. Add no new Vision models,
-  processing, datasets, evaluation, benchmarks, compilation, or Vision-specific tests here.
+  processing, datasets, evaluation, benchmarks, or compilation here. The only Vision tests kept
+  here are generic, opt-in facade smoke tests under `tests/vision`; implementation-specific tests
+  belong in `mblt-vision-python`.
 - Use `obb` when a Model Zoo compatibility configuration must name the Vision task.
 
 ## Transformers and MeloTTS

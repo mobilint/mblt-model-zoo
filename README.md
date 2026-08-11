@@ -86,7 +86,7 @@ Transformers commands to the installed `transformers` package.
 The built-in command surface shown by `mblt-model-zoo -h` is:
 
 - `predict` — run classification, depth estimation, object or face detection, instance or semantic
-  segmentation, OBB, and pose inference; `classify`, `detect`, `pose`, and `segment` are aliases.
+  segmentation, OBB, and pose inference.
 - `val` — validate a vision model on its benchmark dataset.
 - `compile` — compile a configured vision ONNX model to MXQ.
 - `tps measure` and `tps sweep` — run Transformers token-per-second benchmarks.

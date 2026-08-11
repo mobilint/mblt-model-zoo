@@ -11,7 +11,9 @@ description: >-
 1. Read `AGENTS.md`, run `git status --short`, and inspect the relevant parser, exports, tests, and
    `pyproject.toml` before editing.
 2. Keep `mblt_model_zoo.vision` and its Vision compilation exports as thin compatibility layers.
-   Do not reintroduce Vision implementation, datasets, evaluation, benchmarks, or Vision tests.
+   Do not reintroduce Vision implementation, datasets, evaluation, or benchmarks. Limit
+   `tests/vision` to generic opt-in facade smoke tests; keep implementation-specific Vision tests
+   in `mblt-vision-python`.
 3. Make new Vision CLI behavior in `mblt-vision-python` first. The Model Zoo `predict`, `val`, and
    `compile` handlers must delegate to `mblt_vision.cli`.
 4. Preserve Model Zoo CLI help and README examples when its CLI integration changes. Pass
