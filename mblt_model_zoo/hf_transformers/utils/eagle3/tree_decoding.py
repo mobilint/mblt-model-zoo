@@ -349,8 +349,11 @@ def evaluate_posterior(
     if logits_processor is None:
         path_positions = retrieve_indices[:, :-1].to(logits.device)
         safe_positions = path_positions.clamp_min(0)
-        path_logits = logits[safe_positions]
-        greedy_tokens = torch.argmax(path_logits, dim=-1)
+        # Argmax once over the full tree (n_tree_nodes, vocab) instead of the fancy-indexed
+        # (n_cand, depth-1, vocab) view; the latter materializes a 30 MB copy per iteration
+        # for Qwen3-4B (~152k vocab) and dominates greedy-path CPU cost.
+        greedy_tokens_per_node = torch.argmax(logits, dim=-1)
+        greedy_tokens = greedy_tokens_per_node[safe_positions]
         candidate_targets = candidates[:, 1:].to(logits.device)
         valid_mask = (path_positions >= 0) & (candidate_targets >= 0)
         posterior_mask = ((candidate_targets == greedy_tokens) & valid_mask).int()
@@ -365,8 +368,9 @@ def evaluate_posterior(
         if 0 <= int(leaf_position.item()) < logits.shape[0]:
             sample_p = logits[leaf_position]
         else:
-            sample_index = torch.clamp(accepted_draft_count, max=path_logits.shape[1] - 1)
-            sample_p = path_logits[best_candidate, sample_index]
+            sample_index = torch.clamp(accepted_draft_count, max=safe_positions.shape[1] - 1)
+            fallback_node = safe_positions[best_candidate, sample_index]
+            sample_p = logits[fallback_node]
         return best_candidate, accepted_draft_count, sample_p, None
 
     accepted_candidate_length = 1
