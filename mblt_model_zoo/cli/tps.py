@@ -820,19 +820,46 @@ def _resolve_text_measure_inputs(
     """Resolve text-measure input ids/prefill length from CLI input-mode options."""
 
     apply_chat_template = bool(getattr(args, "apply_chat_template", True))
+    enable_thinking = getattr(args, "enable_thinking", None)
 
     def _tokenize_prompt_text(text: str) -> torch.Tensor:
         tokenizer = pipeline.tokenizer
         template_available = getattr(tokenizer, "chat_template", None) is not None
         if apply_chat_template and template_available:
-            encoded = tokenizer.apply_chat_template(
-                [{"role": "user", "content": text}],
-                add_generation_prompt=True,
-                return_tensors="pt",
-                return_dict=True,
-                tokenize=True,
-            )
+            chat_kwargs: dict[str, Any] = {}
+            if enable_thinking is not None:
+                chat_kwargs["enable_thinking"] = bool(enable_thinking)
+            try:
+                encoded = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": text}],
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    return_dict=True,
+                    tokenize=True,
+                    **chat_kwargs,
+                )
+            except TypeError:
+                if enable_thinking is not None:
+                    flag = "--enable-thinking" if enable_thinking else "--disable-thinking"
+                    print(
+                        f"warning: tokenizer.apply_chat_template does not accept enable_thinking; "
+                        f"{flag} has no effect for this template",
+                        file=sys.stderr,
+                    )
+                encoded = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": text}],
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    return_dict=True,
+                    tokenize=True,
+                )
         else:
+            if enable_thinking is not None:
+                print(
+                    "warning: --enable-thinking/--disable-thinking is ignored when the chat "
+                    "template is not applied (--no-chat-template or tokenizer without chat_template)",
+                    file=sys.stderr,
+                )
             encoded = tokenizer(
                 text,
                 return_tensors="pt",
@@ -1847,6 +1874,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 "mode": str(getattr(args, "input_mode", "random")),
                 "prompt_sha256": selected_prompt_sha256,
                 "apply_chat_template": bool(getattr(args, "apply_chat_template", True)),
+                "enable_thinking": getattr(args, "enable_thinking", None),
             },
             "units": _units_for_section(SECTION_LLM_MEASURE, values_by_key),
             "runs": [_llm_measure_run_payload(r) for r in runs],
@@ -3775,6 +3803,30 @@ def add_tps_parser(
             "(--input-mode synthetic-text|file); by default the prompt is inserted as a "
             "single-turn user message with add_generation_prompt=True when the tokenizer "
             "exposes a chat_template"
+        ),
+    )
+    thinking_group = p_measure.add_mutually_exclusive_group()
+    thinking_group.add_argument(
+        "--enable-thinking",
+        dest="enable_thinking",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "for thinking-capable models (e.g., Qwen3), force enable_thinking=True in the "
+            "chat template so the model emits a <think> block; if unspecified the tokenizer "
+            "default is used"
+        ),
+    )
+    thinking_group.add_argument(
+        "--disable-thinking",
+        dest="enable_thinking",
+        action="store_const",
+        const=False,
+        help=(
+            "for thinking-capable models (e.g., Qwen3), force enable_thinking=False in the "
+            "chat template so the <think> block is suppressed; useful when a small --decode "
+            "budget would otherwise be consumed entirely by thinking tokens"
         ),
     )
     p_measure.add_argument(
