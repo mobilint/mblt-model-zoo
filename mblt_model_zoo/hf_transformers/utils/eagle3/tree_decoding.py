@@ -25,18 +25,19 @@ _SOFTMAX_TOPK_MODE_ENV_VAR = "MBLT_EAGLE3_SOFTMAX_TOPK_MODE"
 
 
 def _read_softmax_topk_mode_from_env() -> SoftmaxTopkMode:
-    """Read the mode from the environment, defaulting to ``full`` when unset or invalid."""
+    """Read the mode from the environment, defaulting to ``sliced`` when unset or invalid."""
     raw = os.environ.get(_SOFTMAX_TOPK_MODE_ENV_VAR, "").strip().lower()
     if raw in _VALID_SOFTMAX_TOPK_MODES:
         return raw  # type: ignore[return-value]
-    return "full"
+    return "sliced"
 
 
 # Runtime-selectable mode for ``softmax_topk_cpu_torch``.
 #
-# ``full`` (default, back-compat) computes the softmax denominator over the entire vocabulary.
-# ``sliced`` renormalizes over the top-k slice only, which avoids the full-vocab ``exp`` at the
-# cost of returning probabilities that always sum to 1.0 rather than a partial mass.
+# ``sliced`` (default) renormalizes over the top-k slice only, avoiding the full-vocab ``exp``.
+# ``full`` computes the softmax denominator over the entire vocabulary, so returned probabilities
+# are the partial mass on the top-k slice (``sum <= 1.0``). Set
+# ``MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full`` to opt back into the legacy behavior.
 #
 # The value is initialized from ``MBLT_EAGLE3_SOFTMAX_TOPK_MODE`` at module import; call
 # :func:`set_softmax_topk_mode` to override it programmatically.
@@ -49,8 +50,8 @@ def set_softmax_topk_mode(mode: SoftmaxTopkMode) -> None:
     """Override the softmax top-k mode used by :func:`softmax_topk_cpu_torch`.
 
     Args:
-        mode: Either ``"full"`` (back-compat full-vocab softmax) or ``"sliced"``
-            (renormalize over the top-k slice only).
+        mode: Either ``"sliced"`` (default; renormalize over the top-k slice only) or
+            ``"full"`` (legacy back-compat full-vocab softmax).
 
     Raises:
         ValueError: If ``mode`` is not a supported value.
@@ -174,7 +175,7 @@ def _softmax_topk_cpu_torch_sliced(
     k: int,
     logits_processor: Optional[LogitsProcessorList],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Top-k slice with renormalized softmax (avoids the full-vocab ``exp``)."""
+    """Top-k slice with renormalized softmax (default path; avoids the full-vocab ``exp``)."""
     x = logits.float()
     topk_vals, topk_idx = torch.topk(x, k, dim=-1, largest=True, sorted=True)
     topk_vals = _apply_logits_processor(topk_vals, logits_processor)
@@ -196,11 +197,11 @@ def softmax_topk_cpu_torch(
     :func:`set_softmax_topk_mode`.
 
     Modes:
-        - ``"full"`` (default, back-compat): softmax denominator is computed over the entire
+        - ``"sliced"`` (default): top-k is taken first and probabilities are renormalized over
+          the slice, so probabilities sum to 1.0. This avoids the full-vocab ``exp`` bottleneck.
+        - ``"full"`` (legacy back-compat): softmax denominator is computed over the entire
           vocabulary, so returned probabilities are the partial mass on the top-k slice
           (``sum <= 1.0``).
-        - ``"sliced"``: top-k is taken first and probabilities are renormalized over the slice,
-          so probabilities sum to 1.0. This avoids the full-vocab ``exp`` bottleneck.
 
     Args:
         logits: Logits tensor with float-like dtype.

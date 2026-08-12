@@ -33,32 +33,32 @@ def sample_logits() -> torch.Tensor:
     return torch.randn(1024, generator=generator, dtype=torch.float32)
 
 
-def test_default_mode_is_full():
-    """The default mode preserves the legacy full-vocab softmax path."""
+def test_default_mode_is_sliced():
+    """The default mode is the sliced renormalized softmax path."""
     reloaded = importlib.reload(tree_decoding_module)
     try:
-        assert reloaded.SOFTMAX_TOPK_MODE == "full"
+        assert reloaded.SOFTMAX_TOPK_MODE == "sliced"
     finally:
         importlib.reload(tree_decoding_module)
 
 
-def test_env_var_selects_sliced_mode(monkeypatch):
-    """A ``sliced`` env var value flips the module default at import time."""
-    monkeypatch.setenv("MBLT_EAGLE3_SOFTMAX_TOPK_MODE", "sliced")
+def test_env_var_selects_full_mode(monkeypatch):
+    """A ``full`` env var value opts back into the legacy full-vocab softmax at import time."""
+    monkeypatch.setenv("MBLT_EAGLE3_SOFTMAX_TOPK_MODE", "full")
     reloaded = importlib.reload(tree_decoding_module)
     try:
-        assert reloaded.SOFTMAX_TOPK_MODE == "sliced"
+        assert reloaded.SOFTMAX_TOPK_MODE == "full"
     finally:
         monkeypatch.delenv("MBLT_EAGLE3_SOFTMAX_TOPK_MODE", raising=False)
         importlib.reload(tree_decoding_module)
 
 
-def test_env_var_invalid_falls_back_to_full(monkeypatch):
-    """An unrecognized env var value falls back to the safe ``full`` default."""
+def test_env_var_invalid_falls_back_to_sliced(monkeypatch):
+    """An unrecognized env var value falls back to the ``sliced`` default."""
     monkeypatch.setenv("MBLT_EAGLE3_SOFTMAX_TOPK_MODE", "not-a-mode")
     reloaded = importlib.reload(tree_decoding_module)
     try:
-        assert reloaded.SOFTMAX_TOPK_MODE == "full"
+        assert reloaded.SOFTMAX_TOPK_MODE == "sliced"
     finally:
         monkeypatch.delenv("MBLT_EAGLE3_SOFTMAX_TOPK_MODE", raising=False)
         importlib.reload(tree_decoding_module)
