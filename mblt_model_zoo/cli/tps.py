@@ -1926,6 +1926,11 @@ def _print_generated_output(pipeline: Any, runs: Sequence[Any], decode_budget: i
     The first version keeps special tokens so callers can visually confirm whether an EOS
     token (for example ``<|im_end|>``) was actually emitted. The second version strips them
     for a clean readout of the natural-language output.
+
+    The trailing footer reports the decode-token count using the same convention as
+    ``decode_tps``: the first emitted token is the TTFT sample and is excluded from the
+    decode count, then labelled separately alongside the total emitted count and the
+    ``--decode`` budget.
     """
     if not runs:
         return
@@ -1950,7 +1955,11 @@ def _print_generated_output(pipeline: Any, runs: Sequence[Any], decode_budget: i
     print(raw_text)
     print("--- generated text (clean) ---")
     print(clean_text)
-    print(f"--- token count: {len(token_ids)} (of --decode {decode_budget} max) ---")
+    decode_count = max(0, len(token_ids) - 1)
+    print(
+        f"--- token count: {decode_count} decode tokens "
+        f"(+ 1 TTFT sample = {len(token_ids)} emitted; --decode {decode_budget} max) ---"
+    )
 
 
 def _run_vlm_measure(args: argparse.Namespace) -> int:
@@ -3887,7 +3896,9 @@ def add_tps_parser(
         help=(
             "diagnostic: after the results table, decode and print the tokens actually generated "
             "by the last measured run (excludes the prompt). Prints two versions: special tokens "
-            "preserved and cleaned. Useful for confirming whether EOS terminated decoding early."
+            "preserved and cleaned. The footer reports the decode-token count with the TTFT "
+            "sample labelled separately, matching the decode_tps convention. Useful for "
+            "confirming whether EOS terminated decoding early."
         ),
     )
     p_measure.set_defaults(_handler=_cmd_measure)
