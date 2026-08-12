@@ -199,11 +199,21 @@ truth when this snapshot becomes stale.
   in the `25`–`30` range, where the Hugging Face default of `49` costs more iteration latency than
   its extra acceptance recovers.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` runs in
-  one of two modes. Default `sliced` renormalizes probabilities over the retained top-k slice so
-  they sum to `1`; the legacy `full` mode keeps the whole-vocab denominator. Toggle at import
-  through `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full` or programmatically through
-  `set_softmax_topk_mode(...)`. The greedy path never invokes this function because
-  `prepare_logits_processor` returns `None` for `temperature<=1e-5`.
+  one of three modes. Default `auto` dispatches per call: when the processor list contains a
+  `TopKLogitsWarper`, slice the raw logits to the declared top-K first and apply the processor
+  list on that slice (HF `_get_logits_warper` order Temperature → TopK → TopP makes the slice
+  mathematically identical to the full-vocab path while skipping the full-vocab `exp`);
+  otherwise take the full-vocab path so a bare `TopPLogitsWarper` still determines its nucleus
+  from the whole distribution. `full` forces the full-vocab path as a manual override.
+  `sliced` is a deprecated back-compat mode that always renormalizes over a top-``max_return_k``
+  slice and emits a warning; keep it only for A/B reproducibility. Toggle at import through
+  `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full|sliced|auto` or programmatically through
+  `set_softmax_topk_mode(...)`. The `max_return_k` argument (default `10`) is a return-slice
+  size for downstream candidate matching, not the math slice; do not treat it as an implicit
+  TopK. The greedy path never invokes this function because `prepare_logits_processor` returns
+  `None` for `temperature<=1e-5`.
+- Keep `prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP)
+  so that `softmax_topk_cpu_torch` can safely apply the list on top of a TopK slice.
 - Keep the argmax-first shape in `evaluate_posterior` greedy: compute `argmax(logits)` and index
   with `safe_positions` rather than fancy-indexing the `(n_cand, depth, vocab)` logits tensor,
   which materializes the full slice.

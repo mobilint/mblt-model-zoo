@@ -50,12 +50,21 @@ description: >-
   `25`–`30` range: the Hugging Face default of `49` costs more iteration latency than its extra
   acceptance recovers. Override either by editing the shipped `generation_config.json` or by
   setting `model.generation_config.num_assistant_tokens = ...` before `generate`.
-- A/B the softmax top-k mode in
-  `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py`. Default `sliced` renormalizes
-  probabilities over the retained top-k slice; the legacy `full` mode keeps the whole-vocab
-  denominator. Toggle at import through `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full`, or programmatically
-  through `set_softmax_topk_mode(...)`. The greedy path (`temperature<=1e-5`) never enters this
-  function because `prepare_logits_processor` returns `None`.
+- `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch`
+  dispatches per call. Default `auto`: slice to the declared `TopKLogitsWarper`'s top-K first
+  and apply the processor list on that slice (Hugging Face `_get_logits_warper` order
+  Temperature → TopK → TopP makes the slice mathematically identical to full-vocab softmax
+  while skipping the full-vocab `exp`); otherwise fall back to the full-vocab path so a bare
+  `TopPLogitsWarper` still determines its nucleus over the whole distribution. `full` forces
+  the full-vocab path as a manual override. `sliced` is a deprecated back-compat mode that
+  unconditionally renormalizes over a top-``max_return_k`` slice and emits a warning; retain
+  it only for A/B reproducibility. Toggle at import through
+  `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=auto|full|sliced`, or programmatically through
+  `set_softmax_topk_mode(...)`. The `max_return_k` argument (default `10`) is a return-slice
+  size for downstream candidate matching, not the math slice. Keep `prepare_logits_processor`
+  in HF order (RepetitionPenalty → Temperature → TopK → TopP) so the auto slice-by-TopK path
+  stays HF-equivalent. The greedy path (`temperature<=1e-5`) never enters this function because
+  `prepare_logits_processor` returns `None`.
 - Keep the argmax-first shape in `evaluate_posterior` greedy: `argmax(logits)[safe_positions]`
   avoids materializing the `(n_cand, depth, vocab)` fancy-index slice.
 - EAGLE-3 speculative-decode rows exposed by `mblt-model-zoo tps measure` are `accept_steps`,

@@ -19,25 +19,37 @@ from ..cache_utils import MobilintEagle3Cache
 
 logger = logging.get_logger(__name__)
 
-SoftmaxTopkMode: TypeAlias = Literal["full", "sliced"]
-_VALID_SOFTMAX_TOPK_MODES: tuple[SoftmaxTopkMode, ...] = ("full", "sliced")
+SoftmaxTopkMode: TypeAlias = Literal["auto", "full", "sliced"]
+_VALID_SOFTMAX_TOPK_MODES: tuple[SoftmaxTopkMode, ...] = ("auto", "full", "sliced")
 _SOFTMAX_TOPK_MODE_ENV_VAR = "MBLT_EAGLE3_SOFTMAX_TOPK_MODE"
+
+_SLICED_DEPRECATION_MESSAGE = (
+    "EAGLE-3 softmax_topk_cpu_torch: %r mode is deprecated. It applies the logits processor "
+    "list on top of an arbitrary top-N slice, which does not implement HF nucleus sampling "
+    "when a TopPLogitsWarper is present without a TopKLogitsWarper. Prefer %r (default) or "
+    "%r for HF-equivalent behavior."
+)
 
 
 def _read_softmax_topk_mode_from_env() -> SoftmaxTopkMode:
-    """Read the mode from the environment, defaulting to ``sliced`` when unset or invalid."""
+    """Read the mode from the environment, defaulting to ``auto`` when unset or invalid."""
     raw = os.environ.get(_SOFTMAX_TOPK_MODE_ENV_VAR, "").strip().lower()
     if raw in _VALID_SOFTMAX_TOPK_MODES:
         return raw  # type: ignore[return-value]
-    return "sliced"
+    return "auto"
 
 
 # Runtime-selectable mode for ``softmax_topk_cpu_torch``.
 #
-# ``sliced`` (default) renormalizes over the top-k slice only, avoiding the full-vocab ``exp``.
-# ``full`` computes the softmax denominator over the entire vocabulary, so returned probabilities
-# are the partial mass on the top-k slice (``sum <= 1.0``). Set
-# ``MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full`` to opt back into the legacy behavior.
+# ``auto`` (default) dispatches per-call:
+#   * If a ``TopKLogitsWarper`` is present, slice to top-K first and apply the processor list
+#     on that slice — mathematically identical to the full-vocab HF path whenever the standard
+#     Temperature/TopK/TopP warpers are used, but skips the full-vocab ``exp``.
+#   * Otherwise, take the full-vocab path so that a bare ``TopPLogitsWarper`` still determines
+#     its nucleus from the whole distribution.
+# ``full`` forces the full-vocab path unconditionally (manual override).
+# ``sliced`` is a deprecated back-compat mode that always renormalizes over a top-``max_return_k``
+# slice; it is retained only for A/B reproducibility.
 #
 # The value is initialized from ``MBLT_EAGLE3_SOFTMAX_TOPK_MODE`` at module import; call
 # :func:`set_softmax_topk_mode` to override it programmatically.
@@ -45,13 +57,17 @@ SOFTMAX_TOPK_MODE: SoftmaxTopkMode = _read_softmax_topk_mode_from_env()
 
 _last_logged_softmax_topk_mode: Optional[SoftmaxTopkMode] = None
 
+if SOFTMAX_TOPK_MODE == "sliced":
+    logger.warning(_SLICED_DEPRECATION_MESSAGE, "sliced", "auto", "full")
+
 
 def set_softmax_topk_mode(mode: SoftmaxTopkMode) -> None:
     """Override the softmax top-k mode used by :func:`softmax_topk_cpu_torch`.
 
     Args:
-        mode: Either ``"sliced"`` (default; renormalize over the top-k slice only) or
-            ``"full"`` (legacy back-compat full-vocab softmax).
+        mode: One of ``"auto"`` (default; dispatches per-call based on the processor list),
+            ``"full"`` (force full-vocab softmax), or ``"sliced"`` (deprecated legacy top-N
+            renormalization).
 
     Raises:
         ValueError: If ``mode`` is not a supported value.
@@ -61,6 +77,8 @@ def set_softmax_topk_mode(mode: SoftmaxTopkMode) -> None:
         raise ValueError(
             f"Unsupported softmax top-k mode {mode!r}; expected one of {_VALID_SOFTMAX_TOPK_MODES}."
         )
+    if mode == "sliced":
+        logger.warning(_SLICED_DEPRECATION_MESSAGE, "sliced", "auto", "full")
     SOFTMAX_TOPK_MODE = mode
 
 
@@ -140,87 +158,147 @@ def prepare_logits_processor(
     top_p: float = 0.0,
     top_k: int = 0,
 ) -> Optional[LogitsProcessorList]:
-    """Build a minimal logits processor list for EAGLE-3 generation."""
+    """Build a minimal logits processor list for EAGLE-3 generation.
+
+    Ordering matches Hugging Face's ``_get_logits_processor``/``_get_logits_warper`` contract
+    (repetition penalty → temperature → top-k → top-p) so that :func:`softmax_topk_cpu_torch`
+    can safely apply the list on top of a top-k slice when a ``TopKLogitsWarper`` is present.
+    """
     processor_list = LogitsProcessorList()
     if temperature <= 1e-5:
         return None
-    if temperature != 1.0:
-        processor_list.append(TemperatureLogitsWarper(temperature))
     if repetition_penalty > 1.0:
         processor_list.append(RepetitionPenaltyLogitsProcessor(repetition_penalty))
-    if 1e-8 <= top_p < 1.0:
-        processor_list.append(TopPLogitsWarper(top_p))
+    if temperature != 1.0:
+        processor_list.append(TemperatureLogitsWarper(temperature))
     if top_k > 0:
         processor_list.append(TopKLogitsWarper(top_k))
+    if 1e-8 <= top_p < 1.0:
+        processor_list.append(TopPLogitsWarper(top_p))
     return processor_list or None
 
 
-def _softmax_topk_cpu_torch_full(
+def _extract_top_k_from_processor(
+    logits_processor: Optional[LogitsProcessorList],
+) -> Optional[int]:
+    """Return the ``top_k`` value from the first ``TopKLogitsWarper`` in the list, or ``None``."""
+    if logits_processor is None:
+        return None
+    for warper in logits_processor:
+        if isinstance(warper, TopKLogitsWarper):
+            return int(warper.top_k)
+    return None
+
+
+def _softmax_topk_full_vocab(
     logits: torch.Tensor,
-    k: int,
+    max_return_k: int,
     logits_processor: Optional[LogitsProcessorList],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Full-vocab softmax denominator with top-k selection (legacy back-compat path)."""
+    """Apply the processor list on full-vocab logits, softmax with a full-vocab denominator."""
     x = logits.float()
-    processed_logits = _apply_logits_processor(x, logits_processor)
-    topk_vals, topk_idx = torch.topk(processed_logits, k, dim=-1, largest=True, sorted=True)
-    max_val = processed_logits.max(dim=-1, keepdim=True).values
-    denom = torch.exp(processed_logits - max_val).sum(dim=-1, keepdim=True)
+    processed = _apply_logits_processor(x, logits_processor)
+    return_k = min(int(max_return_k), processed.shape[-1])
+    max_val = processed.max(dim=-1, keepdim=True).values
+    denom = torch.exp(processed - max_val).sum(dim=-1, keepdim=True)
+    topk_vals, topk_idx = torch.topk(processed, return_k, dim=-1, largest=True, sorted=True)
     probs = torch.exp(topk_vals - max_val) / denom
     return probs, topk_idx
 
 
-def _softmax_topk_cpu_torch_sliced(
+def _softmax_topk_sliced_by_top_k(
     logits: torch.Tensor,
-    k: int,
+    max_return_k: int,
+    logits_processor: Optional[LogitsProcessorList],
+    top_k: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Slice to top-K first, apply the processor list on the slice, softmax over the slice.
+
+    Mathematically equivalent to :func:`_softmax_topk_full_vocab` for HF-ordered
+    Temperature/TopK/TopP warpers because entries outside the K slice would be set to
+    ``-inf`` by ``TopKLogitsWarper`` and contribute zero to the softmax denominator.
+    """
+    x = logits.float()
+    vocab = x.shape[-1]
+    slice_size = min(max(int(top_k), int(max_return_k)), vocab)
+    return_k = min(int(max_return_k), vocab)
+    topk_vals, topk_idx = torch.topk(x, slice_size, dim=-1, largest=True, sorted=True)
+    processed_slice = _apply_logits_processor(topk_vals, logits_processor)
+    max_val = processed_slice.max(dim=-1, keepdim=True).values
+    exp_slice = torch.exp(processed_slice - max_val)
+    denom = exp_slice.sum(dim=-1, keepdim=True)
+    probs_slice = exp_slice / denom
+    if slice_size == return_k:
+        return probs_slice, topk_idx
+    _, order = torch.topk(processed_slice, return_k, dim=-1, largest=True, sorted=True)
+    probs = probs_slice.gather(-1, order)
+    idx = topk_idx.gather(-1, order)
+    return probs, idx
+
+
+def _softmax_topk_legacy_sliced(
+    logits: torch.Tensor,
+    max_return_k: int,
     logits_processor: Optional[LogitsProcessorList],
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Top-k slice with renormalized softmax (default path; avoids the full-vocab ``exp``)."""
+    """Legacy top-``max_return_k`` slice + renormalization (retained for A/B reproducibility)."""
     x = logits.float()
-    topk_vals, topk_idx = torch.topk(x, k, dim=-1, largest=True, sorted=True)
-    topk_vals = _apply_logits_processor(topk_vals, logits_processor)
-    max_val = topk_vals.max(dim=-1, keepdim=True).values
-    exp_vals = torch.exp(topk_vals - max_val)
+    return_k = min(int(max_return_k), x.shape[-1])
+    topk_vals, topk_idx = torch.topk(x, return_k, dim=-1, largest=True, sorted=True)
+    processed_vals = _apply_logits_processor(topk_vals, logits_processor)
+    max_val = processed_vals.max(dim=-1, keepdim=True).values
+    exp_vals = torch.exp(processed_vals - max_val)
     probs = exp_vals / exp_vals.sum(dim=-1, keepdim=True)
     return probs, topk_idx
 
 
 def softmax_topk_cpu_torch(
     logits: torch.Tensor,
-    k: int,
+    max_return_k: int = 10,
+    *,
     logits_processor: Optional[LogitsProcessorList] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return top-k probabilities and indices from logits.
+    """Return the top-``max_return_k`` ``(probs, indices)`` for candidate matching.
 
-    The active path is selected by :data:`SOFTMAX_TOPK_MODE`, initialized from the
-    ``MBLT_EAGLE3_SOFTMAX_TOPK_MODE`` environment variable at import and overridable via
-    :func:`set_softmax_topk_mode`.
+    ``max_return_k`` is a return-slice size (for downstream candidate matching), *not* a math
+    slice for the softmax. The mathematical path is chosen by :data:`SOFTMAX_TOPK_MODE`:
 
-    Modes:
-        - ``"sliced"`` (default): top-k is taken first and probabilities are renormalized over
-          the slice, so probabilities sum to 1.0. This avoids the full-vocab ``exp`` bottleneck.
-        - ``"full"`` (legacy back-compat): softmax denominator is computed over the entire
-          vocabulary, so returned probabilities are the partial mass on the top-k slice
-          (``sum <= 1.0``).
+    - ``"auto"`` (default): dispatch per call.
+        * If ``logits_processor`` contains a ``TopKLogitsWarper``, slice the raw logits to the
+          declared top-K first and apply the processor list on that slice. HF ordering
+          (Temperature → TopK → TopP) makes the slice mathematically identical to full-vocab
+          softmax while skipping the full-vocab ``exp``.
+        * Otherwise (no TopK; TopP or bare Temperature only), take the full-vocab path so that
+          ``TopPLogitsWarper`` determines its nucleus from the whole distribution.
+    - ``"full"``: force full-vocab softmax and processor application. Manual override.
+    - ``"sliced"`` (deprecated): unconditionally slice to top-``max_return_k`` first and
+      renormalize over that slice. Retained for A/B reproducibility only; incorrect for
+      ``TopPLogitsWarper`` without a companion ``TopKLogitsWarper``.
 
     Args:
-        logits: Logits tensor with float-like dtype.
-        k: Number of top candidates.
+        logits: Float-like logits tensor.
+        max_return_k: Number of top candidates to return. Defaults to ``10``.
         logits_processor: Optional HF logits processor list.
 
     Returns:
-        Tuple of ``(probs, topk_indices)`` where:
-          - ``probs``: float tensor.
-          - ``topk_indices``: ``torch.long`` tensor.
+        Tuple ``(probs, indices)`` where ``probs`` is a float tensor and ``indices`` is a
+        ``torch.long`` tensor.
     """
     global _last_logged_softmax_topk_mode
     mode = SOFTMAX_TOPK_MODE
     if mode != _last_logged_softmax_topk_mode:
         logger.info("EAGLE-3 softmax_topk_cpu_torch mode = %r", mode)
         _last_logged_softmax_topk_mode = mode
+
+    if mode == "full":
+        return _softmax_topk_full_vocab(logits, max_return_k, logits_processor)
     if mode == "sliced":
-        return _softmax_topk_cpu_torch_sliced(logits, k, logits_processor)
-    return _softmax_topk_cpu_torch_full(logits, k, logits_processor)
+        return _softmax_topk_legacy_sliced(logits, max_return_k, logits_processor)
+
+    top_k = _extract_top_k_from_processor(logits_processor)
+    if top_k is not None:
+        return _softmax_topk_sliced_by_top_k(logits, max_return_k, logits_processor, top_k)
+    return _softmax_topk_full_vocab(logits, max_return_k, logits_processor)
 
 
 @torch.no_grad()
@@ -256,7 +334,7 @@ def initialize_tree(
     cache.update_base_seen_tokens(prompt_delta_input_ids.shape[1])
 
     if logits_processor is not None:
-        probabilities, indices = softmax_topk_cpu_torch(logits, 10, logits_processor=logits_processor)
+        probabilities, indices = softmax_topk_cpu_torch(logits, logits_processor=logits_processor)
         sampled_idx = torch.multinomial(probabilities, 1)
         token = indices.gather(dim=1, index=sampled_idx)
     else:
@@ -387,7 +465,6 @@ def evaluate_posterior(
         matching = (candidates[:, :accepted_candidate_length] == accept_prefix).all(dim=1)
         topk_probs, topk_indices = softmax_topk_cpu_torch(
             select_token_logits(logits, retrieve_idx),
-            10,
             logits_processor=logits_processor,
         )
         sampled_indices = topk_indices
@@ -418,7 +495,6 @@ def evaluate_posterior(
         sample_logits = select_token_logits(logits, retrieve_indices[best_candidate, accepted_candidate_length - 1])
         sample_p, sampled_indices = softmax_topk_cpu_torch(
             sample_logits,
-            10,
             logits_processor=logits_processor,
         )
 

@@ -80,9 +80,15 @@
   FC stack. Tune the draft budget with `GenerationConfig.num_assistant_tokens` (default `64`);
   Qwen3-4B measures best around `25`–`30`.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
-  to `sliced` (top-k renormalized). Set `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full` or call
-  `set_softmax_topk_mode(...)` to restore the legacy whole-vocab denominator; the greedy path
-  never enters this function.
+  to `auto`: slice by declared `TopKLogitsWarper` if present, else full-vocab softmax so
+  `TopPLogitsWarper` computes its nucleus over the whole distribution. `full` forces full-vocab;
+  `sliced` is a deprecated legacy top-``max_return_k`` renormalization that violates HF nucleus
+  semantics for TopP-only and emits a warning. Toggle via
+  `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=auto|full|sliced` or `set_softmax_topk_mode(...)`. The
+  `max_return_k` keyword (default `10`) is only a return-slice size, not a math slice. The
+  greedy path never enters this function.
+- Keep `prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP)
+  so the auto slice-by-TopK path stays mathematically equivalent to full-vocab.
 - Keep `evaluate_posterior` greedy argmax-first (`argmax(logits)[safe_positions]`) to avoid
   materializing the full `(n_cand, depth, vocab)` slice.
 - EAGLE-3 speculative-decode rows in `tps measure` are `accept_steps`, `tokens_sum`,

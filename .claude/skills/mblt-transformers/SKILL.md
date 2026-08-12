@@ -26,12 +26,17 @@ EAGLE-3 speculative decoding (`mobilint/EAGLE3-Qwen3-4B` and siblings) loads thr
 `AutoModelForCausalLM.from_pretrained(...)` as one release bundling base MXQ, one-block draft MXQ,
 and FC stack. Tune the draft-tree budget through `GenerationConfig.num_assistant_tokens` (default
 `64` in `mblt_model_zoo/hf_transformers/utils/generation_utils.py`); Qwen3-4B measures best around
-`25`–`30`. A/B the softmax top-k mode in
-`mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch`: default
-`sliced` renormalizes over the retained top-k slice, and `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full` (or
-`set_softmax_topk_mode(...)`) restores the whole-vocab denominator. The greedy path never enters
-that function. `evaluate_posterior` greedy uses `argmax(logits)[safe_positions]` to avoid the
-fancy-indexed `(n_cand, depth, vocab)` slice.
+`25`–`30`. The softmax dispatch in
+`mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
+to `auto`: slice by declared `TopKLogitsWarper` if present, else fall back to full-vocab so a
+bare `TopPLogitsWarper` still determines its nucleus over the whole distribution. `full` is a
+manual full-vocab override; `sliced` is a deprecated legacy top-``max_return_k`` renormalization
+that violates HF nucleus semantics without a TopK companion and emits a warning. Toggle via
+`MBLT_EAGLE3_SOFTMAX_TOPK_MODE=auto|full|sliced` or `set_softmax_topk_mode(...)`. Keep
+`prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP) so the
+auto slice-by-TopK path stays mathematically equivalent to full-vocab. The greedy path never
+enters that function. `evaluate_posterior` greedy uses `argmax(logits)[safe_positions]` to
+avoid the fancy-indexed `(n_cand, depth, vocab)` slice.
 
 `mblt-model-zoo tps measure` on EAGLE-3 pipelines prints the extra rows `accept_steps`,
 `tokens_sum`, `tokens_per_step` (= `drafts_avg + 1`, matching `accept_length + 1` in the reference
