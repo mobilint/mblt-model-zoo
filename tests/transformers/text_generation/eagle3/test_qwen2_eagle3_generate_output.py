@@ -13,11 +13,11 @@ from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 im
     CachedRotaryEmbedding,
     MobilintQwen2Eagle3ForCausalLM,
 )
+from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
-from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
-from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintEagle3GenerationMixin, llm_eagle3_forward
 from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, update_inference_inputs
+from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintEagle3GenerationMixin, llm_eagle3_forward
 
 
 def _attach_minimal_eagle3_modules(model: MobilintQwen2Eagle3ForCausalLM) -> None:
@@ -161,16 +161,20 @@ def test_qwen2_eagle3_acceptance_stats_getter_defaults_and_updates(monkeypatch) 
             torch.tensor([0], dtype=torch.long),
         ),
     )
+    # Emit two tokens (root + one accepted draft) so acceptance accounting —
+    # which derives drafts from ``emitted_length - 1`` after truncation — sees
+    # one accepted draft. ``evaluate_posterior`` above still reports one draft
+    # accepted; that matches the emitted delta.
     monkeypatch.setattr(
         decoding_module,
         "update_inference_inputs",
         lambda *_args, **_kwargs: (
-            torch.tensor([[1, 2, 4]], dtype=torch.long),
+            torch.tensor([[1, 2, 4, 5]], dtype=torch.long),
             torch.tensor([[3]], dtype=torch.long),
             torch.tensor([0], dtype=torch.long),
             None,
             torch.tensor([[0]], dtype=torch.long),
-            1,
+            2,
             True,
         ),
     )
@@ -180,6 +184,8 @@ def test_qwen2_eagle3_acceptance_stats_getter_defaults_and_updates(monkeypatch) 
     assert stats["steps"] == 1
     assert stats["accepted_tokens_sum"] == 1
     assert stats["accepted_tokens_avg"] == 1.0
+    # candidate_draft_tokens == retrieve_indices.shape[-1] - 1 == 0 → clamped to 1;
+    # 1 accepted draft / 1 candidate slot == 1.0.
     assert stats["acceptance_ratio"] == 1.0
     assert output.past_key_values is cache
 
@@ -1080,7 +1086,9 @@ def test_qwen2_eagle3_npu_timing_aggregation_and_reset() -> None:
 def test_qwen2_eagle3_npu_timing_requires_all_components() -> None:
     """Fail fast when any EAGLE-3 child backend is missing."""
     model = object.__new__(MobilintQwen2Eagle3ForCausalLM)
-    object.__setattr__(model, "_modules", {"model": SimpleNamespace(_modules={"base_model": object(), "draft_model": object()})})
+    object.__setattr__(
+        model, "_modules", {"model": SimpleNamespace(_modules={"base_model": object(), "draft_model": object()})}
+    )
 
     import pytest
 

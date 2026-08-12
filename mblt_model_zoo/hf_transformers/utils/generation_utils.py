@@ -932,10 +932,6 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             )
             candidate_width = int(candidates.shape[-1]) if candidates.ndim >= 2 else 1
             candidate_draft_tokens = max(1, candidate_width - 1)
-            accepted_tokens = max(0, int(accepted_draft_count))
-            acceptance_steps += 1
-            acceptance_tokens_sum += accepted_tokens
-            acceptance_ratio_sum += float(accepted_tokens) / float(candidate_draft_tokens)
             prev_len = generated.shape[1]
             generated, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token_count, should_stop = (
                 update_inference_inputs(
@@ -956,6 +952,16 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                     count_npu_time=count_npu_time,
                 )
             )
+            # Count accepted drafts from the actual emitted-length delta so EOS
+            # and remaining-token truncation inside ``update_inference_inputs``
+            # do not inflate the tally. Each iteration emits at most one root
+            # token plus its accepted drafts; ``emitted - 1`` recovers the
+            # draft count (clamped at zero when the iteration emits nothing).
+            emitted = int(generated.shape[1] - prev_len)
+            accepted_tokens = max(0, emitted - 1)
+            acceptance_steps += 1
+            acceptance_tokens_sum += accepted_tokens
+            acceptance_ratio_sum += float(accepted_tokens) / float(candidate_draft_tokens)
             if streamer is not None:
                 for token_id in generated[0, prev_len:]:
                     streamer.put(token_id.unsqueeze(0))

@@ -75,6 +75,58 @@ def test_cli_tps_measure_print_output_flag():
     assert args.print_output is True
 
 
+@pytest.mark.parametrize("value", ["nan", "NaN", "inf", "-inf", "Infinity"])
+def test_cli_tps_measure_temperature_rejects_non_finite(value):
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--temperature",
+                value,
+            ]
+        )
+
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize(("value", "expected"), [("0.0", 0.0), ("0.5", 0.5), ("1.0", 1.0)])
+def test_cli_tps_measure_temperature_accepts_finite_non_negative(value, expected):
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+            "--temperature",
+            value,
+        ]
+    )
+
+    assert args.temperature == pytest.approx(expected)
+
+
+def test_cli_tps_measure_temperature_rejects_negative():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--temperature",
+                "-0.1",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+
+
 def test_cli_tps_measure_thinking_defaults_to_none():
     parser = build_parser()
     args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])
