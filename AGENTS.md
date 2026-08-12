@@ -191,6 +191,40 @@ truth when this snapshot becomes stale.
   processor.
 - Video decoding in the Qwen3-VL release requires the `transformers` extra's `torchcodec`
   dependency; validate video paths only against a dynamic-vision release.
+- EAGLE-3 speculative decoding is a supported release family loaded through
+  `AutoModelForCausalLM.from_pretrained(...)` (for example `mobilint/EAGLE3-Qwen3-4B`), which
+  binds the base MXQ, one-block draft MXQ, and FC stack as one release. The draft-tree budget is
+  `GenerationConfig.num_assistant_tokens` (defaults to `64` in
+  `mblt_model_zoo/hf_transformers/utils/generation_utils.py`); the Qwen3-4B release measures best
+  in the `25`–`30` range, where the Hugging Face default of `49` costs more iteration latency than
+  its extra acceptance recovers.
+- `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` runs in
+  one of two modes. Default `sliced` renormalizes probabilities over the retained top-k slice so
+  they sum to `1`; the legacy `full` mode keeps the whole-vocab denominator. Toggle at import
+  through `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full` or programmatically through
+  `set_softmax_topk_mode(...)`. The greedy path never invokes this function because
+  `prepare_logits_processor` returns `None` for `temperature<=1e-5`.
+- Keep the argmax-first shape in `evaluate_posterior` greedy: compute `argmax(logits)` and index
+  with `safe_positions` rather than fancy-indexing the `(n_cand, depth, vocab)` logits tensor,
+  which materializes the full slice.
+- EAGLE-3 speculative-decode rows in `mblt-model-zoo tps measure` are `accept_steps`,
+  `tokens_sum`, `tokens_per_step` (= `drafts_avg + 1`, matching `accept_length + 1` in the
+  reference `eagle3MXQ.py`), and `draft_accept_ratio`. Non-EAGLE-3 pipelines omit these rows
+  automatically; keep the schema centralized in `mblt_model_zoo/cli/tps_table.py`.
+- `mblt-model-zoo tps measure` exposes `--print-output` for diagnostic decoded text, mutually
+  exclusive `--enable-thinking`/`--disable-thinking` to override the Qwen3 chat template
+  `enable_thinking` flag, and `--temperature FLOAT` (`0.0` keeps greedy; any `>0` enables
+  `do_sample=True`). Chat templates apply to text prompts by default. `tps sweep` stays greedy so
+  its numbers remain comparable.
+- On EAGLE-3 pipelines the TPS measurement path in
+  `mblt_model_zoo/hf_transformers/utils/benchmark_utils.py::_apply_eagle3_gen_kwargs` strips
+  `min_new_tokens` and `pad_token_id` and sets `eos_token_id=None` so `generate` honors the real
+  EOS in `config.json`; the measured `num_decode` reflects the tokens actually produced, and
+  `--decode N` becomes an upper bound. Non-speculative pipelines keep exact-`N` semantics.
+- MXQ backends exhibit known cross-process non-determinism. Use `scripts/probe_mxq_determinism.py`,
+  `scripts/probe_generate_same_process.py`, and `scripts/probe_warmup_stabilization.py` to
+  reproduce and isolate; warmup does not stabilize outputs across processes (verified by the
+  warmup probe). For stable benchmarks, prefer same-process `--repeat N`.
 - Start with the narrowest test file or documented `-k` selection. Use
   `pytest tests/transformers --full-matrix` only for a release or pre-merge matrix; use `-x` while
   iterating.

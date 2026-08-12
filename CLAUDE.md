@@ -75,5 +75,28 @@
 - The Qwen3-VL processor reads `config.dynamic_vision` in `from_pretrained` and mirrors it onto
   its video processor. Call `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model(model)`
   only when a runtime `vision_mxq_path=` override diverges from the shipped config.
+- EAGLE-3 speculative decoding (`mobilint/EAGLE3-Qwen3-4B` and siblings) loads through
+  `AutoModelForCausalLM.from_pretrained(...)` as one release bundling base MXQ, draft MXQ, and
+  FC stack. Tune the draft budget with `GenerationConfig.num_assistant_tokens` (default `64`);
+  Qwen3-4B measures best around `25`–`30`.
+- `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
+  to `sliced` (top-k renormalized). Set `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full` or call
+  `set_softmax_topk_mode(...)` to restore the legacy whole-vocab denominator; the greedy path
+  never enters this function.
+- Keep `evaluate_posterior` greedy argmax-first (`argmax(logits)[safe_positions]`) to avoid
+  materializing the full `(n_cand, depth, vocab)` slice.
+- EAGLE-3 speculative-decode rows in `tps measure` are `accept_steps`, `tokens_sum`,
+  `tokens_per_step` (= `drafts_avg + 1`, matching `accept_length + 1` in the reference
+  `eagle3MXQ.py`), and `draft_accept_ratio`; non-EAGLE-3 pipelines omit them.
+- `tps measure` accepts `--print-output`, mutually exclusive `--enable-thinking` /
+  `--disable-thinking` (Qwen3 chat template override), and `--temperature FLOAT` (`0` = greedy);
+  chat templates apply to text prompts by default. `tps sweep` stays greedy.
+- On EAGLE-3, `_apply_eagle3_gen_kwargs` in `benchmark_utils.py` drops `min_new_tokens` and
+  `pad_token_id` and sets `eos_token_id=None`, so `--decode N` becomes an upper bound and
+  measured `num_decode` reflects actual generation.
+- MXQ backends have known cross-process non-determinism; use
+  `scripts/probe_mxq_determinism.py`, `scripts/probe_generate_same_process.py`, and
+  `scripts/probe_warmup_stabilization.py` to reproduce. Warmup does not stabilize across
+  processes; prefer same-process `--repeat N`.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.
