@@ -61,6 +61,20 @@ def test_cli_tps_measure_batch_size_override():
     assert args.batch_size == 4
 
 
+def test_cli_tps_measure_print_output_defaults_false():
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])
+
+    assert args.print_output is False
+
+
+def test_cli_tps_measure_print_output_flag():
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--print-output"])
+
+    assert args.print_output is True
+
+
 def test_cli_tps_sweep_defaults():
     parser = build_parser()
     args = parser.parse_args(["tps", "sweep", "--model", "mobilint/Llama-3.2-1B-Instruct"])
@@ -189,7 +203,9 @@ def test_build_pipeline_eagle3_prefixed_options_override_global_with_warning(mon
 
 def test_build_pipeline_eagle3_prefixed_options_no_warning_when_same_values(monkeypatch) -> None:
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
-    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
 
     eagle3_options = tps_cli.Eagle3PipelineOptions(
         base_core_mode="single",
@@ -229,7 +245,9 @@ def test_build_pipeline_eagle3_prefixed_options_no_warning_when_same_values(monk
 def test_build_pipeline_single_mode_can_omit_default_target_cores(monkeypatch) -> None:
     """Verify batch TPS paths can keep single-mode target cores unset."""
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
-    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
 
     pipe = tps_cli._build_pipeline(
         task="text-generation",
@@ -255,7 +273,9 @@ def test_build_pipeline_single_mode_can_omit_default_target_cores(monkeypatch) -
 def test_build_pipeline_single_mode_preserves_explicit_target_cores(monkeypatch) -> None:
     """Verify explicit target cores still override batch TPS default suppression."""
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
-    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
 
     pipe = tps_cli._build_pipeline(
         task="text-generation",

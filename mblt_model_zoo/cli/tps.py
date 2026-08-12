@@ -1629,6 +1629,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     )
 
     temperature = float(getattr(args, "temperature", 0.0) or 0.0)
+    print_output = bool(getattr(args, "print_output", False))
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=measure_num_prefill,
@@ -1664,6 +1665,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                     on_decode_end=((lambda: tracker_decode.stop()) if tracker_decode is not None else None),
                     batch_size=batch_size,
                     temperature=temperature,
+                    collect_generated_token_ids=print_output,
                 )
             finally:
                 _stop_tracker_safe(tracker_prefill)
@@ -1833,6 +1835,9 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     )
     _print_summary_footer()
 
+    if print_output:
+        _print_generated_output(pipeline, runs, args.decode)
+
     if args.json:
         payload = {
             "repeat": args.repeat,
@@ -1852,6 +1857,39 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         print(f"wrote: {args.json}")
 
     return 0
+
+
+def _print_generated_output(pipeline: Any, runs: Sequence[Any], decode_budget: int) -> None:
+    """Print the token IDs decoded on the last measured run in two versions.
+
+    The first version keeps special tokens so callers can visually confirm whether an EOS
+    token (for example ``<|im_end|>``) was actually emitted. The second version strips them
+    for a clean readout of the natural-language output.
+    """
+    if not runs:
+        return
+    last = runs[-1]
+    token_ids = getattr(last, "generated_token_ids", None)
+    if not token_ids:
+        print("--- generated text: unavailable (no token IDs were captured) ---")
+        return
+    tokenizer = getattr(pipeline, "tokenizer", None)
+    if tokenizer is None:
+        print("--- generated text: unavailable (pipeline has no tokenizer) ---")
+        return
+    try:
+        raw_text = tokenizer.decode(token_ids, skip_special_tokens=False)
+    except Exception as exc:
+        raw_text = f"<decode failed: {exc}>"
+    try:
+        clean_text = tokenizer.decode(token_ids, skip_special_tokens=True)
+    except Exception as exc:
+        clean_text = f"<decode failed: {exc}>"
+    print("--- generated text (special tokens preserved) ---")
+    print(raw_text)
+    print("--- generated text (clean) ---")
+    print(clean_text)
+    print(f"--- token count: {len(token_ids)} (of --decode {decode_budget} max) ---")
 
 
 def _run_vlm_measure(args: argparse.Namespace) -> int:
@@ -3757,6 +3795,16 @@ def add_tps_parser(
         help="sampling temperature; 0 (default) = greedy decoding, >0 = do_sample=True with that temperature",
     )
     p_measure.add_argument("--json", default=None, help="write result as JSON")
+    p_measure.add_argument(
+        "--print-output",
+        action="store_true",
+        default=False,
+        help=(
+            "diagnostic: after the results table, decode and print the tokens actually generated "
+            "by the last measured run (excludes the prompt). Prints two versions: special tokens "
+            "preserved and cleaned. Useful for confirming whether EOS terminated decoding early."
+        ),
+    )
     p_measure.set_defaults(_handler=_cmd_measure)
 
     p_sweep = tps_sub.add_parser("sweep", help="Prefill/decode TPS sweep")

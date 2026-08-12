@@ -448,6 +448,11 @@ def _resolve_decoder_logits(outputs: object) -> torch.Tensor:
 
 
 class TokenIteratorStreamer(TextIteratorStreamer):
+    def __init__(self, *args, collect_token_ids: bool = False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._collect_token_ids = bool(collect_token_ids)
+        self.token_ids: List[int] = []
+
     def put(self, value):
         if len(value.shape) > 1 and value.shape[0] > 1:
             raise ValueError("TokenIteratorStreamer only supports batch size 1")
@@ -458,7 +463,9 @@ class TokenIteratorStreamer(TextIteratorStreamer):
             self.next_tokens_are_prompt = False
             return
 
-        for _ in value.tolist():
+        for token_id in value.tolist():
+            if self._collect_token_ids:
+                self.token_ids.append(int(token_id))
             self.text_queue.put("", timeout=self.timeout)
 
     def end(self):
@@ -536,6 +543,7 @@ class SingleMeasurement:
     acceptance_tokens_avg: Optional[float] = None
     acceptance_ratio: Optional[float] = None
     decode_prefill_mode: str = "real"
+    generated_token_ids: Optional[List[int]] = None
 
     def __post_init__(self) -> None:
         """Populate nanosecond timing fields from second-based fields when omitted."""
@@ -884,6 +892,7 @@ class TPSMeasurer:
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
         temperature: float = 0.0,
+        collect_generated_token_ids: bool = False,
     ) -> SingleMeasurement:
         """Measure batched generation without a streamer and report total throughput."""
         batch_size = _validate_batch_size(int(input_ids.shape[0]))
@@ -935,6 +944,10 @@ class TPSMeasurer:
         output_len = int(outputs.shape[1]) if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 else 0
         input_len = int(input_ids.shape[1])
         generated_per_row = max(output_len - input_len, 0) if output_len else num_decode + (0 if fake_prefill else 1)
+        generated_token_ids: Optional[List[int]] = None
+        if collect_generated_token_ids and isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 and output_len > input_len:
+            # Only decode the first row of the batch; full batch decoding is out of scope.
+            generated_token_ids = outputs[0, input_len:].detach().cpu().tolist()
         decode_count = max(generated_per_row if fake_prefill else generated_per_row - 1, 0)
         if decode_count == 0:
             decode_count = num_decode
@@ -1003,6 +1016,7 @@ class TPSMeasurer:
             acceptance_tokens_avg=cast(Optional[float], acceptance_stats["acceptance_tokens_avg"]),
             acceptance_ratio=cast(Optional[float], acceptance_stats["acceptance_ratio"]),
             decode_prefill_mode="fake" if fake_prefill else "real",
+            generated_token_ids=generated_token_ids,
         )
 
     def measure(
@@ -1020,6 +1034,7 @@ class TPSMeasurer:
         on_decode_end: Optional[Callable[[], None]] = None,
         batch_size: int = 1,
         temperature: float = 0.0,
+        collect_generated_token_ids: bool = False,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
@@ -1058,10 +1073,16 @@ class TPSMeasurer:
                     on_decode_start=on_decode_start,
                     on_decode_end=on_decode_end,
                     temperature=temperature,
+                    collect_generated_token_ids=collect_generated_token_ids,
                 )
 
             # 2. Setup
-            streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+            streamer = TokenIteratorStreamer(
+                self.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True,
+                collect_token_ids=collect_generated_token_ids,
+            )
             gen_kwargs = dict(
                 input_ids=measure_input_ids,
                 streamer=streamer,
@@ -1230,6 +1251,7 @@ class TPSMeasurer:
                 acceptance_tokens_sum=cast(Optional[int], acceptance_stats["acceptance_tokens_sum"]),
                 acceptance_tokens_avg=cast(Optional[float], acceptance_stats["acceptance_tokens_avg"]),
                 acceptance_ratio=cast(Optional[float], acceptance_stats["acceptance_ratio"]),
+                generated_token_ids=list(streamer.token_ids) if collect_generated_token_ids else None,
             )
         finally:
             self._stop_trace(trace_handle)
