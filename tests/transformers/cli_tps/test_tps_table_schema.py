@@ -436,3 +436,144 @@ def test_format_temperature_display_positive_values():
     """Positive temperatures should render as their numeric value."""
     assert format_temperature_display(0.7) == "0.7"
     assert format_temperature_display(1.5) == "1.5"
+
+
+def _accept_row_keys() -> set[str]:
+    """Return the canonical keys of speculative-decoding acceptance rows."""
+    return {row.key for row in TPS_TABLE_SPEC if row.spec_decode_only}
+
+
+def test_accept_rows_are_gated_by_is_speculative():
+    """Acceptance rows must appear only when ``is_speculative=True``."""
+    expected_keys = {"accept_steps", "tokens_sum", "tokens_per_step", "draft_accept_ratio"}
+    assert _accept_row_keys() == expected_keys
+
+    non_spec = _emit_labels(SECTION_LLM_MEASURE, device_metrics=True)
+    for label in expected_keys:
+        assert label not in non_spec, label
+
+    spec_keys = {
+        row.key
+        for row in iter_section_rows(
+            SECTION_LLM_MEASURE,
+            device_metrics=True,
+            is_speculative=True,
+        )
+    }
+    assert expected_keys <= spec_keys
+
+    non_spec_keys = {
+        row.key
+        for row in iter_section_rows(
+            SECTION_LLM_MEASURE,
+            device_metrics=True,
+            is_speculative=False,
+        )
+    }
+    assert expected_keys.isdisjoint(non_spec_keys)
+
+
+def test_accept_rows_survive_no_device_metrics_when_speculative():
+    """``--no-device-metrics`` must not hide acceptance rows on a speculative model.
+
+    Acceptance metrics are not device telemetry; the only gate that hides them
+    is ``is_speculative=False``.
+    """
+    rows_with_device = {
+        row.key for row in iter_section_rows(SECTION_LLM_MEASURE, device_metrics=True, is_speculative=True)
+    }
+    rows_without_device = {
+        row.key for row in iter_section_rows(SECTION_LLM_MEASURE, device_metrics=False, is_speculative=True)
+    }
+    for key in ("accept_steps", "tokens_sum", "tokens_per_step", "draft_accept_ratio"):
+        assert key in rows_with_device, key
+        assert key in rows_without_device, key
+
+
+def test_accept_rows_dropped_from_json_when_not_speculative():
+    """``iter_json_rows`` (JSON payload) also omits acceptance rows for plain LLMs."""
+    non_spec_keys = {row.key for row in iter_json_rows(SECTION_LLM_MEASURE)}
+    spec_keys = {row.key for row in iter_json_rows(SECTION_LLM_MEASURE, is_speculative=True)}
+    for key in ("accept_steps", "tokens_sum", "tokens_per_step", "draft_accept_ratio"):
+        assert key not in non_spec_keys, key
+        assert key in spec_keys, key
+
+
+def test_tokens_per_step_row_adds_root_token():
+    """``tokens_per_step = acceptance_tokens_avg + 1`` (base's forced root token per step)."""
+    from types import SimpleNamespace
+
+    row = next(r for r in TPS_TABLE_SPEC if r.key == "tokens_per_step")
+    assert row.from_run is not None
+    assert row.spec_decode_only is True
+
+    run = SimpleNamespace(acceptance_tokens_avg=2.242, acceptance_steps=8)
+    assert row.from_run(run) == pytest.approx(3.242)
+
+    missing = SimpleNamespace(acceptance_tokens_avg=None)
+    assert row.from_run(missing) is None
+
+    runs = [
+        SimpleNamespace(acceptance_tokens_avg=2.0, acceptance_steps=5),
+        SimpleNamespace(acceptance_tokens_avg=3.0, acceptance_steps=4),
+    ]
+    assert row.from_runs_for_summary(runs) == [3.0, 4.0]
+
+
+def test_tokens_sum_row_adds_root_tokens_per_step():
+    """``tokens_sum = acceptance_tokens_sum + acceptance_steps`` (roots + accepted drafts)."""
+    from types import SimpleNamespace
+
+    row = next(r for r in TPS_TABLE_SPEC if r.key == "tokens_sum")
+    assert row.from_run is not None
+    assert row.spec_decode_only is True
+
+    run = SimpleNamespace(acceptance_tokens_sum=18, acceptance_steps=8)
+    assert row.from_run(run) == pytest.approx(26.0)
+
+    missing_sum = SimpleNamespace(acceptance_tokens_sum=None, acceptance_steps=8)
+    assert row.from_run(missing_sum) is None
+    missing_steps = SimpleNamespace(acceptance_tokens_sum=18, acceptance_steps=None)
+    assert row.from_run(missing_steps) is None
+
+    runs = [
+        SimpleNamespace(acceptance_tokens_sum=10, acceptance_steps=5),
+        SimpleNamespace(acceptance_tokens_sum=12, acceptance_steps=4),
+    ]
+    assert row.from_runs_for_summary(runs) == [15.0, 16.0]
+
+
+def test_draft_accept_ratio_row_scales_ratio_to_percent():
+    """``draft_accept_ratio`` renames the historical ``accept_ratio`` and stays x100."""
+    from types import SimpleNamespace
+
+    row = next(r for r in TPS_TABLE_SPEC if r.key == "draft_accept_ratio")
+    assert row.spec_decode_only is True
+    assert row.unit == "%"
+    assert row.from_run is not None
+
+    run = SimpleNamespace(acceptance_ratio=0.5)
+    assert row.from_run(run) == pytest.approx(50.0)
+
+
+def test_emit_table_speculative_flag_prints_new_labels():
+    """When speculative, acceptance labels are emitted with the new names."""
+    captured: list[str] = []
+
+    def _capture(label, values, unit):
+        captured.append(label)
+
+    values = {
+        "accept_steps": [8.0],
+        "tokens_sum": [26.0],
+        "tokens_per_step": [3.242],
+        "draft_accept_ratio": [70.0],
+    }
+    emit_table(
+        SECTION_LLM_MEASURE,
+        values,
+        device_metrics=False,
+        print_summary=_capture,
+        is_speculative=True,
+    )
+    assert captured == ["accept_steps", "tokens_sum", "tokens_per_step", "draft_accept_ratio"]

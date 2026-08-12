@@ -60,6 +60,7 @@ class TpsRow:
     device_metric: bool = False
     llm_prefix: bool = False
     sweep_suffix: bool = False
+    spec_decode_only: bool = False
     from_run: Optional[Extractor] = None
     from_aggregate: Optional[Extractor] = None
     from_runs_for_summary: Optional[RunsExtractor] = None
@@ -464,7 +465,13 @@ def _accept_row(
     *,
     scale: float = 1.0,
 ) -> TpsRow:
-    """Acceptance metric row (LLM measure only)."""
+    """Acceptance metric row (LLM measure only; speculative-decoding models only).
+
+    Rows built here are gated by ``spec_decode_only=True`` so non-speculative
+    (plain autoregressive) LLM runs skip them in both the CLI table and the
+    JSON payload.  The underlying ``SingleMeasurement`` fields remain populated
+    with the raw draft-only quantities regardless.
+    """
     return TpsRow(
         key=key,
         label=label,
@@ -473,10 +480,88 @@ def _accept_row(
         device_metric=False,
         llm_prefix=False,
         sweep_suffix=False,
+        spec_decode_only=True,
         from_run=lambda obj, _attr=attr, _s=scale: (
             None if _get_optional(obj, _attr) is None else float(_get_optional(obj, _attr)) * _s
         ),
         from_runs_for_summary=_list_attr(attr, scale=scale),
+    )
+
+
+def _tokens_per_step_row() -> TpsRow:
+    """Speculative-decoding row: total tokens emitted per iteration.
+
+    Value = ``acceptance_tokens_avg + 1`` — the ``+1`` accounts for the base
+    model's forced-root token that is emitted before drafts are evaluated.
+    Matches the reference EAGLE-3 script's ``accepts.append(accept_length+1)``
+    definition so side-by-side numbers agree.
+    """
+
+    def _from_run(obj: Any) -> Optional[float]:
+        avg = _get_optional(obj, "acceptance_tokens_avg")
+        if avg is None:
+            return None
+        return float(avg) + 1.0
+
+    def _from_runs_for_summary(runs: Sequence[Any]) -> list[float]:
+        out: list[float] = []
+        for run in runs:
+            v = _from_run(run)
+            if v is None:
+                continue
+            out.append(float(v))
+        return out
+
+    return TpsRow(
+        key="tokens_per_step",
+        label="tokens_per_step",
+        unit="tok",
+        sections=frozenset((SECTION_LLM_MEASURE,)),
+        device_metric=False,
+        llm_prefix=False,
+        sweep_suffix=False,
+        spec_decode_only=True,
+        from_run=_from_run,
+        from_runs_for_summary=_from_runs_for_summary,
+    )
+
+
+def _tokens_sum_row() -> TpsRow:
+    """Speculative-decoding row: total tokens generated across the run.
+
+    Value = ``acceptance_tokens_sum + acceptance_steps`` — the raw sum in
+    ``SingleMeasurement`` counts accepted draft tokens only; each iteration
+    also emits the base's forced root token, so total generated tokens equals
+    drafts summed plus one per iteration (``steps``).
+    """
+
+    def _from_run(obj: Any) -> Optional[float]:
+        tok_sum = _get_optional(obj, "acceptance_tokens_sum")
+        steps = _get_optional(obj, "acceptance_steps")
+        if tok_sum is None or steps is None:
+            return None
+        return float(tok_sum) + float(steps)
+
+    def _from_runs_for_summary(runs: Sequence[Any]) -> list[float]:
+        out: list[float] = []
+        for run in runs:
+            v = _from_run(run)
+            if v is None:
+                continue
+            out.append(float(v))
+        return out
+
+    return TpsRow(
+        key="tokens_sum",
+        label="tokens_sum",
+        unit="tok",
+        sections=frozenset((SECTION_LLM_MEASURE,)),
+        device_metric=False,
+        llm_prefix=False,
+        sweep_suffix=False,
+        spec_decode_only=True,
+        from_run=_from_run,
+        from_runs_for_summary=_from_runs_for_summary,
     )
 
 
@@ -581,11 +666,16 @@ TPS_TABLE_SPEC: list[TpsRow] = [
     _npu_latency_row("prefill_npu_lat", "prefill_npu_lat", "prefill_npu_latency_pct", "prefill_sweep"),
     _npu_latency_row("decode_npu_lat", "decode_npu_lat", "decode_npu_latency_pct", "decode_sweep"),
     _total_npu_latency_row(),
-    # --- EAGLE-3 acceptance (LLM measure only) ---
+    # --- Speculative decoding acceptance (LLM measure only; EAGLE-3 today) ---
+    # accept_steps: number of speculative-decoding iterations.
+    # tokens_sum: total tokens generated = drafts accepted + steps (base's forced root per step).
+    # tokens_per_step: mean tokens per iteration = drafts_avg + 1; matches the reference
+    #   EAGLE-3 script's `accepts.append(accept_length+1)` definition for side-by-side comparison.
+    # draft_accept_ratio: fraction of proposed draft tokens accepted (drafts concept).
     _accept_row("accept_steps", "accept_steps", "count", "acceptance_steps"),
-    _accept_row("accept_tok_sum", "accept_tok_sum", "tok", "acceptance_tokens_sum"),
-    _accept_row("accept_tok_avg", "accept_tok_avg", "tok", "acceptance_tokens_avg"),
-    _accept_row("accept_ratio", "accept_ratio", "%", "acceptance_ratio", scale=100.0),
+    _tokens_sum_row(),
+    _tokens_per_step_row(),
+    _accept_row("draft_accept_ratio", "draft_accept_ratio", "%", "acceptance_ratio", scale=100.0),
     # --- Device metrics: power ---
     _scalar_device_row("avg_power", "avg_power", "W", _ALL_LLM, "avg_power_w", llm_prefix=True),
     _scalar_device_row("p99_power", "p99_power", "W", _ALL_LLM, "p99_power_w", llm_prefix=True),
@@ -814,26 +904,42 @@ def json_key_for(row: TpsRow, section: str, *, is_summary: bool = False) -> str:
     return key
 
 
-def iter_section_rows(section: str, *, device_metrics: bool) -> list[TpsRow]:
-    """Return the rows that should be emitted in ``section`` (CLI table view)."""
+def iter_section_rows(
+    section: str,
+    *,
+    device_metrics: bool,
+    is_speculative: bool = False,
+) -> list[TpsRow]:
+    """Return the rows that should be emitted in ``section`` (CLI table view).
+
+    ``is_speculative`` gates rows whose metric only exists on a speculative-
+    decoding runtime (acceptance stats).  Callers pass the model-class-based
+    detection here so plain autoregressive LLM runs never surface acceptance
+    rows.  The gate is independent of ``device_metrics``: acceptance metrics
+    are not device telemetry and must survive ``--no-device-metrics``.
+    """
     rows: list[TpsRow] = []
     for row in TPS_TABLE_SPEC:
         if section not in row.sections:
             continue
         if row.device_metric and not device_metrics:
             continue
+        if row.spec_decode_only and not is_speculative:
+            continue
         rows.append(row)
     return rows
 
 
-def iter_json_rows(section: str) -> list[TpsRow]:
+def iter_json_rows(section: str, *, is_speculative: bool = False) -> list[TpsRow]:
     """Return the rows that should appear in the JSON output for ``section``.
 
     Unlike :func:`iter_section_rows`, this does *not* apply the
     ``device_metrics`` gate — JSON payloads always dump whatever the run
-    produced; the CLI table is what respects ``--device-metrics``.
+    produced; the CLI table is what respects ``--device-metrics``.  The
+    ``is_speculative`` gate does apply here: non-speculative runs omit the
+    acceptance rows entirely so the JSON schema stays clean.
     """
-    return [row for row in TPS_TABLE_SPEC if section in row.sections]
+    return [row for row in TPS_TABLE_SPEC if section in row.sections and (not row.spec_decode_only or is_speculative)]
 
 
 def emit_table(
@@ -842,6 +948,7 @@ def emit_table(
     *,
     device_metrics: bool,
     print_summary,
+    is_speculative: bool = False,
 ) -> None:
     """Emit a summary table for ``section`` using ``values_by_key``.
 
@@ -854,7 +961,7 @@ def emit_table(
     ``print_summary`` is injected so this module stays free of the display
     formatting concerns living in :mod:`mblt_model_zoo.cli.tps`.
     """
-    for row in iter_section_rows(section, device_metrics=device_metrics):
+    for row in iter_section_rows(section, device_metrics=device_metrics, is_speculative=is_speculative):
         if row.key not in values_by_key:
             continue
         print_summary(label_for(row, section), values_by_key[row.key], row.unit)
@@ -875,7 +982,12 @@ def format_temperature_display(temperature: float) -> str:
     return f"{float(temperature):g}"
 
 
-def render_units(section: str, keys_present: Optional[set[str]] = None) -> dict[str, str]:
+def render_units(
+    section: str,
+    keys_present: Optional[set[str]] = None,
+    *,
+    is_speculative: bool = False,
+) -> dict[str, str]:
     """Return a ``{canonical_key: unit}`` dict for JSON's ``units`` metadata.
 
     ``keys_present``, when provided, filters the output to canonical keys
@@ -885,7 +997,7 @@ def render_units(section: str, keys_present: Optional[set[str]] = None) -> dict[
     curves and to the derived ``_last`` summary scalars.
     """
     out: dict[str, str] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         key = json_key_for(row, section)
         if keys_present is not None and key not in keys_present:
             continue
@@ -897,6 +1009,8 @@ def render_summary_json(
     section: str,
     values_by_key: Mapping[str, Sequence[float]],
     summary_fn: Callable[[Sequence[float]], dict[str, float]],
+    *,
+    is_speculative: bool = False,
 ) -> dict[str, dict[str, float]]:
     """Build the ``summary`` JSON block for ``section``.
 
@@ -906,7 +1020,7 @@ def render_summary_json(
     :func:`json_key_for`).
     """
     out: dict[str, dict[str, float]] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         values = values_by_key.get(row.key)
         if values is None:
             continue
@@ -918,6 +1032,8 @@ def render_summary_json_from_runs(
     section: str,
     runs: Sequence[Any],
     summary_fn: Callable[[Sequence[float]], dict[str, float]],
+    *,
+    is_speculative: bool = False,
 ) -> dict[str, dict[str, float]]:
     """Build the ``summary`` block by invoking each row's ``from_runs_for_summary``.
 
@@ -925,7 +1041,7 @@ def render_summary_json_from_runs(
     keys (``_last`` suffix for sweep-suffix rows).
     """
     out: dict[str, dict[str, float]] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         if row.from_runs_for_summary is None:
             continue
         values = row.from_runs_for_summary(runs)
@@ -933,7 +1049,7 @@ def render_summary_json_from_runs(
     return out
 
 
-def render_run_json(section: str, run: Any) -> dict[str, Any]:
+def render_run_json(section: str, run: Any, *, is_speculative: bool = False) -> dict[str, Any]:
     """Build a per-run canonical projection for ``run``.
 
     Missing/None extractions are skipped, matching the CLI table gating.
@@ -941,7 +1057,7 @@ def render_run_json(section: str, run: Any) -> dict[str, Any]:
     suffix is reserved for summary scalars.
     """
     out: dict[str, Any] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         if row.from_run is None:
             continue
         value = row.from_run(run)
@@ -955,10 +1071,10 @@ def render_run_json(section: str, run: Any) -> dict[str, Any]:
     return out
 
 
-def render_aggregate_json(section: str, aggregate: Any) -> dict[str, Any]:
+def render_aggregate_json(section: str, aggregate: Any, *, is_speculative: bool = False) -> dict[str, Any]:
     """Build a canonical projection of the aggregate object for ``section``."""
     out: dict[str, Any] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         if row.from_aggregate is None:
             continue
         value = row.from_aggregate(aggregate)

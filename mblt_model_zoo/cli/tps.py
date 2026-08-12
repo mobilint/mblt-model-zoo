@@ -99,6 +99,19 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
 
+
+def _is_speculative_decoding_model(model: Any) -> bool:
+    """Return whether ``model`` is a speculative-decoding wrapper.
+
+    Currently detects Mobilint EAGLE-3 (the only speculative stack shipped in
+    this repo).  The EAGLE-3 wrapper exposes ``eagle3_base_model`` as its
+    unique marker attribute; a ``hasattr`` probe stays consistent with
+    ``_is_eagle3_model`` in :mod:`benchmark_utils` while keeping the CLI free
+    of the extra import cycle.
+    """
+    return hasattr(model, "eagle3_base_model")
+
+
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
 _VLM_WARMUP_PREFILL = 128
@@ -1571,10 +1584,10 @@ def _vlm_llm_aggregate_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
-def _llm_measure_run_payload(run: Any) -> dict[str, Any]:
+def _llm_measure_run_payload(run: Any, *, is_speculative: bool = False) -> dict[str, Any]:
     """Return a canonical JSON payload for a text LLM measurement run."""
     payload: dict[str, Any] = _llm_measure_identifying_fields(run)
-    payload.update(_render_run_json(SECTION_LLM_MEASURE, run))
+    payload.update(_render_run_json(SECTION_LLM_MEASURE, run, is_speculative=is_speculative))
     return payload
 
 
@@ -1594,13 +1607,18 @@ def _llm_sweep_aggregate_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
-def _units_for_section(section: str, values_by_key: dict[str, Sequence[float]]) -> dict[str, str]:
+def _units_for_section(
+    section: str,
+    values_by_key: dict[str, Sequence[float]],
+    *,
+    is_speculative: bool = False,
+) -> dict[str, str]:
     """Return the ``units`` metadata block for ``section`` filtered by data."""
     keys_present: set[str] = set()
-    for row in _iter_json_rows(section):
+    for row in _iter_json_rows(section, is_speculative=is_speculative):
         if row.key in values_by_key:
             keys_present.add(_json_key_for(row, section))
-    return _render_units(section, keys_present)
+    return _render_units(section, keys_present, is_speculative=is_speculative)
 
 
 def _cmd_measure(args: argparse.Namespace) -> int:
@@ -1786,10 +1804,22 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     decode_tps_per_w = [r.decode_tps_per_w for r in runs if r.decode_tps_per_w is not None]
     prefill_j_per_tok = [r.prefill_j_per_token for r in runs if r.prefill_j_per_token is not None]
     decode_j_per_tok = [r.decode_j_per_token for r in runs if r.decode_j_per_token is not None]
+    # Speculative-decoding acceptance metrics.
+    #   accept_steps    : number of iterations
+    #   tokens_sum      : total tokens emitted = drafts_sum + steps (root token per step)
+    #   tokens_per_step : mean tokens per iteration = drafts_avg + 1 (root token per step)
+    #     Matches the reference EAGLE-3 script's `accepts.append(accept_length+1)` and
+    #     `sum(accepts)/len(accepts)` so side-by-side comparisons agree.
+    #   draft_accept_ratio : fraction of proposed draft tokens accepted (drafts concept).
     acceptance_steps = [float(r.acceptance_steps) for r in runs if r.acceptance_steps is not None]
-    acceptance_tokens_sum = [float(r.acceptance_tokens_sum) for r in runs if r.acceptance_tokens_sum is not None]
-    acceptance_tokens_avg = [r.acceptance_tokens_avg for r in runs if r.acceptance_tokens_avg is not None]
-    acceptance_ratio_pct = [(r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None]
+    tokens_sum = [
+        float(r.acceptance_tokens_sum) + float(r.acceptance_steps)
+        for r in runs
+        if r.acceptance_tokens_sum is not None and r.acceptance_steps is not None
+    ]
+    tokens_per_step = [float(r.acceptance_tokens_avg) + 1.0 for r in runs if r.acceptance_tokens_avg is not None]
+    draft_accept_ratio = [(r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None]
+    is_speculative = _is_speculative_decoding_model(pipeline.model)
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
@@ -1806,9 +1836,9 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         "decode_npu_lat": decode_npu_latency_pct,
         "total_npu_lat": total_npu_latency_pct,
         "accept_steps": acceptance_steps,
-        "accept_tok_sum": acceptance_tokens_sum,
-        "accept_tok_avg": acceptance_tokens_avg,
-        "accept_ratio": acceptance_ratio_pct,
+        "tokens_sum": tokens_sum,
+        "tokens_per_step": tokens_per_step,
+        "draft_accept_ratio": draft_accept_ratio,
     }
     if args.device_metrics:
         values_by_key.update(
@@ -1859,6 +1889,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         values_by_key,
         device_metrics=args.device_metrics,
         print_summary=_print_summary,
+        is_speculative=is_speculative,
     )
     _print_summary_footer()
 
@@ -1876,9 +1907,11 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                 "apply_chat_template": bool(getattr(args, "apply_chat_template", True)),
                 "enable_thinking": getattr(args, "enable_thinking", None),
             },
-            "units": _units_for_section(SECTION_LLM_MEASURE, values_by_key),
-            "runs": [_llm_measure_run_payload(r) for r in runs],
-            "summary": _render_summary_json(SECTION_LLM_MEASURE, values_by_key, _summary),
+            "units": _units_for_section(SECTION_LLM_MEASURE, values_by_key, is_speculative=is_speculative),
+            "runs": [_llm_measure_run_payload(r, is_speculative=is_speculative) for r in runs],
+            "summary": _render_summary_json(
+                SECTION_LLM_MEASURE, values_by_key, _summary, is_speculative=is_speculative
+            ),
             "device_time_series_runs": run_phase_device_time_series,
         }
         _write_json(args.json, payload)
