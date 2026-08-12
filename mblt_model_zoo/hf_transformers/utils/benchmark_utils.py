@@ -297,6 +297,33 @@ def _supports_fake_decode_prefill(model: object) -> bool:
     return _is_mobilint_npu_model(model) and _get_cache_mxq_model(model) is not None
 
 
+def _is_eagle3_model(model: object) -> bool:
+    """Return whether ``model`` is a Mobilint EAGLE-3 speculative-decoding model.
+
+    EAGLE-3 wrappers expose the base LM under ``eagle3_base_model``; the attribute is unique
+    to that stack, so a ``hasattr`` probe is a stable detector without importing the mixin.
+    """
+    return hasattr(model, "eagle3_base_model")
+
+
+def _apply_eagle3_gen_kwargs(gen_kwargs: dict, model: object) -> None:
+    """Adjust ``gen_kwargs`` in place so EAGLE-3 generate honors real EOS early stopping.
+
+    EAGLE-3's ``generate`` ignores ``min_new_tokens`` and ``pad_token_id`` and emits warnings when
+    they are supplied. It also falls back to the model's configured EOS when
+    ``eos_token_id=None``. TPS measurement paths pin these values to force ``N`` deterministic
+    tokens on the non-speculative path; for EAGLE-3 we instead drop the pin so the measurement
+    reflects the real workload (stops at EOS, capped by ``max_new_tokens``).
+
+    No-op for non-EAGLE-3 models to preserve exact-N generation semantics.
+    """
+    if not _is_eagle3_model(model):
+        return
+    for key in ("min_new_tokens", "pad_token_id"):
+        gen_kwargs.pop(key, None)
+    gen_kwargs["eos_token_id"] = None
+
+
 def _resolve_config_vocab_size(config) -> int:
     """Resolve vocabulary size from text-only or vision-language model configs.
 
@@ -879,6 +906,7 @@ class TPSMeasurer:
         if npu_timing_target is not None:
             gen_kwargs["count_npu_time"] = True
             _reset_npu_timing(npu_timing_target)
+        _apply_eagle3_gen_kwargs(gen_kwargs, self.model)
 
         phase_callbacks = _GenerationPhaseCallbacks(
             on_prefill_start=on_prefill_start,
@@ -1053,6 +1081,7 @@ class TPSMeasurer:
             if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
                 _reset_npu_timing(npu_timing_target)
+            _apply_eagle3_gen_kwargs(gen_kwargs, self.model)
             phase_callbacks = _GenerationPhaseCallbacks(
                 on_prefill_start=on_prefill_start,
                 on_prefill_end=on_prefill_end,
@@ -1171,7 +1200,7 @@ class TPSMeasurer:
             acceptance_stats = self._get_eagle3_acceptance_stats()
             return SingleMeasurement(
                 num_prefill=num_prefill,
-                num_decode=num_decode,
+                num_decode=decode_count,
                 prefill_latency=prefill_latency,
                 prefill_tps=prefill_tps,
                 decode_duration=decode_duration,
@@ -1753,6 +1782,7 @@ class VLMTPSMeasurer:
             if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
                 _reset_npu_timing(npu_timing_target)
+            _apply_eagle3_gen_kwargs(gen_kwargs, gen_model)
             t_start_ns = time.perf_counter_ns()
             with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
                 outputs = gen_model.generate(**gen_kwargs)
@@ -1849,6 +1879,7 @@ class VLMTPSMeasurer:
         if npu_timing_target is not None:
             gen_kwargs["count_npu_time"] = True
             _reset_npu_timing(npu_timing_target)
+        _apply_eagle3_gen_kwargs(gen_kwargs, gen_model)
 
         thread_error: list[Exception] = []
 

@@ -3690,7 +3690,15 @@ def add_tps_parser(
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)
     p_measure.add_argument("--prefill", type=_parse_positive_int, default=128, help="input token count")
-    p_measure.add_argument("--decode", type=_parse_positive_int, default=32, help="new tokens to generate")
+    p_measure.add_argument(
+        "--decode",
+        type=_parse_positive_int,
+        default=32,
+        help=(
+            "new tokens to generate; for non-speculative decode this is exact, "
+            "for EAGLE-3 it is an upper bound and early EOS terminates measurement"
+        ),
+    )
     p_measure.add_argument(
         "--input-mode",
         choices=["random", "synthetic-text", "file"],

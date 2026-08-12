@@ -366,6 +366,10 @@ mblt-model-zoo tps sweep --help
 A value of `0.0` keeps the current greedy behavior; any value greater than zero enables
 `do_sample=True` with that temperature. `tps sweep` remains greedy so its numbers stay comparable.
 
+`--decode N` forces exactly `N` new tokens on non-speculative models. For EAGLE-3 speculative
+decode, `N` is an upper bound: generation stops at the configured EOS and reported TPS is
+computed over the tokens actually produced.
+
 Detailed TPS benchmark examples are available in
 [benchmark/transformers/README.md](benchmark/transformers/README.md).
 
