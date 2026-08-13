@@ -366,6 +366,10 @@ mblt-model-zoo tps sweep --help
 A value of `0.0` keeps the current greedy behavior; any value greater than zero enables
 `do_sample=True` with that temperature. `tps sweep` remains greedy so its numbers stay comparable.
 
+On VLM (`--task image-text-to-text`) pipelines whose language model uses the fake-prefill decode
+path, `tps measure` decode TPS is measured with a greedy `torch.argmax` and the CLI rejects
+`--temperature > 0` with a clear error. Use `--temperature 0` (default) for VLM decode TPS.
+
 `--decode N` forces exactly `N` new tokens on non-speculative models. For EAGLE-3 speculative
 decode, `N` is an upper bound: generation stops at the configured EOS and reported TPS is
 computed over the tokens actually produced.

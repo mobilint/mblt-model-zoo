@@ -107,7 +107,9 @@
   `eagle3MXQ.py`), and `draft_accept_ratio`; non-EAGLE-3 pipelines omit them.
 - `tps measure` accepts `--print-output`, mutually exclusive `--enable-thinking` /
   `--disable-thinking` (Qwen3 chat template override), and `--temperature FLOAT` (`0` = greedy);
-  chat templates apply to text prompts by default. `tps sweep` stays greedy.
+  chat templates apply to text prompts by default. `tps sweep` stays greedy. VLM (`--task
+  image-text-to-text`) `tps measure` decode uses greedy `argmax` on the fake-prefill path; the
+  CLI rejects `--temperature > 0` there with a clear error.
 - On EAGLE-3, `_apply_eagle3_gen_kwargs` in `benchmark_utils.py` drops `min_new_tokens` and
   `pad_token_id` and sets `eos_token_id=None`, so `--decode N` becomes an upper bound and
   measured `num_decode` reflects actual generation.

@@ -2006,6 +2006,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         SingleMeasurement,
         VLMSingleMeasurement,
         VLMTPSMeasurer,
+        _supports_fake_decode_prefill,
     )
 
     def _single_llm_measurement(result: Any) -> SingleMeasurement:
@@ -2093,6 +2094,13 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         return measurement
 
     measurer = VLMTPSMeasurer(pipeline)
+    temperature = float(getattr(args, "temperature", 0.0) or 0.0)
+    if temperature > 0.0 and _supports_fake_decode_prefill(measurer._get_language_model()):
+        raise SystemExit(
+            "VLM `tps measure` decode TPS is measured with a greedy argmax on the "
+            "fake-prefill decode path; --temperature > 0 is not supported for this "
+            "pipeline. Re-run with --temperature 0 (default) for greedy decoding."
+        )
     tracker = _build_device_tracker(args, pipeline)
     _print_device_status(args, tracker)
 
@@ -2100,7 +2108,6 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
     print(f"image resolution: {args.image_resolution} | prefill tokens: {args.prefill} | decode tokens: {args.decode}")
-    temperature = float(getattr(args, "temperature", 0.0) or 0.0)
     print(f"temperature: {_format_temperature_display(temperature)}")
 
     for _ in tqdm(range(args.warmup), desc="vision warmup runs", leave=False):
@@ -3902,7 +3909,11 @@ def add_tps_parser(
         "--temperature",
         type=_parse_non_negative_float,
         default=0.0,
-        help="sampling temperature; 0 (default) = greedy decoding, >0 = do_sample=True with that temperature",
+        help=(
+            "sampling temperature; 0 (default) = greedy decoding, >0 = do_sample=True with that "
+            "temperature. VLM (image-text-to-text) `tps measure` decode uses a greedy argmax on "
+            "the fake-prefill path, so --temperature > 0 is rejected there"
+        ),
     )
     p_measure.add_argument("--json", default=None, help="write result as JSON")
     p_measure.add_argument(

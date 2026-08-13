@@ -240,7 +240,9 @@ truth when this snapshot becomes stale.
   exclusive `--enable-thinking`/`--disable-thinking` to override the Qwen3 chat template
   `enable_thinking` flag, and `--temperature FLOAT` (`0.0` keeps greedy; any `>0` enables
   `do_sample=True`). Chat templates apply to text prompts by default. `tps sweep` stays greedy so
-  its numbers remain comparable.
+  its numbers remain comparable. VLM (`--task image-text-to-text`) `tps measure` decode is
+  measured with a greedy `torch.argmax` on the fake-prefill decode path; the CLI rejects
+  `--temperature > 0` there with a clear error rather than silently ignoring it.
 - On EAGLE-3 pipelines the TPS measurement path in
   `mblt_model_zoo/hf_transformers/utils/benchmark_utils.py::_apply_eagle3_gen_kwargs` strips
   `min_new_tokens` and `pad_token_id` and sets `eos_token_id=None` so `generate` honors the real

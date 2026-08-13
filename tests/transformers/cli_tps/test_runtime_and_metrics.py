@@ -1797,6 +1797,113 @@ def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
     assert tps_cli._run_vlm_measure(args) == 0
 
 
+class _SentinelVlmGuardPassed(Exception):
+    """Raised by a monkeypatched ``_build_device_tracker`` to short-circuit after the VLM guard."""
+
+
+def _build_vlm_measure_guard_args(temperature: float) -> argparse.Namespace:
+    """Namespace shaped for ``_run_vlm_measure`` up through the temperature guard."""
+    return argparse.Namespace(
+        task="image-text-to-text",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=1,
+        warmup=0,
+        repeat=1,
+        image_resolution=224,
+        prefill=8,
+        decode=2,
+        prompt="Describe the image.",
+        npu_prefill_chunk_size=None,
+        device_metrics=False,
+        json=None,
+        device_backend="none",
+        print_output=False,
+        temperature=temperature,
+    )
+
+
+def _install_vlm_measure_guard_fixtures(monkeypatch, language_model) -> None:
+    """Wire ``_run_vlm_measure`` up to the temperature guard with the given language model."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeGuardVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def _get_language_model(self):
+            return language_model
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeGuardVLMTPSMeasurer)
+
+
+def test_run_vlm_measure_rejects_positive_temperature_when_fake_prefill_supported(monkeypatch):
+    """Reject ``--temperature > 0`` on a VLM whose LM decode uses the greedy fake-prefill path."""
+    _install_vlm_measure_guard_fixtures(monkeypatch, _DummyNPUModel())
+
+    args = _build_vlm_measure_guard_args(temperature=0.7)
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._run_vlm_measure(args)
+
+    message = str(excinfo.value)
+    assert "greedy argmax" in message
+    assert "fake-prefill" in message
+    assert "--temperature 0" in message
+
+
+def test_run_vlm_measure_allows_positive_temperature_when_fake_prefill_unsupported(monkeypatch):
+    """Do not reject ``--temperature > 0`` when the LM does not use the fake-prefill decode path."""
+    _install_vlm_measure_guard_fixtures(monkeypatch, _DummyNonNPUModel())
+
+    def _stop_after_guard(_args, _pipeline):
+        raise _SentinelVlmGuardPassed()
+
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", _stop_after_guard)
+    args = _build_vlm_measure_guard_args(temperature=0.7)
+    with pytest.raises(_SentinelVlmGuardPassed):
+        tps_cli._run_vlm_measure(args)
+
+
+def test_run_vlm_measure_allows_greedy_temperature_when_fake_prefill_supported(monkeypatch):
+    """Do not reject ``--temperature 0`` (greedy) even when the LM uses the fake-prefill path."""
+    _install_vlm_measure_guard_fixtures(monkeypatch, _DummyNPUModel())
+
+    def _stop_after_guard(_args, _pipeline):
+        raise _SentinelVlmGuardPassed()
+
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", _stop_after_guard)
+    args = _build_vlm_measure_guard_args(temperature=0.0)
+    with pytest.raises(_SentinelVlmGuardPassed):
+        tps_cli._run_vlm_measure(args)
+
+
 def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():
     model = _DummyGenerateNPUModel()
     measurer = TPSMeasurer(_DummyTextPipeline(model))
