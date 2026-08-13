@@ -893,7 +893,12 @@ def test_qwen2_eagle3_evaluate_posterior_handles_greedy_full_accept() -> None:
 
 
 def test_qwen2_eagle3_evaluate_posterior_sampling_accepts_with_torch_rng(monkeypatch) -> None:
-    """Use torch RNG for sampling-path posterior acceptance."""
+    """Use torch RNG for sampling-path posterior acceptance.
+
+    All drafts accepted (clean-accept path): the finalization returns the raw next-root
+    logits row plus ``sampled_indices=None``. Callers sample over the full processed
+    distribution downstream.
+    """
     logits = torch.zeros((2, 8), dtype=torch.float32)
     candidates = torch.tensor([[3, 4, 5]], dtype=torch.long)
     retrieve_indices = torch.tensor([[0, 1, -1]], dtype=torch.long)
@@ -914,8 +919,12 @@ def test_qwen2_eagle3_evaluate_posterior_sampling_accepts_with_torch_rng(monkeyp
 
     assert best_candidate.item() == 0
     assert accepted_draft_count.item() == 2
-    assert torch.equal(sample_p, torch.tensor([1.0]))
-    assert torch.equal(sampled_indices, torch.tensor([4]))
+    assert sampled_indices is None
+    # Clean-accept: ``sample_p`` is the raw logits row at the next-root position. With
+    # ``retrieve_indices[0, 2] == -1`` and the 2-row logits stub, that resolves to
+    # ``logits[-1]``, i.e. the last (all-zero) row.
+    assert sample_p.shape == (8,)
+    assert torch.equal(sample_p, torch.zeros(8, dtype=torch.float32))
 
 
 def test_qwen2_eagle3_generate_multi_turn_reuses_cache_safely(monkeypatch) -> None:

@@ -214,6 +214,17 @@ truth when this snapshot becomes stale.
   `None` for `temperature<=1e-5`.
 - Keep `prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP)
   so that `softmax_topk_cpu_torch` can safely apply the list on top of a TopK slice.
+- Route EAGLE-3 root/next-token sampling through
+  `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::_sample_next_token_from_processor`
+  so it draws from the full-vocab HF-processed distribution (softmax over the whole vocab, then
+  `torch.multinomial`). `softmax_topk_cpu_torch` is candidate-matching only — feeding its top-N
+  slice to `torch.multinomial` renormalizes over 10 tokens and zeroes every other token, which
+  breaks temperature-only and `top_k > 10` configurations. The `evaluate_posterior` sampling
+  return schema now distinguishes clean-accept (raw next-root logits with `sampled_indices=None`)
+  from rejection-adjusted (top-N renormalized `sample_p` + aligned `sampled_indices`); the
+  rejection-adjusted branch remains a partial approximation of true rejection sampling until a
+  full-vocab algorithm lands, and only the clean-accept branch samples the full processed
+  distribution.
 - Keep the argmax-first shape in `evaluate_posterior` greedy: compute `argmax(logits)` and index
   with `safe_positions` rather than fancy-indexing the `(n_cand, depth, vocab)` logits tensor,
   which materializes the full slice.

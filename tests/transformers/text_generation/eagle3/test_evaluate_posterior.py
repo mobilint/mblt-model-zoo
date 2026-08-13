@@ -228,24 +228,34 @@ def test_greedy_accepts_1d_logits() -> None:
     assert torch.equal(new_sample_p, ref_sample_p)
 
 
-def test_sampling_path_unaffected_by_refactor() -> None:
-    """The refactor lives strictly in the greedy branch; sampling still returns 4-tuples with sampled_indices."""
+def test_sampling_clean_accept_returns_raw_logits_row() -> None:
+    """Sampling clean-accept path returns raw next-root logits with ``sampled_indices=None``.
+
+    The candidate-matching slice (``softmax_topk_cpu_torch``) is used inside the loop for
+    accept/reject decisions, but the finalization must hand back the raw logits row so
+    :func:`update_inference_inputs` can sample from the full processed distribution.
+    """
     torch.manual_seed(19)
-    n_tree_nodes, n_cand, depth, vocab = 8, 3, 3, 64
-    logits = torch.randn(n_tree_nodes, vocab)
-    retrieve_indices = torch.tensor(
+    n_tree_nodes, vocab = 8, 64
+    # Sharpen logits per node so that the top-1 (greedy) token dominates and acceptance is
+    # essentially guaranteed at temperature 0.7 — that keeps the loop on the clean-accept
+    # path rather than adjusting mid-tree.
+    logits = torch.randn(n_tree_nodes, vocab) * 0.1
+    peak_idx = torch.tensor([3, 11, 7, 4, 22, 15, 30, 42], dtype=torch.long)
+    for node in range(n_tree_nodes):
+        logits[node, peak_idx[node]] = 30.0
+    retrieve_indices = torch.tensor([[0, 1, 4]], dtype=torch.long)
+    greedy_per_node = torch.argmax(logits, dim=-1)
+    candidates = torch.tensor(
         [
-            [0, 1, 4],
-            [0, 2, 5],
-            [0, 3, 6],
+            [
+                0,
+                int(greedy_per_node[0].item()),
+                int(greedy_per_node[1].item()),
+            ]
         ],
         dtype=torch.long,
     )
-    greedy_per_node = torch.argmax(logits, dim=-1)
-    candidates = torch.zeros((n_cand, depth), dtype=torch.long)
-    for row in range(n_cand):
-        node = int(retrieve_indices[row, 0].item())
-        candidates[row, 1] = greedy_per_node[node]
 
     processor: Optional[LogitsProcessorList] = prepare_logits_processor(temperature=0.7)
     assert processor is not None
@@ -255,6 +265,47 @@ def test_sampling_path_unaffected_by_refactor() -> None:
     assert isinstance(best, torch.Tensor) and best.dtype in (torch.long, torch.int64)
     assert isinstance(count, torch.Tensor) and count.dtype in (torch.long, torch.int64)
     assert isinstance(sample_p, torch.Tensor)
-    # The sampling branch always exercises softmax_topk_cpu_torch and therefore returns indices.
-    assert sampled_indices is not None
+    # Clean-accept path (no rejection ever triggered): ``sampled_indices`` is ``None`` and
+    # ``sample_p`` is the raw logits row at the next-root position, matching the greedy
+    # schema. The caller samples over the full-vocab processed distribution.
+    assert sampled_indices is None
+    assert int(count.item()) == 2
+    leaf_position = int(retrieve_indices[int(best.item()), int(count.item())].item())
+    assert torch.equal(sample_p, logits[leaf_position])
+
+
+def test_sampling_rejection_adjusted_returns_top_n_slice() -> None:
+    """Rejection-adjusted path keeps the top-N schema: ``sample_p`` sums to 1 and ``sampled_indices``
+    is aligned to it.
+
+    This is the compatibility branch — a partial approximation of full-vocab rejection
+    sampling until a proper algorithm lands. Draft tokens that never win acceptance zero
+    out inside the loop; the surviving top-N slice is what the caller multinomials.
+    """
+    torch.manual_seed(51)
+    n_tree_nodes, vocab = 4, 32
+    logits = torch.randn(n_tree_nodes, vocab)
+    # Node 0's greedy token is likely to accept; force the second-depth draft token to a
+    # value that is NOT the greedy token so the loop hits the rejection branch.
+    greedy_per_node = torch.argmax(logits, dim=-1)
+    off_target = (int(greedy_per_node[1].item()) + 1) % vocab
+    retrieve_indices = torch.tensor([[0, 1, -1]], dtype=torch.long)
+    candidates = torch.tensor(
+        [[0, int(greedy_per_node[0].item()), off_target]],
+        dtype=torch.long,
+    )
+
+    processor: Optional[LogitsProcessorList] = prepare_logits_processor(temperature=0.7)
+    assert processor is not None
+
+    torch.manual_seed(51)
+    _best, _count, sample_p, sampled_indices = evaluate_posterior(logits, candidates, processor, retrieve_indices)
+    # Even if no rejection actually adjusts (draft token could still be in top-10 and
+    # accepted by chance), the branch schema is: either clean-accept (indices None) or
+    # adjusted (indices aligned to top-N sample_p). Guard both.
+    if sampled_indices is None:
+        return
     assert sampled_indices.dtype == torch.long
+    assert sample_p.ndim == 1
+    assert sampled_indices.shape == sample_p.shape
+    assert sample_p.sum().item() == pytest.approx(1.0, abs=1e-6)

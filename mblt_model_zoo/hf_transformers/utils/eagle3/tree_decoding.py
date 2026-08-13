@@ -260,6 +260,14 @@ def softmax_topk_cpu_torch(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return the top-``max_return_k`` ``(probs, indices)`` for candidate matching.
 
+    **This function is intended for candidate matching only, NOT for sampling.** In the
+    default ``"auto"`` / ``"full"`` paths the returned probabilities sum to less than 1
+    when the returned slice does not cover the entire active support of the processed
+    distribution, so passing them directly to ``torch.multinomial`` would silently
+    renormalize over the returned slice and assign zero mass to every token outside it.
+    Use :func:`_sample_next_token_from_processor` to sample the root or next token from
+    the full-vocab processed distribution.
+
     ``max_return_k`` is a return-slice size (for downstream candidate matching), *not* a math
     slice for the softmax. The mathematical path is chosen by :data:`SOFTMAX_TOPK_MODE`:
 
@@ -301,6 +309,38 @@ def softmax_topk_cpu_torch(
     return _softmax_topk_full_vocab(logits, max_return_k, logits_processor)
 
 
+def _sample_next_token_from_processor(
+    logits: torch.Tensor,
+    logits_processor: LogitsProcessorList,
+) -> torch.LongTensor:
+    """Sample a single token from the full-vocab HF-processed distribution.
+
+    This is the sampling counterpart to :func:`softmax_topk_cpu_torch`. The latter returns a
+    top-N slice whose masses do not sum to 1, so feeding it to ``torch.multinomial`` would
+    renormalize over just the returned slice and give every token outside the slice zero
+    probability. That silently diverges from Hugging Face's ``LogitsProcessorList`` +
+    ``softmax`` + ``multinomial`` contract whenever the effective active support extends
+    past the return slice (temperature-only, or ``top_k`` larger than the return slice).
+
+    Args:
+        logits: Float-like logits of shape ``(vocab,)`` or ``(batch, vocab)``.
+        logits_processor: HF logits processor list; must not be ``None``.
+
+    Returns:
+        ``torch.long`` sampled token. Shape is ``(1,)`` for 1D input or ``(batch, 1)`` for
+        2D input.
+    """
+    input_ndim = logits.ndim
+    x = logits.float()
+    x2d = x.unsqueeze(0) if input_ndim == 1 else x
+    processed = _apply_logits_processor(x2d, logits_processor)
+    probs = torch.softmax(processed, dim=-1)
+    token = torch.multinomial(probs, 1)
+    if input_ndim == 1:
+        return token.squeeze(0).to(torch.long)
+    return token.to(torch.long)
+
+
 @torch.no_grad()
 def initialize_tree(
     input_ids: torch.LongTensor,
@@ -334,9 +374,7 @@ def initialize_tree(
     cache.update_base_seen_tokens(prompt_delta_input_ids.shape[1])
 
     if logits_processor is not None:
-        probabilities, indices = softmax_topk_cpu_torch(logits, logits_processor=logits_processor)
-        sampled_idx = torch.multinomial(probabilities, 1)
-        token = indices.gather(dim=1, index=sampled_idx)
+        token = _sample_next_token_from_processor(logits, logits_processor)
     else:
         token = torch.argmax(logits, dim=-1, keepdim=True)
 
@@ -409,6 +447,22 @@ def evaluate_posterior(
     retrieve_indices: torch.Tensor,
 ) -> PosteriorResult:
     """Choose the best accepted branch and the next sampling distribution.
+
+    The next-token sampling schema encoded in the returned tuple is:
+
+    - Greedy (``logits_processor is None``): ``sample_p`` holds the raw logits row at the
+      leaf position (or the fallback node), ``sampled_indices`` is ``None``. Callers
+      argmax on ``sample_p``.
+    - Sampling clean-accept (``logits_processor`` present, no rejection ever triggered):
+      ``sample_p`` holds the raw next-root logits row, ``sampled_indices`` is ``None``.
+      Callers sample from the full processed distribution via
+      :func:`_sample_next_token_from_processor`.
+    - Sampling rejection-adjusted (``logits_processor`` present, at least one draft token
+      was rejected mid-tree): ``sample_p`` is the top-N rejection-renormalized probability
+      vector and ``sampled_indices`` is the aligned top-N token id vector. Callers sample
+      from that top-N distribution. This is a partial approximation of true rejection
+      sampling (the redistribution stays within the top-N support), retained for
+      compatibility until a full-vocab rejection-sampling algorithm lands.
 
     Returns:
         Tuple of ``(best_candidate, accepted_draft_count, sample_p, sampled_indices)``.
@@ -490,13 +544,17 @@ def evaluate_posterior(
                 adjusted = True
 
     if adjusted and accepted_candidate_length != candidates.shape[1]:
+        # Rejection-adjusted mid-tree stop: sample from the top-N renormalized distribution
+        # (partial approximation of full rejection sampling). ``sampled_indices`` was
+        # captured inside the loop and stays aligned with ``topk_probs``.
         sample_p = topk_probs
     else:
-        sample_logits = select_token_logits(logits, retrieve_indices[best_candidate, accepted_candidate_length - 1])
-        sample_p, sampled_indices = softmax_topk_cpu_torch(
-            sample_logits,
-            logits_processor=logits_processor,
-        )
+        # Clean-accept (no rejection ever triggered): hand the raw next-root logits row
+        # back to the caller so sampling happens over the full-vocab processed
+        # distribution, matching HF's ``LogitsProcessorList`` + ``softmax`` + ``multinomial``
+        # contract instead of renormalizing over the top-N candidate-matching slice.
+        sample_p = select_token_logits(logits, retrieve_indices[best_candidate, accepted_candidate_length - 1])
+        sampled_indices = None
 
     accepted_draft_count = max(0, accepted_candidate_length - 1)
     return torch.tensor(best_candidate), torch.tensor(accepted_draft_count), sample_p, sampled_indices
@@ -563,9 +621,16 @@ def update_inference_inputs(
     accepted_hidden_state = retrieved_hidden_state[:, best_candidate_int, : int(accepted.shape[1])]
 
     if logits_processor is not None:
-        assert sampled_indices is not None
-        sampled_idx = torch.multinomial(sample_p, 1)
-        token = sampled_indices[None, sampled_idx]
+        if sampled_indices is None:
+            # Clean-accept path: sample from the full-vocab HF-processed distribution.
+            # ``sample_p`` is the raw next-root logits row here (see ``evaluate_posterior``).
+            token = _sample_next_token_from_processor(sample_p, logits_processor)[None]
+        else:
+            # Rejection-adjusted path: fall back to the top-N renormalized distribution
+            # produced by ``evaluate_posterior``. Partial approximation until a full-vocab
+            # rejection-sampling algorithm lands.
+            sampled_idx = torch.multinomial(sample_p, 1)
+            token = sampled_indices[None, sampled_idx]
     else:
         token = torch.argmax(sample_p, dim=-1, keepdim=True)[None]
 

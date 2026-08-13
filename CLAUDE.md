@@ -89,6 +89,13 @@
   greedy path never enters this function.
 - Keep `prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP)
   so the auto slice-by-TopK path stays mathematically equivalent to full-vocab.
+- EAGLE-3 root/next-token sampling goes through
+  `tree_decoding.py::_sample_next_token_from_processor` (full-vocab softmax → `multinomial`).
+  `softmax_topk_cpu_torch` is candidate-matching only; passing its top-N slice to `multinomial`
+  renormalizes over 10 tokens and breaks temperature-only and `top_k > 10` configs.
+  `evaluate_posterior` returns `sampled_indices=None` + raw next-root logits on the clean-accept
+  branch (caller samples full-vocab) and top-N `(sample_p, sampled_indices)` on the
+  rejection-adjusted branch (partial approximation retained for compatibility).
 - Keep `evaluate_posterior` greedy argmax-first (`argmax(logits)[safe_positions]`) to avoid
   materializing the full `(n_cand, depth, vocab)` slice.
 - EAGLE-3 speculative-decode rows in `tps measure` are `accept_steps`, `tokens_sum`,
