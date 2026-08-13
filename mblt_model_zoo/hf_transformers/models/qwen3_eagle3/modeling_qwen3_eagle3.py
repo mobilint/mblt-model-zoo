@@ -71,7 +71,7 @@ class MobilintQwen3Eagle3DraftModel(MobilintEagle3DraftModelMixin, MobilintEagle
             base=int(getattr(draft_config, "rope_theta", 10000)),
         )
         self.top_k = int(config.eagle3_tree_top_k)
-        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 63)) - 1
+        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 64)) - 1
         self.depth = int(config.eagle3_tree_depth)
         self.hidden_size = draft_config.hidden_size
         self.logsoftmax = nn.LogSoftmax(dim=-1)

@@ -945,7 +945,12 @@ class TPSMeasurer:
         input_len = int(input_ids.shape[1])
         generated_per_row = max(output_len - input_len, 0) if output_len else num_decode + (0 if fake_prefill else 1)
         generated_token_ids: Optional[List[int]] = None
-        if collect_generated_token_ids and isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 and output_len > input_len:
+        if (
+            collect_generated_token_ids
+            and isinstance(outputs, torch.Tensor)
+            and outputs.ndim >= 2
+            and output_len > input_len
+        ):
             # Only decode the first row of the batch; full batch decoding is out of scope.
             generated_token_ids = outputs[0, input_len:].detach().cpu().tolist()
         decode_count = max(generated_per_row if fake_prefill else generated_per_row - 1, 0)

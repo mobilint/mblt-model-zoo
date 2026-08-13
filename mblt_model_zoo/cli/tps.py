@@ -1954,11 +1954,11 @@ def _print_generated_output(pipeline: Any, runs: Sequence[Any], decode_budget: i
         return
     try:
         raw_text = tokenizer.decode(token_ids, skip_special_tokens=False)
-    except Exception as exc:
+    except (ValueError, RuntimeError, TypeError) as exc:
         raw_text = f"<decode failed: {exc}>"
     try:
         clean_text = tokenizer.decode(token_ids, skip_special_tokens=True)
-    except Exception as exc:
+    except (ValueError, RuntimeError, TypeError) as exc:
         clean_text = f"<decode failed: {exc}>"
     print("--- generated text (special tokens preserved) ---")
     print(raw_text)

@@ -652,7 +652,6 @@ class MobilintEagle3DraftModelMixin:
             infer_inputs = [
                 inputs_embeds_numpy[:, :, seq_start:seq_end, :],
                 hidden_states_numpy[:, :, seq_start:seq_end, :],
-                
                 attention_mask_numpy[:, :, seq_start:seq_end, : current_cache_position + seq_end - seq_start],
                 position_embs_numpy[:, :, seq_start:seq_end, :],
             ]
