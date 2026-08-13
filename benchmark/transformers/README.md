@@ -42,6 +42,9 @@ inference and model downloads.
 - CLI defaults and benchmark-script defaults are aligned for shared TPS parameters.
   - `measure` defaults to `--prefill 128`, `--decode 32`, `--repeat 1`, and `--warmup 1`;
     VLM measure also defaults to `--image-resolution 224`.
+  - `measure` also accepts `--temperature FLOAT` (default `0.0`). `0.0` keeps greedy decoding
+    (`do_sample=False`); any value `> 0` enables `do_sample=True` and passes the value to
+    `model.generate`. Sweep runs stay greedy so their numbers stay comparable across configurations.
   - `sweep` defaults to `--prefill-range 512:2048:512`,
     `--cache-lengths 128,512,1024,2048`, and `--decode-window 32`; VLM sweep also defaults
     to `--image-resolutions 224,384,512,768` and `--llm-resolution None`.

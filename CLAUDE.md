@@ -75,5 +75,47 @@
 - The Qwen3-VL processor reads `config.dynamic_vision` in `from_pretrained` and mirrors it onto
   its video processor. Call `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model(model)`
   only when a runtime `vision_mxq_path=` override diverges from the shipped config.
+- EAGLE-3 speculative decoding (`mobilint/EAGLE3-Qwen3-4B` and siblings) loads through
+  `AutoModelForCausalLM.from_pretrained(...)` as one release bundling base MXQ, draft MXQ, and
+  FC stack. Tune the draft budget with `GenerationConfig.num_assistant_tokens` (default `64`);
+  Qwen3-4B measures best around `25`–`30`.
+- `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
+  to `auto`: slice by declared `TopKLogitsWarper` if present, else full-vocab softmax so
+  `TopPLogitsWarper` computes its nucleus over the whole distribution. The slice-by-TopK path
+  detects boundary ties (HF's strict-less-than `TopKLogitsWarper` keeps every logit equal to the
+  k-th threshold; `torch.topk` drops tied entries at the boundary) via
+  `(x >= threshold).sum(-1) > slice_size` and falls back to full-vocab when true, so it stays
+  HF-equivalent even under ties. `full` forces full-vocab; `sliced` is a deprecated legacy
+  top-``max_return_k`` renormalization that violates HF nucleus semantics for TopP-only and
+  emits a warning. Toggle via `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=auto|full|sliced` or
+  `set_softmax_topk_mode(...)`. The `max_return_k` keyword (default `10`) is only a
+  return-slice size, not a math slice. The greedy path never enters this function.
+- Keep `prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP)
+  so the auto slice-by-TopK path stays mathematically equivalent to full-vocab (modulo the
+  boundary-tie fallback).
+- EAGLE-3 root/next-token sampling goes through
+  `tree_decoding.py::_sample_next_token_from_processor` (full-vocab softmax → `multinomial`).
+  `softmax_topk_cpu_torch` is candidate-matching only; passing its top-N slice to `multinomial`
+  renormalizes over 10 tokens and breaks temperature-only and `top_k > 10` configs.
+  `evaluate_posterior` returns `sampled_indices=None` + raw next-root logits on the clean-accept
+  branch (caller samples full-vocab) and top-N `(sample_p, sampled_indices)` on the
+  rejection-adjusted branch (partial approximation retained for compatibility).
+- Keep `evaluate_posterior` greedy argmax-first (`argmax(logits)[safe_positions]`) to avoid
+  materializing the full `(n_cand, depth, vocab)` slice.
+- EAGLE-3 speculative-decode rows in `tps measure` are `accept_steps`, `tokens_sum`,
+  `tokens_per_step` (= `drafts_avg + 1`, matching `accept_length + 1` in the reference
+  `eagle3MXQ.py`), and `draft_accept_ratio`; non-EAGLE-3 pipelines omit them.
+- `tps measure` accepts `--print-output`, mutually exclusive `--enable-thinking` /
+  `--disable-thinking` (Qwen3 chat template override), and `--temperature FLOAT` (`0` = greedy);
+  chat templates apply to text prompts by default. `tps sweep` stays greedy. VLM (`--task
+  image-text-to-text`) `tps measure` decode uses greedy `argmax` on the fake-prefill path; the
+  CLI rejects `--temperature > 0` there with a clear error.
+- On EAGLE-3, `_apply_eagle3_gen_kwargs` in `benchmark_utils.py` drops `min_new_tokens` and
+  `pad_token_id` and sets `eos_token_id=None`, so `--decode N` becomes an upper bound and
+  measured `num_decode` reflects actual generation.
+- MXQ backends have known cross-process non-determinism; use
+  `scripts/probe_mxq_determinism.py`, `scripts/probe_generate_same_process.py`, and
+  `scripts/probe_warmup_stabilization.py` to reproduce. Warmup does not stabilize across
+  processes; prefer same-process `--repeat N`.
 - Read the nearest area README or `TEST.md` before modifying code or selecting validation.
 - Preserve unrelated working-tree changes and report environment-dependent test limitations.

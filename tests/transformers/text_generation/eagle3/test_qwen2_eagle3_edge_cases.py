@@ -8,19 +8,21 @@ import numpy as np
 import pytest
 import torch
 
-from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 import (
-    MobilintQwen2Eagle3ForCausalLM,
-)
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.configuration_qwen2_eagle3 import (
     MobilintQwen2Eagle3Config,
 )
+from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 import (
+    MobilintQwen2Eagle3ForCausalLM,
+)
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
-from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
+from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import (
+    MobilintEagle3BaseModelMixin,
+    MobilintEagle3DraftModelMixin,
+)
 from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, initialize_tree
-from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import MobilintEagle3DraftModelMixin
-from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import MobilintEagle3BaseModelMixin
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 
 def _attach_minimal_eagle3_modules(model: MobilintQwen2Eagle3ForCausalLM) -> None:
@@ -85,8 +87,14 @@ def _patch_minimal_generate_dependencies(monkeypatch) -> None:
     )
 
 
-def test_evaluate_posterior_sampling_zero_sum_probs_fallback(monkeypatch) -> None:
-    """Sampling posterior should avoid NaN when masked probs sum to zero."""
+def test_evaluate_posterior_sampling_clean_accept_returns_raw_logits(monkeypatch) -> None:
+    """Sampling posterior clean-accept returns the raw next-root logits row + ``sampled_indices=None``.
+
+    With the new sampling schema, the finalization hands the caller the full-vocab logits
+    row so :func:`update_inference_inputs` can sample from the HF-processed distribution
+    instead of renormalizing over the candidate-matching top-N slice. The candidate-matching
+    slice is still consumed inside the loop for accept/reject decisions.
+    """
     logits = torch.zeros((2, 8), dtype=torch.float32)
     candidates = torch.tensor([[3, 4, -1], [3, 4, -1]], dtype=torch.long)
     retrieve_indices = torch.tensor([[0, 1, -1], [0, 1, -1]], dtype=torch.long)
@@ -115,17 +123,19 @@ def test_evaluate_posterior_sampling_zero_sum_probs_fallback(monkeypatch) -> Non
     assert torch.isfinite(sample_p).all()
     assert best_candidate.item() == 0
     assert accepted_draft_count.item() >= 0
-    assert sampled_indices is not None
+    # Clean-accept schema: raw logits row + ``sampled_indices=None``.
+    assert sampled_indices is None
+    assert sample_p.shape == (8,)
 
 
 def test_evaluate_posterior_uses_leaf_logits_after_full_path_accept() -> None:
     """Greedy posterior should sample from leaf logits when full draft path is accepted."""
     logits = torch.tensor(
         [
-            [0.0, 10.0, 0.0, 0.0],   # pos 0 -> greedy token 1
-            [0.0, 0.0, 10.0, 0.0],   # pos 1 -> greedy token 2
-            [0.0, 0.0, 0.0, 10.0],   # pos 2 -> greedy token 3
-            [9.0, 1.0, 2.0, 3.0],    # leaf pos to be used for next-token sampling
+            [0.0, 10.0, 0.0, 0.0],  # pos 0 -> greedy token 1
+            [0.0, 0.0, 10.0, 0.0],  # pos 1 -> greedy token 2
+            [0.0, 0.0, 0.0, 10.0],  # pos 2 -> greedy token 3
+            [9.0, 1.0, 2.0, 3.0],  # leaf pos to be used for next-token sampling
         ],
         dtype=torch.float32,
     )
@@ -201,7 +211,9 @@ def test_initialize_tree_accepts_delta_only_input_with_reused_cache() -> None:
     class _DummyBaseModel:
         def __call__(self, input_ids, *_args, **_kwargs):
             assert tuple(input_ids.shape) == (1, 1)
-            return {"hidden_states": [torch.zeros((1, 1, 4), dtype=torch.float32)]}, torch.zeros((1, 8), dtype=torch.float32)
+            return {"hidden_states": [torch.zeros((1, 1, 4), dtype=torch.float32)]}, torch.zeros(
+                (1, 8), dtype=torch.float32
+            )
 
     class _DummyDraftModel:
         def topk_generate(self, *_args, **_kwargs):
