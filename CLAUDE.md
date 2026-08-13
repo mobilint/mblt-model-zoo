@@ -81,14 +81,18 @@
   Qwen3-4B measures best around `25`–`30`.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
   to `auto`: slice by declared `TopKLogitsWarper` if present, else full-vocab softmax so
-  `TopPLogitsWarper` computes its nucleus over the whole distribution. `full` forces full-vocab;
-  `sliced` is a deprecated legacy top-``max_return_k`` renormalization that violates HF nucleus
-  semantics for TopP-only and emits a warning. Toggle via
-  `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=auto|full|sliced` or `set_softmax_topk_mode(...)`. The
-  `max_return_k` keyword (default `10`) is only a return-slice size, not a math slice. The
-  greedy path never enters this function.
+  `TopPLogitsWarper` computes its nucleus over the whole distribution. The slice-by-TopK path
+  detects boundary ties (HF's strict-less-than `TopKLogitsWarper` keeps every logit equal to the
+  k-th threshold; `torch.topk` drops tied entries at the boundary) via
+  `(x >= threshold).sum(-1) > slice_size` and falls back to full-vocab when true, so it stays
+  HF-equivalent even under ties. `full` forces full-vocab; `sliced` is a deprecated legacy
+  top-``max_return_k`` renormalization that violates HF nucleus semantics for TopP-only and
+  emits a warning. Toggle via `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=auto|full|sliced` or
+  `set_softmax_topk_mode(...)`. The `max_return_k` keyword (default `10`) is only a
+  return-slice size, not a math slice. The greedy path never enters this function.
 - Keep `prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP)
-  so the auto slice-by-TopK path stays mathematically equivalent to full-vocab.
+  so the auto slice-by-TopK path stays mathematically equivalent to full-vocab (modulo the
+  boundary-tie fallback).
 - EAGLE-3 root/next-token sampling goes through
   `tree_decoding.py::_sample_next_token_from_processor` (full-vocab softmax → `multinomial`).
   `softmax_topk_cpu_torch` is candidate-matching only; passing its top-N slice to `multinomial`

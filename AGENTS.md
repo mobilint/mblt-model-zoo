@@ -202,9 +202,13 @@ truth when this snapshot becomes stale.
   one of three modes. Default `auto` dispatches per call: when the processor list contains a
   `TopKLogitsWarper`, slice the raw logits to the declared top-K first and apply the processor
   list on that slice (HF `_get_logits_warper` order Temperature → TopK → TopP makes the slice
-  mathematically identical to the full-vocab path while skipping the full-vocab `exp`);
-  otherwise take the full-vocab path so a bare `TopPLogitsWarper` still determines its nucleus
-  from the whole distribution. `full` forces the full-vocab path as a manual override.
+  mathematically identical to the full-vocab path while skipping the full-vocab `exp`), *except*
+  when boundary ties push part of the active support outside the slice — HF's `TopKLogitsWarper`
+  uses a strict-less-than filter and keeps every entry equal to the k-th threshold, while
+  `torch.topk` drops arbitrary tied entries at the boundary, so the slice path detects this case
+  cheaply (`(x >= threshold).sum(-1) > slice_size`) and falls back to the full-vocab helper to
+  preserve HF equivalence; otherwise take the full-vocab path so a bare `TopPLogitsWarper` still
+  determines its nucleus from the whole distribution. `full` forces the full-vocab path as a manual override.
   `sliced` is a deprecated back-compat mode that always renormalizes over a top-``max_return_k``
   slice and emits a warning; keep it only for A/B reproducibility. Toggle at import through
   `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=full|sliced|auto` or programmatically through

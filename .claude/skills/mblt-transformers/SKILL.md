@@ -29,13 +29,17 @@ and FC stack. Tune the draft-tree budget through `GenerationConfig.num_assistant
 `25`–`30`. The softmax dispatch in
 `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
 to `auto`: slice by declared `TopKLogitsWarper` if present, else fall back to full-vocab so a
-bare `TopPLogitsWarper` still determines its nucleus over the whole distribution. `full` is a
-manual full-vocab override; `sliced` is a deprecated legacy top-``max_return_k`` renormalization
-that violates HF nucleus semantics without a TopK companion and emits a warning. Toggle via
+bare `TopPLogitsWarper` still determines its nucleus over the whole distribution. The
+slice-by-TopK path detects boundary ties (HF's strict-less-than `TopKLogitsWarper` keeps every
+logit equal to the k-th threshold; `torch.topk` drops tied entries at the boundary) via
+`(x >= threshold).sum(-1) > slice_size` and falls back to the full-vocab helper when true, so
+it stays HF-equivalent even under ties. `full` is a manual full-vocab override; `sliced` is a
+deprecated legacy top-``max_return_k`` renormalization that violates HF nucleus semantics
+without a TopK companion and emits a warning. Toggle via
 `MBLT_EAGLE3_SOFTMAX_TOPK_MODE=auto|full|sliced` or `set_softmax_topk_mode(...)`. Keep
 `prepare_logits_processor` in HF order (RepetitionPenalty → Temperature → TopK → TopP) so the
-auto slice-by-TopK path stays mathematically equivalent to full-vocab. The greedy path never
-enters that function. `evaluate_posterior` greedy uses `argmax(logits)[safe_positions]` to
+auto slice-by-TopK path stays mathematically equivalent to full-vocab (modulo the tie
+fallback). The greedy path never enters that function. `evaluate_posterior` greedy uses `argmax(logits)[safe_positions]` to
 avoid the fancy-indexed `(n_cand, depth, vocab)` slice.
 
 `mblt-model-zoo tps measure` on EAGLE-3 pipelines prints the extra rows `accept_steps`,

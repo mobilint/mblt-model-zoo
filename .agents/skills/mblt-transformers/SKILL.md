@@ -54,7 +54,11 @@ description: >-
   dispatches per call. Default `auto`: slice to the declared `TopKLogitsWarper`'s top-K first
   and apply the processor list on that slice (Hugging Face `_get_logits_warper` order
   Temperature → TopK → TopP makes the slice mathematically identical to full-vocab softmax
-  while skipping the full-vocab `exp`); otherwise fall back to the full-vocab path so a bare
+  while skipping the full-vocab `exp`), *except* when boundary ties push part of the active
+  support outside the slice — HF's `TopKLogitsWarper` uses a strict-less-than filter and keeps
+  every logit equal to the k-th threshold, while `torch.topk` drops tied entries at the
+  boundary, so the slice path checks `(x >= threshold).sum(-1) > slice_size` and falls back to
+  the full-vocab helper on any tie; otherwise fall back to the full-vocab path so a bare
   `TopPLogitsWarper` still determines its nucleus over the whole distribution. `full` forces
   the full-vocab path as a manual override. `sliced` is a deprecated back-compat mode that
   unconditionally renormalizes over a top-``max_return_k`` slice and emits a warning; retain

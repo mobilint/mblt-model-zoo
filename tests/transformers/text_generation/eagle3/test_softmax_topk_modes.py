@@ -295,3 +295,86 @@ def test_softmax_topk_respects_custom_max_return_k(sample_logits, restore_softma
     probs, indices = softmax_topk_cpu_torch(sample_logits, max_return_k=5, logits_processor=None)
     assert probs.shape == (5,)
     assert indices.shape == (5,)
+
+
+def test_auto_falls_back_to_full_vocab_on_boundary_tie(monkeypatch, restore_softmax_topk_mode):
+    """Boundary ties push part of the TopK support outside the slice; auto must fall back.
+
+    HF's ``TopKLogitsWarper`` uses a strict-less-than filter, so every logit equal to the
+    k-th threshold survives. ``torch.topk`` picks a fixed count and arbitrarily drops tied
+    entries at the boundary. When the tie extends past the slice, the sliced softmax
+    denominator would exclude real active mass — the auto path must detect this and route
+    through the full-vocab helper.
+    """
+    # Top-3 is 5.0, 4.0, 3.0, and *three more* entries also carry 3.0 → four entries share
+    # the k-th threshold value. slice_size == max(top_k=3, max_return_k=3) == 3, so only
+    # three of the four tied entries fit inside the slice.
+    logits = torch.tensor(
+        [5.0, 4.0, 3.0, 3.0, 3.0, 3.0, 1.0, 0.0, -1.0, -2.0],
+        dtype=torch.float32,
+    )
+    processor = prepare_logits_processor(temperature=1.0, top_k=3)
+    assert processor is not None
+
+    call_counts = {"full_vocab": 0, "sliced": 0}
+    original_full_vocab = tree_decoding_module._softmax_topk_full_vocab
+    original_sliced = tree_decoding_module._softmax_topk_sliced_by_top_k
+
+    def counting_full_vocab(*args, **kwargs):
+        call_counts["full_vocab"] += 1
+        return original_full_vocab(*args, **kwargs)
+
+    def counting_sliced(*args, **kwargs):
+        call_counts["sliced"] += 1
+        return original_sliced(*args, **kwargs)
+
+    monkeypatch.setattr(tree_decoding_module, "_softmax_topk_full_vocab", counting_full_vocab)
+    monkeypatch.setattr(tree_decoding_module, "_softmax_topk_sliced_by_top_k", counting_sliced)
+
+    set_softmax_topk_mode("auto")
+    auto_probs, auto_idx = softmax_topk_cpu_torch(logits, max_return_k=3, logits_processor=processor)
+
+    # The sliced entry runs, detects the boundary tie, and delegates to full-vocab.
+    assert call_counts["sliced"] == 1
+    assert call_counts["full_vocab"] == 1
+
+    reference_processor = prepare_logits_processor(temperature=1.0, top_k=3)
+    ref_probs, ref_idx = _hf_full_vocab_reference(logits, reference_processor, 3)
+    assert torch.equal(auto_idx, ref_idx)
+    assert torch.allclose(auto_probs, ref_probs, atol=1e-6)
+
+
+def test_auto_stays_on_slice_path_without_boundary_tie(monkeypatch, restore_softmax_topk_mode):
+    """Absent a boundary tie, auto keeps the slice path and skips the full-vocab ``exp``."""
+    generator = torch.Generator().manual_seed(42)
+    # Distinct random logits — the probability of an exact boundary tie is effectively zero.
+    logits = torch.randn(1024, generator=generator, dtype=torch.float32)
+    processor = prepare_logits_processor(temperature=0.7, top_k=50)
+    assert processor is not None
+
+    call_counts = {"full_vocab": 0, "sliced": 0}
+    original_full_vocab = tree_decoding_module._softmax_topk_full_vocab
+    original_sliced = tree_decoding_module._softmax_topk_sliced_by_top_k
+
+    def counting_full_vocab(*args, **kwargs):
+        call_counts["full_vocab"] += 1
+        return original_full_vocab(*args, **kwargs)
+
+    def counting_sliced(*args, **kwargs):
+        call_counts["sliced"] += 1
+        return original_sliced(*args, **kwargs)
+
+    monkeypatch.setattr(tree_decoding_module, "_softmax_topk_full_vocab", counting_full_vocab)
+    monkeypatch.setattr(tree_decoding_module, "_softmax_topk_sliced_by_top_k", counting_sliced)
+
+    set_softmax_topk_mode("auto")
+    auto_probs, auto_idx = softmax_topk_cpu_torch(logits, logits_processor=processor)
+
+    # No boundary tie → the sliced helper runs and does not fall back to full-vocab.
+    assert call_counts["sliced"] == 1
+    assert call_counts["full_vocab"] == 0
+
+    reference_processor = prepare_logits_processor(temperature=0.7, top_k=50)
+    ref_probs, ref_idx = _hf_full_vocab_reference(logits, reference_processor, 10)
+    assert torch.equal(auto_idx, ref_idx)
+    assert torch.allclose(auto_probs, ref_probs, atol=1e-6)

@@ -44,7 +44,9 @@ def _read_softmax_topk_mode_from_env() -> SoftmaxTopkMode:
 # ``auto`` (default) dispatches per-call:
 #   * If a ``TopKLogitsWarper`` is present, slice to top-K first and apply the processor list
 #     on that slice — mathematically identical to the full-vocab HF path whenever the standard
-#     Temperature/TopK/TopP warpers are used, but skips the full-vocab ``exp``.
+#     Temperature/TopK/TopP warpers are used, *except* when a boundary tie pushes part of the
+#     active support outside the slice; in that case we fall back to the full-vocab path so
+#     the denominator matches HF's strict-less-than TopK filter exactly.
 #   * Otherwise, take the full-vocab path so that a bare ``TopPLogitsWarper`` still determines
 #     its nucleus from the whole distribution.
 # ``full`` forces the full-vocab path unconditionally (manual override).
@@ -216,13 +218,30 @@ def _softmax_topk_sliced_by_top_k(
 
     Mathematically equivalent to :func:`_softmax_topk_full_vocab` for HF-ordered
     Temperature/TopK/TopP warpers because entries outside the K slice would be set to
-    ``-inf`` by ``TopKLogitsWarper`` and contribute zero to the softmax denominator.
+    ``-inf`` by ``TopKLogitsWarper`` and contribute zero to the softmax denominator —
+    *except* when boundary ties push part of the active support outside the slice. HF's
+    ``TopKLogitsWarper`` uses a strict-less-than filter (``scores < kth_threshold``), so
+    every entry whose logit equals the k-th threshold survives, while ``torch.topk``
+    picks a fixed count and drops arbitrary tied entries at the boundary. When such a
+    boundary tie is detected we fall back to :func:`_softmax_topk_full_vocab` so the
+    denominator and returned candidate probabilities match HF exactly.
     """
     x = logits.float()
     vocab = x.shape[-1]
     slice_size = min(max(int(top_k), int(max_return_k)), vocab)
     return_k = min(int(max_return_k), vocab)
     topk_vals, topk_idx = torch.topk(x, slice_size, dim=-1, largest=True, sorted=True)
+    # Detect boundary ties: HF's ``TopKLogitsWarper`` keeps every entry ``>=`` the k-th
+    # threshold, but ``torch.topk`` picks exactly ``slice_size`` entries. When more full-vocab
+    # entries share the threshold value than fit inside the slice, part of the active support
+    # falls outside the slice and the sliced softmax denominator diverges from the full-vocab
+    # one. The check is a single ``>=`` compare + reduce over the vocab dimension, which is far
+    # cheaper than the full-vocab ``exp`` we take on fallback.
+    if slice_size < vocab:
+        threshold = topk_vals[..., -1:]
+        total_at_or_above = (x >= threshold).sum(dim=-1)
+        if bool((total_at_or_above > slice_size).any().item()):
+            return _softmax_topk_full_vocab(logits, max_return_k, logits_processor)
     processed_slice = _apply_logits_processor(topk_vals, logits_processor)
     max_val = processed_slice.max(dim=-1, keepdim=True).values
     exp_slice = torch.exp(processed_slice - max_val)
@@ -275,7 +294,10 @@ def softmax_topk_cpu_torch(
         * If ``logits_processor`` contains a ``TopKLogitsWarper``, slice the raw logits to the
           declared top-K first and apply the processor list on that slice. HF ordering
           (Temperature → TopK → TopP) makes the slice mathematically identical to full-vocab
-          softmax while skipping the full-vocab ``exp``.
+          softmax while skipping the full-vocab ``exp`` — *except* when boundary ties would
+          push part of the active support outside the slice, in which case the sliced path
+          transparently falls back to the full-vocab path so the denominator matches HF's
+          strict-less-than TopK filter exactly.
         * Otherwise (no TopK; TopP or bare Temperature only), take the full-vocab path so that
           ``TopPLogitsWarper`` determines its nucleus from the whole distribution.
     - ``"full"``: force full-vocab softmax and processor application. Manual override.
