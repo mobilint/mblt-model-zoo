@@ -11,8 +11,12 @@ Example:
         --warmup --output-dir debug/eagle3_run
 
 ``--warmup`` (default: on) runs one throwaway ``model.generate(...)`` before the
-traced generate so MXQ backend state reaches steady-state; this makes cross-process
-runs on the same machine deterministic. Pass ``--no-warmup`` to skip it.
+traced generate so MXQ backend state reaches steady-state within the current
+process. This is a diagnostic aid that reduces first-call variance in the traced
+run; it does NOT guarantee cross-process determinism — see
+``scripts/probe_warmup_stabilization.py`` for empirical evidence that MXQ
+outputs may still differ across separate Python processes even with warmup.
+Pass ``--no-warmup`` to skip it.
 """
 
 from __future__ import annotations
@@ -735,9 +739,11 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Run one throwaway model.generate(...) with identical inputs and inference "
             "settings before the traced generate (default: on). Warms MXQ backend state "
-            "to steady-state so cross-process runs on the same machine are deterministic. "
-            "The warmup runs before tracing wrappers are installed, so its call graph is "
-            "not recorded. Pass --no-warmup to skip."
+            "to steady-state within the current process to reduce first-call variance in "
+            "the traced run; does NOT guarantee cross-process determinism (see "
+            "scripts/probe_warmup_stabilization.py). The warmup runs before tracing "
+            "wrappers are installed, so its call graph is not recorded. Pass --no-warmup "
+            "to skip."
         ),
     )
     return parser.parse_args()
