@@ -44,6 +44,23 @@ core_map = {
     3: Core.Core3,
 }
 
+# Inverse maps: ``qbruntime`` enums do not expose a numeric conversion (their
+# ``.value`` returns the enum itself), so we build inverse lookups here and
+# reuse them everywhere a ``Cluster`` / ``Core`` object must be serialized to
+# its integer index.
+_cluster_int_map: Dict["Cluster", int] = {v: k for k, v in cluster_map.items()}
+_core_int_map: Dict["Core", int] = {v: k for k, v in core_map.items()}
+
+
+def cluster_to_int(cluster: "Cluster") -> int:
+    """Return the integer index for a ``qbruntime.Cluster`` enum member."""
+    return _cluster_int_map[cluster]
+
+
+def core_to_int(core: "Core") -> int:
+    """Return the integer index for a ``qbruntime.Core`` enum member."""
+    return _core_int_map[core]
+
 # Default device index for ``dev_no`` when a caller does not pin one.
 # Kept as a single named constant so the backend signature, ``from_dict``
 # fallback, and config-layer normalizers stay in lock-step.
@@ -188,6 +205,32 @@ class MobilintNPUBackend:
 
         self._target_clusters_serialized: List[str] = []
         self.target_clusters = target_clusters if target_clusters is not None else []
+
+        # Snapshot of the canonical state produced by ``_normalize_npu_target_kwargs``
+        # right after construction. ``_re_normalize_backend_state`` compares the
+        # backend's current state against this snapshot to detect *which* fields
+        # HF ``from_pretrained`` overrode via setattr — dev_no vs targets — so
+        # the divergence resolution can trust the field the caller actually
+        # changed instead of guessing. Populated by
+        # :meth:`record_post_normalize_snapshot`; ``None`` until then.
+        self._post_normalize_snapshot: Optional[Dict[str, Any]] = None
+
+    def record_post_normalize_snapshot(self) -> None:
+        """Capture the backend's canonical state right after initial normalization.
+
+        Called by the config layer immediately after
+        :func:`_normalize_npu_target_kwargs` and
+        :meth:`MobilintNPUBackend.from_dict` produced a canonical state from the
+        JSON payload. ``_re_normalize_backend_state`` diffs the backend's later
+        state against this snapshot to identify which fields HF setter chains
+        overrode.
+        """
+        self._post_normalize_snapshot = {
+            "dev_no": self.dev_no,
+            "core_mode": self.core_mode,
+            "cores": tuple(self._target_cores_serialized or []),
+            "clusters": tuple(self._target_clusters_serialized or []),
+        }
 
     def check_model_path(self, mxq_path: str) -> str:
         """Resolves the absolute path to an MXQ model file.
@@ -836,7 +879,7 @@ class MobilintNPUBackend:
         serialized = []
         for v in values:
             if isinstance(v, CoreId):
-                serialized.append(f"{fallback_dev}:{v.cluster.value}:{v.core.value}")
+                serialized.append(f"{fallback_dev}:{cluster_to_int(v.cluster)}:{core_to_int(v.core)}")
             elif isinstance(v, str):
                 n_colons = v.count(":")
                 if n_colons == 2:
@@ -901,7 +944,7 @@ class MobilintNPUBackend:
         serialized = []
         for v in values:
             if isinstance(v, Cluster):
-                serialized.append(f"{fallback_dev}:{v.value}")
+                serialized.append(f"{fallback_dev}:{cluster_to_int(v)}")
             elif isinstance(v, bool):
                 raise TypeError(f"Unsupported type: {type(v)}")
             elif isinstance(v, int):

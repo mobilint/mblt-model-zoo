@@ -379,9 +379,16 @@ def test_backend_roundtrip_multi_device_dev_no_stays_list() -> None:
 
 
 def _load_backend(kwargs: dict) -> MobilintNPUBackend:
-    """Normalize ``kwargs`` and return a fresh backend loaded from it."""
+    """Normalize ``kwargs``, load a backend, and record the post-normalize snapshot.
+
+    Mirrors the ``MobilintConfigMixin._ensure_npu_backend`` production path so
+    ``_re_normalize_backend_state`` can compare later setter mutations against
+    a canonical baseline.
+    """
     _normalize_npu_target_kwargs(kwargs)
-    return MobilintNPUBackend.from_dict(dict(kwargs))
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    backend.record_post_normalize_snapshot()
+    return backend
 
 
 def test_re_normalize_scalar_dev_no_override_rebuilds_targets_to_new_device() -> None:
@@ -473,3 +480,216 @@ def test_re_normalize_default_bare_dev_no_leaves_expanded_targets_intact() -> No
         _re_normalize_backend_state(backend)
     assert backend._target_cores_serialized == [f"0:{c}:{k}" for c in (0, 1) for k in range(4)]
     assert not [w for w in recorded if issubclass(w.category, UserWarning)]
+
+
+# ---------------------------------------------------------------------------
+# Codex review regressions: legacy CoreId / Cluster ambiguity, target authority,
+# CLI-layer legacy defaults with list dev_no.
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_coreid_with_list_dev_no_raises_symmetrically() -> None:
+    """``CoreId`` objects lack a device prefix; reject them with a list-valued ``dev_no``."""
+    from qbruntime import Cluster, Core, CoreId
+
+    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_cores
+
+    with pytest.raises(ValueError, match="Legacy CoreId"):
+        _migrate_target_cores(
+            [CoreId(Cluster.Cluster0, Core.Core0)],
+            fallback_dev=0,
+            dev_no_is_list=True,
+        )
+
+
+def test_legacy_cluster_object_with_list_dev_no_raises_symmetrically() -> None:
+    """``Cluster`` objects lack a device prefix; reject them with a list-valued ``dev_no``."""
+    from qbruntime import Cluster
+
+    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_clusters
+
+    with pytest.raises(ValueError, match="Legacy Cluster"):
+        _migrate_target_clusters(
+            [Cluster.Cluster0],
+            fallback_dev=0,
+            dev_no_is_list=True,
+        )
+
+
+def test_legacy_coreid_with_scalar_dev_no_produces_canonical_form() -> None:
+    """Scalar ``dev_no`` prefixes ``CoreId`` objects; canonical output uses integer indices."""
+    from qbruntime import Cluster, Core, CoreId
+
+    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_cores
+
+    result = _migrate_target_cores(
+        [CoreId(Cluster.Cluster0, Core.Core3), CoreId(Cluster.Cluster1, Core.Core0)],
+        fallback_dev=1,
+        dev_no_is_list=False,
+    )
+    assert result == ["1:0:3", "1:1:0"]
+
+
+def test_legacy_cluster_object_with_scalar_dev_no_produces_canonical_form() -> None:
+    """Scalar ``dev_no`` prefixes ``Cluster`` objects; canonical output uses integer indices."""
+    from qbruntime import Cluster
+
+    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_clusters
+
+    result = _migrate_target_clusters(
+        [Cluster.Cluster0, Cluster.Cluster1],
+        fallback_dev=1,
+        dev_no_is_list=False,
+    )
+    assert result == ["1:0", "1:1"]
+
+
+def test_re_normalize_target_override_syncs_dev_no_and_preserves_targets() -> None:
+    """Explicit target override without a matching ``dev_no`` treats the target as authoritative."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    # Simulate ``--vision-target-cores 1:0:0``: target setter fires but the caller
+    # left ``dev_no`` at its default. The canonical target unambiguously specifies
+    # device 1; ``dev_no`` must sync to match instead of clobbering the target.
+    backend.target_cores = ["1:0:0"]
+    with pytest.warns(UserWarning, match="syncing dev_no"):
+        _re_normalize_backend_state(backend)
+    assert backend.dev_no == 1
+    assert backend._target_cores_serialized == ["1:0:0"]
+
+
+def test_re_normalize_target_override_across_multi_device_sets_dev_no_list() -> None:
+    """A canonical multi-device target override syncs ``dev_no`` to the target list."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    backend.target_cores = ["0:0:0", "1:0:0"]
+    with pytest.warns(UserWarning, match="syncing dev_no"):
+        _re_normalize_backend_state(backend)
+    assert backend.dev_no == [0, 1]
+    assert backend._target_cores_serialized == ["0:0:0", "1:0:0"]
+
+
+def test_re_normalize_dev_no_and_target_both_overridden_consistently_passes() -> None:
+    """When ``dev_no`` and targets are both overridden and consistent, neither fires nor mutates."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    backend.dev_no = 1
+    backend.target_cores = ["1:0:0"]
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        _re_normalize_backend_state(backend)
+    assert backend.dev_no == 1
+    assert backend._target_cores_serialized == ["1:0:0"]
+    assert not [w for w in recorded if issubclass(w.category, UserWarning)]
+
+
+def test_re_normalize_dev_no_and_target_both_overridden_inconsistently_raises() -> None:
+    """When both are overridden but disagree, the consistency check inside normalize still raises."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    backend.dev_no = 1
+    backend.target_cores = ["2:0:0"]
+    with pytest.raises(ValueError, match="target device set"):
+        _re_normalize_backend_state(backend)
+
+
+def test_cli_apply_core_mode_suppresses_single_default_for_list_dev_no() -> None:
+    """CLI helper suppresses the ``"0:0"`` single-mode default when ``dev_no`` is a list."""
+    from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import apply_core_mode_model_kwargs
+
+    model_kwargs: dict = {}
+    apply_core_mode_model_kwargs(
+        model_kwargs,
+        "single",
+        dev_no=[0, 1],
+        default_single_target_cores=("0:0",),
+    )
+    assert "target_cores" not in model_kwargs
+    assert model_kwargs["core_mode"] == "single"
+
+
+def test_cli_apply_core_mode_suppresses_global4_default_for_list_dev_no() -> None:
+    """CLI helper suppresses the ``[0]`` global4 cluster default when ``dev_no`` is a list."""
+    from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import apply_core_mode_model_kwargs
+
+    model_kwargs: dict = {}
+    apply_core_mode_model_kwargs(model_kwargs, "global4", dev_no=[0, 1])
+    assert "target_clusters" not in model_kwargs
+    assert model_kwargs["core_mode"] == "global4"
+
+
+def test_cli_apply_core_mode_suppresses_global8_default_for_list_dev_no() -> None:
+    """CLI helper suppresses the ``[0, 1]`` global8 cluster default when ``dev_no`` is a list."""
+    from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import apply_core_mode_model_kwargs
+
+    model_kwargs: dict = {}
+    apply_core_mode_model_kwargs(model_kwargs, "global8", dev_no=[0, 1])
+    assert "target_clusters" not in model_kwargs
+    assert model_kwargs["core_mode"] == "global8"
+
+
+def test_cli_apply_core_mode_still_injects_defaults_for_scalar_dev_no() -> None:
+    """Scalar ``dev_no`` (or ``None``) keeps the legacy defaults so single-device UX is unchanged."""
+    from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import apply_core_mode_model_kwargs
+
+    for scalar_dev_no in (None, 0, 1):
+        for core_mode, default_key, default_value in (
+            ("single", "target_cores", ["0:0"]),
+            ("global4", "target_clusters", [0]),
+            ("global8", "target_clusters", [0, 1]),
+        ):
+            model_kwargs: dict = {}
+            apply_core_mode_model_kwargs(
+                model_kwargs,
+                core_mode,
+                dev_no=scalar_dev_no,
+                default_single_target_cores=("0:0",),
+            )
+            assert model_kwargs.get(default_key) == default_value, (
+                f"expected {default_key}={default_value} for scalar dev_no={scalar_dev_no}, "
+                f"mode={core_mode}; got {model_kwargs}"
+            )
+
+
+def test_cli_apply_subconfig_threads_dev_no_to_each_prefix() -> None:
+    """VLM/EAGLE-3 subconfig helper honors per-prefix ``dev_no`` for default suppression."""
+    from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+        apply_subconfig_core_mode_model_kwargs,
+    )
+
+    model_kwargs: dict = {}
+    apply_subconfig_core_mode_model_kwargs(
+        model_kwargs,
+        ("vision", "text"),
+        "single",
+        base_dev_no=0,
+        subconfig_dev_nos={"vision": 0, "text": [0, 1]},
+        default_single_target_cores=("0:0",),
+    )
+    # vision (scalar dev_no) keeps the default; text (list dev_no) suppresses it.
+    assert model_kwargs.get("vision_target_cores") == ["0:0"]
+    assert "text_target_cores" not in model_kwargs

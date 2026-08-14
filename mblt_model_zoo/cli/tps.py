@@ -518,11 +518,16 @@ def _apply_vlm_core_mode_model_kwargs(
     text_target_cores: list[str] | None = None,
     vision_target_clusters: list[int] | None = None,
     text_target_clusters: list[int] | None = None,
+    dev_no: int | list[int] | None = None,
+    vision_dev_no: int | list[int] | None = None,
+    text_dev_no: int | list[int] | None = None,
 ) -> dict[str, Any]:
     """Apply shared VLM core-mode kwargs to both vision and text sub-configs.
 
     ``vision_*`` and ``text_*`` overrides take precedence over the base values for their prefix,
-    while the base values continue to fill in any subconfig left unspecified.
+    while the base values continue to fill in any subconfig left unspecified. The per-subconfig
+    ``dev_no`` values are threaded down so :func:`apply_core_mode_model_kwargs` can suppress
+    the legacy default target lists when either subconfig receives a list-shaped ``dev_no``.
     """
     return _apply_subconfig_core_mode_model_kwargs_common(
         model_kwargs,
@@ -534,6 +539,8 @@ def _apply_vlm_core_mode_model_kwargs(
         base_target_clusters=target_clusters,
         subconfig_target_clusters={"vision": vision_target_clusters, "text": text_target_clusters},
         default_single_target_cores=default_single_target_cores,
+        base_dev_no=dev_no,
+        subconfig_dev_nos={"vision": vision_dev_no, "text": text_dev_no},
     )
 
 
@@ -746,6 +753,9 @@ def _build_pipeline(
             text_target_cores=subconfig_options.text_target_cores,
             vision_target_clusters=subconfig_options.vision_target_clusters,
             text_target_clusters=subconfig_options.text_target_clusters,
+            dev_no=dev_no,
+            vision_dev_no=subconfig_options.vision_dev_no,
+            text_dev_no=subconfig_options.text_dev_no,
         )
         if subconfig_options.vision_mxq_path:
             model_kwargs["vision_mxq_path"] = subconfig_options.vision_mxq_path
@@ -825,6 +835,7 @@ def _build_pipeline(
                 target_clusters=prefix_target_clusters,
                 default_single_target_cores=default_single_target_cores,
                 prefix=prefix,
+                dev_no=prefix_dev_no,
             )
             if prefix_dev_no is not None:
                 model_kwargs[f"{prefix}_dev_no"] = prefix_dev_no
@@ -836,6 +847,7 @@ def _build_pipeline(
             target_cores=target_cores,
             target_clusters=target_clusters,
             default_single_target_cores=default_single_target_cores,
+            dev_no=dev_no,
         )
         if dev_no is not None:
             model_kwargs["dev_no"] = dev_no

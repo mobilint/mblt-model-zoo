@@ -19,7 +19,12 @@ except ImportError:
         )
 
 from ...utils.core_mode import normalize_core_mode
-from ...utils.npu_backend import _DEFAULT_DEV_NO, MobilintNPUBackend
+from ...utils.npu_backend import (
+    _DEFAULT_DEV_NO,
+    MobilintNPUBackend,
+    cluster_to_int,
+    core_to_int,
+)
 
 # NPU target-field normalization
 # ------------------------------
@@ -52,21 +57,34 @@ def _migrate_target_cores(
         fallback_dev: Device prefix to apply to legacy items when ``dev_no``
             is a scalar.
         dev_no_is_list: ``True`` if the caller passed a list-shaped ``dev_no``.
-            Legacy items are ambiguous in that case and must be rejected.
+            Legacy items (both string-form ``"c:k"`` and ``CoreId`` objects)
+            lack a device prefix and are ambiguous in that case; both are
+            rejected symmetrically.
 
     Returns:
         A list of canonical ``"d:c:k"`` strings.
 
     Raises:
         ValueError: If entries mix legacy and new forms, or if a legacy entry
-            appears with a list-shaped ``dev_no``.
+            (string or :class:`~qbruntime.CoreId`) appears with a list-shaped
+            ``dev_no``.
         TypeError: If an entry is neither ``CoreId`` nor a string.
     """
     result: list[str] = []
     modes: set[str] = set()
     for v in values:
         if isinstance(v, CoreId):
-            result.append(f"{fallback_dev}:{v.cluster.value}:{v.core.value}")
+            # ``CoreId`` carries only cluster + core; the device prefix comes
+            # from ``fallback_dev``. When ``dev_no`` is a list that prefix is
+            # ambiguous, so reject symmetrically with the string ``"c:k"``
+            # branch below.
+            if dev_no_is_list:
+                raise ValueError(
+                    "Legacy CoreId target_cores entry "
+                    f"{cluster_to_int(v.cluster)}:{core_to_int(v.core)} is ambiguous "
+                    "when dev_no is a list; use the fully-qualified 'd:c:k' string form."
+                )
+            result.append(f"{fallback_dev}:{cluster_to_int(v.cluster)}:{core_to_int(v.core)}")
             modes.add("legacy")
             continue
         if not isinstance(v, str):
@@ -106,21 +124,34 @@ def _migrate_target_clusters(
         fallback_dev: Device prefix to apply to legacy items when ``dev_no``
             is a scalar.
         dev_no_is_list: ``True`` if the caller passed a list-shaped ``dev_no``.
-            Legacy items are ambiguous in that case and must be rejected.
+            Legacy items (``Cluster`` objects, bare ints, and bare ``"c"``
+            strings) lack a device prefix and are ambiguous in that case;
+            they are all rejected symmetrically.
 
     Returns:
         A list of canonical ``"d:c"`` strings.
 
     Raises:
         ValueError: If entries mix legacy and new forms, or if a legacy entry
-            appears with a list-shaped ``dev_no``.
+            (``Cluster``, ``int``, or bare ``"c"`` string) appears with a
+            list-shaped ``dev_no``.
         TypeError: If an entry is neither ``Cluster``, ``int``, nor a string.
     """
     result: list[str] = []
     modes: set[str] = set()
     for v in values:
         if isinstance(v, Cluster):
-            result.append(f"{fallback_dev}:{v.value}")
+            # ``Cluster`` carries only the cluster index; the device prefix
+            # comes from ``fallback_dev``. Reject symmetrically with the
+            # ``int`` and bare-``"c"`` branches below when ``dev_no`` is a
+            # list.
+            if dev_no_is_list:
+                raise ValueError(
+                    f"Legacy Cluster target_clusters entry {cluster_to_int(v)} is "
+                    "ambiguous when dev_no is a list; use the fully-qualified 'd:c' "
+                    "string form."
+                )
+            result.append(f"{fallback_dev}:{cluster_to_int(v)}")
             modes.add("legacy")
             continue
         if isinstance(v, bool):
@@ -327,16 +358,28 @@ def _re_normalize_backend_state(backend: MobilintNPUBackend, prefix: str = "") -
     ``core_mode``, ``target_cores``, ``target_clusters``) only update the
     backend attribute they are named after — they do not re-run the target
     expansion or grain fold/unfold. As a result an override like
-    ``--dev-no 1`` (or the VLM ``--text-dev-no 1`` path) silently leaves
-    ``_target_cores_serialized`` pointing at the JSON's original device, and
-    slot dispatch runs against the stale target set.
+    ``--dev-no 1`` (or the VLM ``--text-target-cores 1:0:0`` path) silently
+    leaves the sibling fields pointing at the JSON's original device, and
+    slot dispatch runs against a stale target set.
 
-    This helper rebuilds ``kwargs`` from the backend's current attribute
-    state, detects target vs ``dev_no`` device-set divergence (assumed to be
-    caused by a ``dev_no`` override with stale targets), clears the stale
-    targets in that case, and re-runs :func:`_normalize_npu_target_kwargs`.
-    The resulting canonical ``target_cores`` / ``target_clusters`` are
-    written back onto the backend so ``create()`` sees the caller's intent.
+    The correct resolution depends on *which* field the caller actually
+    overrode:
+
+    * When ``dev_no`` was overridden but the targets came from the JSON
+      snapshot, the stale targets must be cleared so
+      :func:`_normalize_npu_target_kwargs` re-expands them from the new
+      ``dev_no`` sugar.
+    * When ``target_cores`` / ``target_clusters`` were overridden with
+      fully-qualified canonical strings (which unambiguously encode the
+      device set), the targets are authoritative; the stale ``dev_no`` is
+      synced to the target device set instead.
+    * When both were overridden, the caller's intent is consistent so long
+      as the device sets match; the standard consistency check inside
+      :func:`_normalize_npu_target_kwargs` still catches genuine mismatches.
+
+    :meth:`MobilintNPUBackend.record_post_normalize_snapshot` recorded the
+    canonical state produced from the JSON payload, so this helper can tell
+    exactly which fields changed rather than guessing.
 
     Grain mismatches (``core_mode`` change turning a core list into a
     cluster mode, or vice versa) do not need special handling — the
@@ -348,37 +391,69 @@ def _re_normalize_backend_state(backend: MobilintNPUBackend, prefix: str = "") -
         prefix: Optional prefix scoping the NPU keys inside the temporary
             kwargs dict. Empty for the default backend.
     """
+    snapshot = getattr(backend, "_post_normalize_snapshot", None) or {}
+    snapshot_dev_no = snapshot.get("dev_no")
+    snapshot_cores = tuple(snapshot.get("cores") or ())
+    snapshot_clusters = tuple(snapshot.get("clusters") or ())
+
+    current_cores = tuple(getattr(backend, "_target_cores_serialized", None) or ())
+    current_clusters = tuple(getattr(backend, "_target_clusters_serialized", None) or ())
+
+    dev_no_overridden = snapshot and snapshot_dev_no != backend.dev_no
+    targets_overridden = snapshot and (
+        current_cores != snapshot_cores or current_clusters != snapshot_clusters
+    )
+
+    cores: list[str] = list(current_cores)
+    clusters: list[str] = list(current_clusters)
+
+    if targets_overridden and not dev_no_overridden and (cores or clusters):
+        # Canonical target strings carry the device prefix and are the
+        # authoritative source of truth. Sync ``dev_no`` to their device
+        # set rather than clobbering the caller's explicit targets. This
+        # is the ``--vision-target-cores 1:0:0`` case: the JSON's
+        # ``dev_no=0`` is stale, not overriding intent.
+        target_devs = sorted(_devices_from_targets(cores, clusters))
+        if target_devs:
+            new_dev_no: Union[int, list[int]] = (
+                target_devs if len(target_devs) > 1 else target_devs[0]
+            )
+            if new_dev_no != backend.dev_no:
+                warnings.warn(
+                    f"NPU backend dev_no {backend.dev_no!r} diverged from the "
+                    f"overridden target device set {target_devs}; syncing dev_no "
+                    "to match the targets. Set dev_no explicitly if you meant "
+                    "to override the device instead of the targets.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                backend.dev_no = new_dev_no
+    elif dev_no_overridden and not targets_overridden:
+        # ``dev_no`` override with stale targets from the JSON snapshot.
+        # Drop the targets so the sugar expansion path re-expands them for
+        # the new device set. This is the ``--dev-no 1`` case.
+        current_dev_list = set(_normalize_dev_list(backend.dev_no))
+        target_devs = _devices_from_targets(cores, clusters)
+        if target_devs and target_devs != current_dev_list:
+            warnings.warn(
+                f"NPU backend targets covered devices {sorted(target_devs)} but dev_no is "
+                f"{sorted(current_dev_list)}; rebuilding targets from dev_no. If you "
+                "intended to keep the explicit targets, set dev_no to match the target "
+                "device set.",
+                UserWarning,
+                stacklevel=3,
+            )
+            cores = []
+            clusters = []
+    # When both were overridden, keep both as-is; ``_normalize_npu_target_kwargs``'s
+    # own consistency check raises on genuine mismatches. When neither was
+    # overridden, we still run normalize below (harmlessly idempotent) so
+    # any core_mode change is reconciled.
+
     kwargs: dict[str, Any] = {
         f"{prefix}dev_no": backend.dev_no,
         f"{prefix}core_mode": backend.core_mode,
     }
-    cores = list(getattr(backend, "_target_cores_serialized", None) or [])
-    clusters = list(getattr(backend, "_target_clusters_serialized", None) or [])
-
-    dev_list = set(_normalize_dev_list(backend.dev_no))
-    target_devs: set[int] = set()
-    for entry in cores + clusters:
-        if isinstance(entry, str) and ":" in entry:
-            try:
-                target_devs.add(int(entry.split(":", 1)[0]))
-            except ValueError:
-                continue
-    if target_devs and target_devs != dev_list:
-        # ``dev_no`` override diverged from the stale target list. Drop the
-        # targets so the sugar expansion path inside
-        # ``_normalize_npu_target_kwargs`` re-expands them to the new device
-        # set. Callers that meant to keep explicit targets on a different
-        # device must also set ``dev_no`` to match.
-        warnings.warn(
-            f"NPU backend targets covered devices {sorted(target_devs)} but dev_no is "
-            f"{sorted(dev_list)}; rebuilding targets from dev_no. If you intended to keep "
-            "the explicit targets, set dev_no to match the target device set.",
-            UserWarning,
-            stacklevel=3,
-        )
-        cores = []
-        clusters = []
-
     if cores:
         kwargs[f"{prefix}target_cores"] = cores
     if clusters:
@@ -388,6 +463,12 @@ def _re_normalize_backend_state(backend: MobilintNPUBackend, prefix: str = "") -
 
     backend._target_cores_serialized = list(kwargs.get(f"{prefix}target_cores", []))
     backend._target_clusters_serialized = list(kwargs.get(f"{prefix}target_clusters", []))
+    # Refresh the snapshot so subsequent overrides continue to be diffable
+    # relative to a canonical baseline. Without this, a legitimate second
+    # re-normalize (e.g. VLM sub-configs both traversed) would see the
+    # earlier setter changes as "not overridden" and lose the divergence
+    # signal.
+    backend.record_post_normalize_snapshot()
 
 
 class MobilintConfigMixin(PretrainedConfig):
@@ -434,6 +515,10 @@ class MobilintConfigMixin(PretrainedConfig):
         if not hasattr(self, "npu_backend"):
             _normalize_npu_target_kwargs(kwargs, prefix="")
             self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
+            # Record the canonical state so a later ``_re_normalize_backend_state``
+            # can pinpoint which fields HF ``from_pretrained`` setattr'd on top
+            # of the JSON payload.
+            self.npu_backend.record_post_normalize_snapshot()
 
     def __init__(self, *args, **kwargs):
         self._ensure_npu_backend(kwargs)
@@ -536,10 +621,12 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
         if not hasattr(self, "encoder_npu_backend"):
             _normalize_npu_target_kwargs(kwargs, prefix="encoder_")
             self.encoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="encoder_")
+            self.encoder_npu_backend.record_post_normalize_snapshot()
 
         if not hasattr(self, "decoder_npu_backend"):
             _normalize_npu_target_kwargs(kwargs, prefix="decoder_")
             self.decoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="decoder_")
+            self.decoder_npu_backend.record_post_normalize_snapshot()
 
     def __init__(self, **kwargs):
         self._ensure_encoder_decoder_npu_backends(kwargs)
@@ -939,14 +1026,17 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
             base_kwargs = _resolve_backend_kwargs("base_")
             _normalize_npu_target_kwargs(base_kwargs, prefix="base_")
             self.base_npu_backend = MobilintNPUBackend.from_dict(base_kwargs, prefix="base_")
+            self.base_npu_backend.record_post_normalize_snapshot()
         if not hasattr(self, "draft_npu_backend"):
             draft_kwargs = _resolve_backend_kwargs("draft_")
             _normalize_npu_target_kwargs(draft_kwargs, prefix="draft_")
             self.draft_npu_backend = MobilintNPUBackend.from_dict(draft_kwargs, prefix="draft_")
+            self.draft_npu_backend.record_post_normalize_snapshot()
         if not hasattr(self, "fc_npu_backend"):
             fc_kwargs = _resolve_backend_kwargs("fc_")
             _normalize_npu_target_kwargs(fc_kwargs, prefix="fc_")
             self.fc_npu_backend = MobilintNPUBackend.from_dict(fc_kwargs, prefix="fc_")
+            self.fc_npu_backend.record_post_normalize_snapshot()
 
     def _ensure_eagle3_runtime_fields(self, kwargs: dict[str, Any]) -> None:
         for field_name, default_value, _annotation in self._EAGLE3_RUNTIME_FIELDS:
