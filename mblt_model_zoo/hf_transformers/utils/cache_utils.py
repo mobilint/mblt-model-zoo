@@ -3,7 +3,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Type, Union
 
 import qbruntime
 import torch
@@ -314,6 +314,108 @@ class MobilintCache(Cache):
         for i in range(len(self.layers)):
             copied.layers[i] = self.layers[i].copy()
         return copied
+
+
+def _resolve_language_model_candidate(model: Any) -> Optional[Any]:
+    """Return the nested language model commonly used by VLM wrappers."""
+    nested_model = getattr(model, "model", None)
+    if nested_model is not None:
+        language_model = getattr(nested_model, "language_model", None)
+        if language_model is not None:
+            return language_model
+    return getattr(model, "language_model", None)
+
+
+def _call_maybe_getter(obj: Any, name: str) -> Optional[Any]:
+    """Return an attribute value, calling it when it is a zero-argument getter."""
+    candidate = getattr(obj, name, None)
+    if candidate is None:
+        return None
+    if callable(candidate):
+        try:
+            return candidate()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None
+    return candidate
+
+
+def resolve_multi_slot_backend(model: Any) -> Optional[Any]:
+    """Return the Mobilint NPU backend that hosts one or more Model slots for ``model``.
+
+    Walks ``model`` and its nested language model (the two shapes current VLM
+    wrappers use — ``model.language_model`` and ``model.model.language_model``)
+    looking for an ``npu_backend`` that exposes a non-empty ``mxq_models``
+    list. Returns ``None`` for models that do not expose a Mobilint backend
+    (e.g. unit-test stubs that only carry a bare ``get_cache_mxq_model``).
+    """
+    for candidate in (model, _resolve_language_model_candidate(model)):
+        if candidate is None:
+            continue
+        backend = getattr(candidate, "npu_backend", None)
+        if backend is None:
+            continue
+        if getattr(backend, "mxq_models", None):
+            return backend
+    return None
+
+
+def resolve_cache_mxq_model(model: Any) -> Optional[qbruntime.Model]:
+    """Return the single ``qbruntime.Model`` used by the legacy cache path.
+
+    Falls back through ``get_cache_mxq_model``, then ``get_mxq_model`` on both
+    ``model`` and its nested language model, so wrappers that override
+    ``get_cache_mxq_model`` to delegate into ``language_model`` continue to work.
+    """
+    for candidate in (model, _resolve_language_model_candidate(model)):
+        if candidate is None:
+            continue
+        for getter_name in ("get_cache_mxq_model", "get_mxq_model"):
+            mxq_model = _call_maybe_getter(candidate, getter_name)
+            if mxq_model is not None:
+                return mxq_model
+    return None
+
+
+def build_mobilint_cache_from_model(
+    model: Any,
+    batch_size: int,
+    *,
+    cache_cls: Type[MobilintCache] = MobilintCache,
+    **cache_kwargs: Any,
+) -> MobilintCache:
+    """Build a Mobilint cache routed across every ``qbruntime.Model`` slot the backend hosts.
+
+    Uses the multi-slot ``cache_cls(mxq_models, per_model_batch=K)`` signature
+    when the model exposes a multi-slot :class:`MobilintNPUBackend`, so
+    :meth:`MobilintCache.slot_of` routes each flat row to its owning Model.
+    Falls back to ``cache_cls(mxq_model, batch_size=batch_size)`` when the
+    backend cannot be resolved (unit-test stubs and single-Model wrappers
+    without a discoverable backend).
+
+    Growing beyond ``n_models * k_per_model`` is only supported on the legacy
+    single-Model hardware-batch path (``ensure_batch_size`` raises otherwise);
+    multi-slot caches must be sized upfront by the backend.
+    """
+    backend = resolve_multi_slot_backend(model)
+    if backend is None:
+        mxq_model = resolve_cache_mxq_model(model)
+        if mxq_model is None:
+            raise RuntimeError(
+                "Cannot build MobilintCache: no Mobilint NPU backend or "
+                "get_cache_mxq_model resolver on this model."
+            )
+        return cache_cls(mxq_model, batch_size=batch_size, **cache_kwargs)
+
+    mxq_models = list(getattr(backend, "mxq_models", []) or [])
+    if not mxq_models:
+        raise RuntimeError("Mobilint NPU backend has no loaded Model slots.")
+    k_per_model = int(getattr(backend, "k_per_model", 1) or 1)
+    cache = cache_cls(mxq_models, per_model_batch=k_per_model, **cache_kwargs)
+    if batch_size > cache.batch_size:
+        # ensure_batch_size raises for multi-Model caches (N > 1); the legacy
+        # single-Model path can still grow here.
+        cache.ensure_batch_size(batch_size)
+    return cache
 
 
 class MobilintBeamCache(MobilintCache):

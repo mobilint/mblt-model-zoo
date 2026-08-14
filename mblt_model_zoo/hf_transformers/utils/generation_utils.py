@@ -13,7 +13,11 @@ from transformers.generation.utils import GenerateDecoderOnlyOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.utils import logging
 
-from ..utils.cache_utils import MobilintCache, MobilintEagle3Cache
+from ..utils.cache_utils import (
+    MobilintCache,
+    MobilintEagle3Cache,
+    build_mobilint_cache_from_model,
+)
 from ..utils.modeling_utils import MobilintModelMixin
 
 logger = logging.get_logger(__name__)
@@ -425,11 +429,15 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
     # args contain device and model_kwargs in transformers<4.56.0
     # args contain only model_kwargs in transformers>=4.56.0
     def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintCache:
-        configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
+        # Prefer the backend-declared aggregate capacity (``N * K``) so a
+        # multi-slot backend routes each logical row to its owning Model.
+        # The legacy single-Model path still honors ``config.max_batch_size``
+        # as a hardware-batch growth request.
+        configured_batch_size = max(1, int(getattr(self.config, "max_batch_size", 1)))
         if not isinstance(getattr(self, "_cache", None), MobilintCache):
-            self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
-        elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
-            self._cache = MobilintCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+            self._cache = build_mobilint_cache_from_model(self, configured_batch_size)
+        elif getattr(self._cache, "batch_size", 1) < configured_batch_size:
+            self._cache = build_mobilint_cache_from_model(self, configured_batch_size)
         else:
             self._cache.reset()
 

@@ -9,7 +9,7 @@ import torch
 from tqdm.auto import tqdm
 from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
 
-from .cache_utils import MobilintCache
+from .cache_utils import MobilintCache, build_mobilint_cache_from_model
 
 _NS_PER_SECOND = 1_000_000_000
 _SAMPLING_GENERATION_FLAGS = ("temperature", "top_p", "top_k")
@@ -318,37 +318,10 @@ def _resolve_multi_slot_backend(model: object) -> object | None:
 def _build_batched_mobilint_cache(model: object, batch_size: int) -> MobilintCache:
     """Build a ``MobilintCache`` sized to route ``batch_size`` rows across every backend slot.
 
-    Uses the multi-slot ``MobilintCache([m0, m1, ...], per_model_batch=K)``
-    signature when the backend exposes ``mxq_models`` so ``slot_of`` routes
-    each flat row to its owning ``qbruntime.Model``. Falls back to the
-    legacy single-Model constructor only when the backend cannot be
-    resolved (e.g. non-NPU models in unit tests).
-
-    Growing beyond ``n_models * k_per_model`` is only supported on the
-    legacy single-slot hardware-batch path; the underlying
-    :meth:`MobilintCache.ensure_batch_size` enforces that invariant.
+    Thin wrapper around :func:`build_mobilint_cache_from_model` retained so
+    benchmark_utils callers keep a stable local entry point.
     """
-    backend = _resolve_multi_slot_backend(model)
-    if backend is None:
-        mxq_model = _get_cache_mxq_model(model)
-        if mxq_model is None:
-            raise RuntimeError(
-                "Cannot build MobilintCache: no Mobilint NPU backend on this model."
-            )
-        cache = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
-        return cache
-
-    mxq_models = list(getattr(backend, "mxq_models", []) or [])
-    if not mxq_models:
-        raise RuntimeError("Mobilint NPU backend has no loaded Model slots.")
-    k_per_model = int(getattr(backend, "k_per_model", 1) or 1)
-    cache = MobilintCache(mxq_models, per_model_batch=k_per_model)
-    if batch_size > cache.batch_size:
-        # Only the single-Model legacy path can grow beyond aggregate capacity.
-        # ``ensure_batch_size`` raises for multi-Model caches, which is the
-        # correct behavior — the backend must be sized upfront in that case.
-        cache.ensure_batch_size(batch_size)
-    return cache
+    return build_mobilint_cache_from_model(model, batch_size)
 
 
 def _is_eagle3_model(model: object) -> bool:
