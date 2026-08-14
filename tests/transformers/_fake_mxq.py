@@ -53,7 +53,9 @@ class StaticLastOnlyMxq:
         active_batch = len(batch_params)
         payload = np.stack(
             [
-                np.full((self.vocab_size,), fill_value=float(p.cache_id * 100 + self._batched_counter), dtype=np.float32)
+                np.full(
+                    (self.vocab_size,), fill_value=float(p.cache_id * 100 + self._batched_counter), dtype=np.float32
+                )
                 for p in batch_params
             ],
             axis=0,
@@ -92,16 +94,12 @@ class DynamicAxisMxq:
             chunk_len = int(chunk.shape[2])
             offset = int(cache_size) * self.vocab_size
             values = np.arange(chunk_len * self.vocab_size, dtype=np.float32) + offset
-            self.calls.append(
-                {"shape": tuple(chunk.shape), "cache_size": int(cache_size), "chunk_len": chunk_len}
-            )
+            self.calls.append({"shape": tuple(chunk.shape), "cache_size": int(cache_size), "chunk_len": chunk_len})
             return [values.reshape(1, chunk_len, self.vocab_size)]
 
         self._batched_counter += 1
         total_tokens = sum(int(p.sequence_length) for p in batch_params)
-        flat = np.arange(total_tokens * self.vocab_size, dtype=np.float32).reshape(
-            total_tokens, self.vocab_size
-        )
+        flat = np.arange(total_tokens * self.vocab_size, dtype=np.float32).reshape(total_tokens, self.vocab_size)
         # Encode per-item id into the payload so batched tests can spot mixups.
         offset = 0
         for p in batch_params:
@@ -119,6 +117,10 @@ class DynamicAxisMxq:
 class FakeBackend:
     def __init__(self, mxq_model):
         self.mxq_model = mxq_model
+        # ``_llm_forward_batch`` uses ``npu_backend.mxq_models`` for
+        # per-group dispatch; single-Model fakes still land on the
+        # single-group fast path.
+        self.mxq_models = [mxq_model]
 
 
 def make_model(mxq, *, max_batch_size: int = 1) -> MobilintModelMixin:

@@ -267,7 +267,8 @@ def test_llm_forward_counts_single_token_first_call_as_prefill() -> None:
             return [np.zeros((1, inputs[0].shape[2], 4), dtype=np.float32)]
 
     model = MobilintModelMixin.__new__(MobilintModelMixin)
-    model.npu_backend = SimpleNamespace(mxq_model=_DummyMxq())
+    dummy_mxq = _DummyMxq()
+    model.npu_backend = SimpleNamespace(mxq_model=dummy_mxq, mxq_models=[dummy_mxq])
     model.config = SimpleNamespace(npu_prefill_chunk_size=None)
     model.npu_time = None
     model.logged_phases = []

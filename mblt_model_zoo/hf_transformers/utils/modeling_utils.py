@@ -3,6 +3,7 @@ import math
 import os
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional, Union, cast
 
 import numpy as np
@@ -497,7 +498,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     ):
         input_numpy = input.type(torch.float32).cpu().numpy()
 
-        result = self.npu_backend.mxq_model.infer([input_numpy])
+        result = self.npu_backend.mxq_models[0].infer([input_numpy])
         assert result is not None, "mxq infer result is None!"
 
         output = torch.tensor(result[0], dtype=input.dtype, device=input.device)
@@ -728,7 +729,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
         seq_len = inputs_embeds_numpy.shape[2]
-        mxq_model = self.npu_backend.mxq_model
+        mxq_model = self.npu_backend.mxq_models[0]
         initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
         timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
 
@@ -924,9 +925,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             )
 
         max_sequence_length = max(sequence_lengths)
-        mxq_model = self.npu_backend.mxq_model
+        mxq_models = self.npu_backend.mxq_models
+        # Slot 0 is used for backend probes and as the single-group fast path;
+        # per-group dispatch inside ``_run_batch_infer`` selects
+        # ``mxq_models[model_idx]`` based on the owning cache slot.
         if npu_prefill_chunk_size == 0:
-            npu_prefill_chunk_size = mxq_model.get_input_buffer_info()[0].max_width
+            npu_prefill_chunk_size = mxq_models[0].get_input_buffer_info()[0].max_width
         assert npu_prefill_chunk_size > 0, (
             "npu_prefill_chunk_size should be a positive number! npu_prefill_chunk_size: %d" % npu_prefill_chunk_size
         )
@@ -993,52 +997,230 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             *,
             chunk_start: int = 0,
         ) -> tuple[np.ndarray, tuple[int, ...]]:
-            inputs_embeds_concat_l = torch.concat(inputs_embeds_chunks_l, dim=0).unsqueeze(0)
-            inputs_embeds_numpy_l: np.ndarray = inputs_embeds_concat_l.type(torch.float32).cpu().numpy()
-            if self._batched_input_expand_dims and inputs_embeds_numpy_l.ndim == 3:
-                inputs_embeds_numpy_l = np.expand_dims(inputs_embeds_numpy_l, 1)
-            infer_inputs_l: list[np.ndarray] = [inputs_embeds_numpy_l]
-            if pack_extra_inputs is not None:
-                # Hook for multi-input decoders (e.g. Qwen3-VL deepstack). The
-                # callback receives the same window info as _assemble_batch_chunk
-                # emitted so it can slice per-item side inputs the same way.
-                extras = pack_extra_inputs(
-                    chunk_start=chunk_start,
-                    sequence_lengths_chunks=sequence_lengths_chunks_l,
-                    cache_ids=cache_ids_l,
-                )
-                infer_inputs_l.extend(extras)
-            batch_params_l = [
-                qbruntime.BatchParam(
-                    sequence_length=sequence_lengths_chunks_l[k],
-                    cache_size=cache_sizes_chunks_l[k],
-                    cache_id=cache_ids_l[k],
-                )
-                for k in range(len(cache_ids_l))
-            ]
-            if count_npu_time:
-                t0 = time.perf_counter()
-                result_l = mxq_model.infer(infer_inputs_l, None, 0, batch_params_l)
-                assert self.npu_time is not None
-                elapsed = time.perf_counter() - t0
-                self.npu_time += elapsed
-                # Path 3 fallback advances a shared cursor across the batch, so its
-                # chunk=1 capture calls run at cursor > 0 with all cache_sizes > 0 —
-                # but the auto-heuristic below latches on max_sequence_length (the
-                # batch-wide max, not the current chunk size) and would misclassify
-                # every one of those captures as 'prefill'. Path 3 passes an
-                # explicit phase_override to keep decode_time accurate; Path 1 and
+            n_backend_slots = len(mxq_models)
+            # Multi-slot dispatch requires a MobilintCache so ``slot_of`` can
+            # route each flat row to its owning Model. Absent a cache we
+            # retain the pre-refactor single-slot semantics — the row index
+            # is passed straight through as ``BatchParam.cache_id`` on slot 0
+            # (which is what the compat property did).
+            can_multi_dispatch = (
+                n_backend_slots > 1
+                and past_key_values is not None
+                and hasattr(past_key_values, "slot_of")
+            )
+
+            if not can_multi_dispatch:
+                groups: list[tuple[int, list[int], list[int]]] = [
+                    (0, list(range(len(cache_ids_l))), list(cache_ids_l))
+                ]
+            else:
+                buckets: dict[int, list[tuple[int, int]]] = {}
+                for k, flat_row in enumerate(cache_ids_l):
+                    model_idx, local_cache_id = past_key_values.slot_of(int(flat_row))
+                    buckets.setdefault(model_idx, []).append((k, local_cache_id))
+                groups = [
+                    (
+                        m,
+                        [entry[0] for entry in buckets[m]],
+                        [entry[1] for entry in buckets[m]],
+                    )
+                    for m in sorted(buckets.keys())
+                ]
+
+            def _classify_phase() -> Literal["prefill", "decode"]:
+                # Path 3 fallback advances a shared cursor across the batch, so
+                # its chunk=1 capture calls run at cursor > 0 with all
+                # cache_sizes > 0 — but the auto-heuristic latches on
+                # max_sequence_length (the batch-wide max, not the current
+                # chunk size) and would misclassify every one of those
+                # captures as 'prefill'. Path 3 passes an explicit
+                # phase_override to keep decode_time accurate; Path 1 and
                 # Path 2 leave it None and get the auto-heuristic.
-                phase: Literal["prefill", "decode"] = phase_override or (
+                return (
                     "prefill"
-                    if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks_l)
+                    if max_sequence_length > 1
+                    or any(cs == 0 for cs in cache_sizes_chunks_l)
                     else "decode"
                 )
-                self._record_npu_timing(phase, elapsed)
-            else:
-                result_l = mxq_model.infer(infer_inputs_l, None, 0, batch_params_l)
-            assert result_l is not None, "mxq infer result is None!"
-            return result_l[0], inputs_embeds_numpy_l.shape
+
+            def _build_group_payload(
+                group_items: list[int],
+                group_local_ids: list[int],
+            ) -> tuple[tuple[int, ...], list[np.ndarray], list[qbruntime.BatchParam], list[int]]:
+                g_orig_ids = [cache_ids_l[k] for k in group_items]
+                g_seq_lens = [sequence_lengths_chunks_l[k] for k in group_items]
+                g_cache_sizes = [cache_sizes_chunks_l[k] for k in group_items]
+                g_embeds = [inputs_embeds_chunks_l[k] for k in group_items]
+                inputs_embeds_concat = torch.concat(g_embeds, dim=0).unsqueeze(0)
+                inputs_embeds_numpy = inputs_embeds_concat.type(torch.float32).cpu().numpy()
+                if self._batched_input_expand_dims and inputs_embeds_numpy.ndim == 3:
+                    inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
+                infer_inputs: list[np.ndarray] = [inputs_embeds_numpy]
+                if pack_extra_inputs is not None:
+                    # Hook for multi-input decoders (e.g. Qwen3-VL deepstack).
+                    # ``cache_ids`` here is the caller's flat-row list so the
+                    # extras hook can slice per-item side inputs (rope,
+                    # deepstack) even after we route to different Model slots.
+                    extras = pack_extra_inputs(
+                        chunk_start=chunk_start,
+                        sequence_lengths_chunks=g_seq_lens,
+                        cache_ids=g_orig_ids,
+                    )
+                    infer_inputs.extend(extras)
+                # BatchParam.cache_id is the LOCAL slot id inside the target
+                # Model (0..k_per_model-1), not the flat batch row.
+                batch_params = [
+                    qbruntime.BatchParam(
+                        sequence_length=g_seq_lens[k],
+                        cache_size=g_cache_sizes[k],
+                        cache_id=group_local_ids[k],
+                    )
+                    for k in range(len(group_items))
+                ]
+                return inputs_embeds_numpy.shape, infer_inputs, batch_params, g_seq_lens
+
+            def _merge_group_outputs(
+                group_raw: list[np.ndarray],
+                group_seq_lens: list[list[int]],
+            ) -> np.ndarray:
+                # Layout detection from the first non-empty group. The
+                # compiled MXQ is identical across slots, so every group emits
+                # the same layout — we only inspect one to decide.
+                first_idx = -1
+                for i, arr in enumerate(group_raw):
+                    if arr.size > 0:
+                        first_idx = i
+                        break
+                assert first_idx >= 0, "every group returned an empty output"
+                first_arr = group_raw[first_idx]
+                vocab = int(first_arr.shape[-1])
+                first_rows = first_arr.size // vocab
+                first_n_items = len(groups[first_idx][1])
+                first_n_tokens = sum(group_seq_lens[first_idx])
+                if first_rows == first_n_items and first_rows != first_n_tokens:
+                    layout_b = False
+                elif first_rows == first_n_tokens and first_rows != first_n_items:
+                    layout_b = True
+                elif first_rows == first_n_items == first_n_tokens:
+                    # Decode step (all seq_len == 1) — both layouts coincide.
+                    layout_b = False
+                else:
+                    raise RuntimeError(
+                        f"Unexpected group MXQ output row count {first_rows} "
+                        f"(vocab={vocab}) for active={first_n_items}, "
+                        f"total_tokens={first_n_tokens}"
+                    )
+
+                n_items = len(cache_ids_l)
+                if not layout_b:
+                    merged_a = np.empty((n_items, vocab), dtype=first_arr.dtype)
+                    for gi, (_m, group_items, _g_local_ids) in enumerate(groups):
+                        g_flat = group_raw[gi].reshape(-1, vocab)
+                        for r, item_idx in enumerate(group_items):
+                            merged_a[item_idx] = g_flat[r]
+                    return merged_a
+                total_tokens = sum(sequence_lengths_chunks_l)
+                offsets = [0] * n_items
+                running = 0
+                for k in range(n_items):
+                    offsets[k] = running
+                    running += sequence_lengths_chunks_l[k]
+                merged_b = np.empty((total_tokens, vocab), dtype=first_arr.dtype)
+                for gi, (_m, group_items, _g_local_ids) in enumerate(groups):
+                    g_flat = group_raw[gi].reshape(-1, vocab)
+                    g_off = 0
+                    for item_idx in group_items:
+                        len_k = sequence_lengths_chunks_l[item_idx]
+                        merged_b[offsets[item_idx] : offsets[item_idx] + len_k] = (
+                            g_flat[g_off : g_off + len_k]
+                        )
+                        g_off += len_k
+                return merged_b
+
+            # Single-group fast path: preserve pre-refactor behavior verbatim
+            # (one blocking infer call, no thread pool overhead). This covers
+            # both N==1 backends and multi-slot backends whose batch happens
+            # to land on one Model.
+            if len(groups) == 1:
+                m_idx, group_items, group_local_ids = groups[0]
+                input_shape, infer_inputs, batch_params, _g_seq_lens = _build_group_payload(
+                    group_items, group_local_ids
+                )
+                if count_npu_time:
+                    t0 = time.perf_counter()
+                    result = mxq_models[m_idx].infer(infer_inputs, None, 0, batch_params)
+                    elapsed = time.perf_counter() - t0
+                    assert self.npu_time is not None
+                    self.npu_time += elapsed
+                    phase: Literal["prefill", "decode"] = phase_override or _classify_phase()
+                    self._record_npu_timing(phase, elapsed)
+                else:
+                    result = mxq_models[m_idx].infer(infer_inputs, None, 0, batch_params)
+                assert result is not None, "mxq infer result is None!"
+                return result[0], input_shape
+
+            # Multi-group parallel dispatch: one blocking ``.infer`` per Model
+            # slot dispatched from its own thread. ``qbruntime.Model.infer``
+            # releases the GIL for the duration of the NPU call (see
+            # ``scripts/probe_multi_model_parallel.py``), so wall time drops
+            # to roughly ``max(group_elapsed)`` on independent slots.
+            per_group_payload: list[
+                tuple[tuple[int, ...], list[np.ndarray], list[qbruntime.BatchParam], list[int]]
+            ] = [_build_group_payload(g[1], g[2]) for g in groups]
+
+            group_raw: list[Optional[np.ndarray]] = [None] * len(groups)
+            group_elapsed: list[float] = [0.0] * len(groups)
+
+            def _dispatch(gi: int) -> None:
+                m_idx = groups[gi][0]
+                _shape, infer_inputs, batch_params, _seq_lens = per_group_payload[gi]
+                t0 = time.perf_counter()
+                result = mxq_models[m_idx].infer(infer_inputs, None, 0, batch_params)
+                group_elapsed[gi] = time.perf_counter() - t0
+                assert result is not None, "mxq infer result is None!"
+                group_raw[gi] = np.asarray(result[0])
+
+            t_wall_0 = time.perf_counter()
+            with ThreadPoolExecutor(max_workers=len(groups)) as executor:
+                futures = [executor.submit(_dispatch, gi) for gi in range(len(groups))]
+                for f in futures:
+                    # ``.result()`` re-raises worker exceptions here so the
+                    # caller sees the underlying qbruntime error rather than
+                    # a silently-missing group_raw slot.
+                    f.result()
+            wall_elapsed = time.perf_counter() - t_wall_0
+
+            if count_npu_time:
+                assert self.npu_time is not None
+                # Aggregate the wall time (not the sum of group times):
+                # parallel work on independent slots overlaps, and doubling
+                # it would inflate TPS-facing counters.
+                self.npu_time += wall_elapsed
+                phase = phase_override or _classify_phase()
+                self._record_npu_timing(phase, wall_elapsed)
+
+            if debug_enabled:
+                logger.debug(
+                    "[BATCH-LLM][PARALLEL] n_groups=%d wall=%.6fs group_elapsed=%s "
+                    "model_indices=%s group_item_counts=%s",
+                    len(groups),
+                    wall_elapsed,
+                    [f"{e:.6f}" for e in group_elapsed],
+                    [g[0] for g in groups],
+                    [len(g[1]) for g in groups],
+                )
+
+            group_raw_arrs: list[np.ndarray] = [
+                cast(np.ndarray, arr) for arr in group_raw
+            ]
+            group_seq_lens: list[list[int]] = [payload[3] for payload in per_group_payload]
+            merged = _merge_group_outputs(group_raw_arrs, group_seq_lens)
+
+            # ``inputs_embeds_numpy_l.shape`` was previously used only for
+            # debug logging in Path 1. Return the first group's shape so the
+            # debug lines keep printing something meaningful without
+            # synthesizing a fake shape across heterogeneous groups.
+            return merged, per_group_payload[0][0]
 
         # ------------------------------------------------------------------
         # Path 1: default fast path (logits_to_keep == 1). Preserved
@@ -1565,12 +1747,21 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         if past_key_values is None:
             return
 
-        cache_batch_size = getattr(past_key_values, "batch_size", 1)
+        # The multi-Model cache exposes ``n_models`` and ``k_per_model``; the
+        # aggregate capacity is ``n_models * k_per_model`` (also stored as
+        # ``batch_size`` for legacy callers, and preserved as the fallback so
+        # test doubles that only expose ``batch_size`` keep working).
+        n_models = getattr(past_key_values, "n_models", None)
+        k_per_model = getattr(past_key_values, "k_per_model", None)
+        if isinstance(n_models, int) and isinstance(k_per_model, int):
+            cache_batch_size = n_models * k_per_model
+        else:
+            cache_batch_size = getattr(past_key_values, "batch_size", 1)
         if cache_batch_size < batch_size:
             raise ValueError(
                 "Batch cache size is too small: "
-                f"past_key_values.batch_size={cache_batch_size}, input batch_size={batch_size}. "
-                "Create MobilintCache with a batch size greater than or equal to the batched request."
+                f"cache capacity (n_models*k_per_model)={cache_batch_size}, input batch_size={batch_size}. "
+                "Create MobilintCache with capacity greater than or equal to the batched request."
             )
 
     def resolve_npu_prefill_chunk_size(self, npu_prefill_chunk_size: Optional[int]) -> int:
@@ -1623,7 +1814,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         hidden_states_numpy = hidden_states.type(torch.float32).cpu().numpy()
         encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
 
-        mxq_model = self.npu_backend.mxq_model
+        mxq_model = self.npu_backend.mxq_models[0]
 
         cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
 

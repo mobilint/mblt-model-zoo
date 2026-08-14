@@ -43,6 +43,10 @@ class _FakeMxqModel:
 class _FakeBackend:
     def __init__(self, mxq_model: _FakeMxqModel):
         self.mxq_model = mxq_model
+        # ``_llm_forward_batch`` now consults ``npu_backend.mxq_models``
+        # directly so per-group dispatch can address specific Model slots.
+        # A single-Model fake still exercises the fast path.
+        self.mxq_models = [mxq_model]
 
 
 def test_validate_batch_cache_accepts_matching_size():
