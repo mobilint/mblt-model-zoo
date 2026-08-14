@@ -21,6 +21,25 @@ from huggingface_hub.errors import (
 )
 
 
+def list_default_model_ids(task: str, *, include_private: bool = False) -> list[str]:
+    """Return default Mobilint HF model ids for a benchmark task.
+
+    Wraps :func:`mblt_model_zoo.hf_transformers.utils.list_models` so every
+    benchmark script forwards a consistent ``include_private`` flag.
+
+    Args:
+        task: Hugging Face pipeline task tag (for example ``"text-generation"``).
+        include_private: When True, include private ``mobilint/*`` releases. Requires an
+            authenticated Hugging Face session (``hf auth login``).
+
+    Returns:
+        A list of Mobilint HF model ids for the task, empty when none are available.
+    """
+    from mblt_model_zoo.hf_transformers.utils import list_models
+
+    return list_models(tasks=task, include_private=include_private).get(task, [])
+
+
 def normalize_repo_id(value: str) -> str:
     """Normalize a Hugging Face repository identifier or URL.
 
@@ -280,8 +299,7 @@ def iter_targets_from_mxq_dir(
         resolved_model_id = resolve_model_id_from_mxq_name(model_part, available_model_ids)
         if not resolved_model_id:
             print(
-                f"Skipping mxq (cannot resolve model_id from filename): {path.name} "
-                "(expected <model_id>-<W8|W4V8>.mxq)"
+                f"Skipping mxq (cannot resolve model_id from filename): {path.name} (expected <model_id>-<W8|W4V8>.mxq)"
             )
             continue
         label = f"{resolved_model_id}-{revision}"

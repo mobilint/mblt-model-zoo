@@ -45,11 +45,11 @@ from benchmark.transformers.benchmark_target_utils import (
     args_for_target_device_backend as _args_for_target_device_backend_shared,
 )
 from benchmark.transformers.benchmark_target_utils import iter_revision_targets as _iter_revision_targets_shared
+from benchmark.transformers.benchmark_target_utils import list_default_model_ids
 from benchmark.transformers.benchmark_target_utils import (
     resolve_original_model_ids as _resolve_original_model_ids_shared,
 )
 from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
-from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
 )
@@ -61,9 +61,6 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     append_core_mode_suffix as _append_core_mode_suffix_common,
-)
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    apply_core_mode_model_kwargs as _apply_core_mode_model_kwargs_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     apply_subconfig_core_mode_model_kwargs as _apply_subconfig_core_mode_model_kwargs_common,
@@ -202,7 +199,6 @@ def _vlm_llm_run_payload(run: Any) -> dict[str, Any]:
     payload["llm_prefill_energy_j"] = getattr(run, "llm_prefill_energy_j", getattr(run, "prefill_energy_j", None))
     payload["llm_decode_energy_j"] = getattr(run, "llm_decode_energy_j", getattr(run, "decode_energy_j", None))
     return payload
-
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -826,9 +822,7 @@ def _run_model(
                         _safe_div(decode_energy, float(decode_tokens)) if decode_tokens > 0 else None
                     )
                     run.total_tps_per_w = _safe_div(float(total_tokens), total_energy)
-                    run.total_j_per_token = (
-                        _safe_div(total_energy, float(total_tokens)) if total_tokens > 0 else None
-                    )
+                    run.total_j_per_token = _safe_div(total_energy, float(total_tokens)) if total_tokens > 0 else None
             llm_runs.append(run)
     finally:
         stop_qbruntime_trace(trace_handle)
@@ -1411,6 +1405,14 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         help="resolve each Mobilint model to parent/base model id from HF Hub",
     )
     parser.add_argument(
+        "--include-private",
+        action="store_true",
+        help=(
+            "Include private mobilint/* models in the default target list. "
+            "Requires an authenticated Hugging Face session (hf auth login)."
+        ),
+    )
+    parser.add_argument(
         "--cuda-precheck",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -1581,11 +1583,11 @@ def _run_sweep(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
-        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size).")
+        print(
+            "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
+        )
     script_dir = Path(__file__).resolve().parent
-    output_dir = (
-        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
-    )
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.rebuild_charts:
@@ -1594,7 +1596,10 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
     _collect_host_pc_info(output_dir)
 
-    available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
+    available_model_ids = list_default_model_ids(
+        "image-text-to-text",
+        include_private=bool(getattr(args, "include_private", False)),
+    )
     if not available_model_ids:
         print("No image-text-to-text models found.")
         return 0
@@ -1762,13 +1767,14 @@ def _collect_vlm_run_targets(
 ) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int, str]]]:
     """Resolve image-text-to-text benchmark targets and core-mode expansion."""
     script_dir = Path(__file__).resolve().parent
-    output_dir = (
-        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
-    )
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     output_dir.mkdir(parents=True, exist_ok=True)
     available_model_ids: list[str] | None = None
     if args.mxq_dir or not args.models:
-        available_model_ids = list_models(tasks="image-text-to-text").get("image-text-to-text", [])
+        available_model_ids = list_default_model_ids(
+            "image-text-to-text",
+            include_private=bool(getattr(args, "include_private", False)),
+        )
         if not available_model_ids:
             print("No image-text-to-text models found.")
             return output_dir, False, []
@@ -2053,9 +2059,7 @@ def _rebuild_measure_outputs(output_dir: Path) -> None:
 def _resolve_vlm_output_dir(args: argparse.Namespace) -> Path:
     """Resolve and create the image-text-to-text benchmark output directory."""
     script_dir = Path(__file__).resolve().parent
-    output_dir = (
-        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
-    )
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 

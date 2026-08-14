@@ -43,6 +43,7 @@ from benchmark.transformers.benchmark_target_utils import iter_revision_targets 
 from benchmark.transformers.benchmark_target_utils import (
     iter_targets_from_mxq_dir as _iter_targets_from_mxq_dir_shared,
 )
+from benchmark.transformers.benchmark_target_utils import list_default_model_ids
 from benchmark.transformers.benchmark_target_utils import (
     resolve_model_id_from_mxq_name as _resolve_model_id_from_mxq_name_shared,
 )
@@ -51,7 +52,6 @@ from benchmark.transformers.benchmark_target_utils import (
 )
 from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
 from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
-from mblt_model_zoo.hf_transformers.utils import list_models
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
 )
@@ -968,6 +968,14 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="resolve each Mobilint model to its parent/base model from HF Hub and benchmark unique parent ids",
     )
+    parser.add_argument(
+        "--include-private",
+        action="store_true",
+        help=(
+            "Include private mobilint/* models in the default target list. "
+            "Requires an authenticated Hugging Face session (hf auth login)."
+        ),
+    )
     _add_device_tracking_args(parser)
     parser.add_argument(
         "--cuda-precheck",
@@ -1197,12 +1205,16 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
     disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
     if disable_npu_specific_args:
-        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size).")
+        print(
+            "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
+        )
 
     available_model_ids: list[str] | None = None
     if args.mxq_dir or not args.models:
-        available = list_models(tasks="text-generation")
-        available_model_ids = available.get("text-generation", [])
+        available_model_ids = list_default_model_ids(
+            "text-generation",
+            include_private=bool(getattr(args, "include_private", False)),
+        )
         if not available_model_ids:
             print("No text-generation models found.")
             return 0
@@ -1826,8 +1838,10 @@ def _collect_text_run_targets(
     args: argparse.Namespace,
 ) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]]]:
     """Resolve text-generation benchmark targets and core-mode expansion."""
-    available = list_models(tasks="text-generation")
-    available_model_ids = available.get("text-generation", [])
+    available_model_ids = list_default_model_ids(
+        "text-generation",
+        include_private=bool(getattr(args, "include_private", False)),
+    )
     if not available_model_ids:
         print("No text-generation models found.")
         return "", False, []
@@ -1889,7 +1903,9 @@ def _run_measure(args: argparse.Namespace) -> int:
     if not run_targets:
         return 0
     if disable_npu_specific_args:
-        print("Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size).")
+        print(
+            "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
+        )
     _collect_host_pc_info(output_dir)
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
