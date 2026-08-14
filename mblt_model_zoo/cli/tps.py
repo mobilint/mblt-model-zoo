@@ -4,6 +4,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 import random
 import sys
@@ -16,6 +17,40 @@ from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 import torch
 from tqdm.auto import tqdm
 
+from mblt_model_zoo.cli.tps_table import (
+    SECTION_LLM_MEASURE,
+    SECTION_LLM_SWEEP,
+    SECTION_VLM_MEASURE,
+    SECTION_VLM_SWEEP_LLM,
+    SECTION_VLM_SWEEP_VISION,
+)
+from mblt_model_zoo.cli.tps_table import (
+    TEMPERATURE_JSON_KEY as _TEMPERATURE_JSON_KEY,
+)
+from mblt_model_zoo.cli.tps_table import (
+    emit_table as _emit_tps_table,
+)
+from mblt_model_zoo.cli.tps_table import (
+    format_temperature_display as _format_temperature_display,
+)
+from mblt_model_zoo.cli.tps_table import (
+    iter_json_rows as _iter_json_rows,
+)
+from mblt_model_zoo.cli.tps_table import (
+    json_key_for as _json_key_for,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_aggregate_json as _render_aggregate_json,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_run_json as _render_run_json,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_summary_json as _render_summary_json,
+)
+from mblt_model_zoo.cli.tps_table import (
+    render_units as _render_units,
+)
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES,
 )
@@ -65,20 +100,18 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
 
-from mblt_model_zoo.cli.tps_table import (
-    SECTION_LLM_MEASURE,
-    SECTION_LLM_SWEEP,
-    SECTION_VLM_MEASURE,
-    SECTION_VLM_SWEEP_LLM,
-    SECTION_VLM_SWEEP_VISION,
-    emit_table as _emit_tps_table,
-    iter_json_rows as _iter_json_rows,
-    json_key_for as _json_key_for,
-    render_aggregate_json as _render_aggregate_json,
-    render_run_json as _render_run_json,
-    render_summary_json as _render_summary_json,
-    render_units as _render_units,
-)
+
+def _is_speculative_decoding_model(model: Any) -> bool:
+    """Return whether ``model`` is a speculative-decoding wrapper.
+
+    Currently detects Mobilint EAGLE-3 (the only speculative stack shipped in
+    this repo).  The EAGLE-3 wrapper exposes ``eagle3_base_model`` as its
+    unique marker attribute; a ``hasattr`` probe stays consistent with
+    ``_is_eagle3_model`` in :mod:`benchmark_utils` while keeping the CLI free
+    of the extra import cycle.
+    """
+    return hasattr(model, "eagle3_base_model")
+
 
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
@@ -247,6 +280,25 @@ def _parse_positive_int_optional(spec: Union[str, None]) -> Union[int, None]:
     return _parse_positive_int_optional_common(spec)
 
 
+def _parse_non_negative_float(spec: str) -> float:
+    """Parse a finite non-negative float for argparse ``type=`` validation.
+
+    ``nan`` and ``inf`` both slip through a plain ``value >= 0`` guard: NaN
+    silently degrades to greedy (``value > 0`` evaluates false) and infinity
+    reaches the temperature warper and collapses logits toward uniform. Reject
+    both up front so the CLI surfaces the invalid input explicitly.
+    """
+    try:
+        value = float(spec)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected float") from exc
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError("must be a finite number")
+    if value < 0.0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return value
+
+
 def _flag_present(raw_argv: Sequence[str], flag: str) -> bool:
     """Return whether ``flag`` appears in raw argv (accepts ``--flag`` or ``--flag=value``)."""
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in raw_argv)
@@ -309,14 +361,10 @@ def _apply_sweep_batch_auto_scale(args: argparse.Namespace, pipeline: Any) -> No
     if scaled:
         print(
             f"[tps] batch={batch_size} detected; auto-scaled sweep lengths by "
-            f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: "
-            + ", ".join(scaled)
+            f"1/{_BATCH_SWEEP_LENGTH_SCALE}; decode_window remains {args.decode_window}: " + ", ".join(scaled)
         )
     if skipped:
-        print(
-            f"[tps] batch={batch_size} detected; skipping auto-scale for explicit flag(s): "
-            + ", ".join(skipped)
-        )
+        print(f"[tps] batch={batch_size} detected; skipping auto-scale for explicit flag(s): " + ", ".join(skipped))
 
 
 def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
@@ -793,12 +841,52 @@ def _resolve_text_measure_inputs(
 ) -> tuple[torch.Tensor | None, int, str | None]:
     """Resolve text-measure input ids/prefill length from CLI input-mode options."""
 
+    apply_chat_template = bool(getattr(args, "apply_chat_template", True))
+    enable_thinking = getattr(args, "enable_thinking", None)
+
     def _tokenize_prompt_text(text: str) -> torch.Tensor:
-        encoded = pipeline.tokenizer(
-            text,
-            return_tensors="pt",
-            add_special_tokens=True,
-        )
+        tokenizer = pipeline.tokenizer
+        template_available = getattr(tokenizer, "chat_template", None) is not None
+        if apply_chat_template and template_available:
+            chat_kwargs: dict[str, Any] = {}
+            if enable_thinking is not None:
+                chat_kwargs["enable_thinking"] = bool(enable_thinking)
+            try:
+                encoded = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": text}],
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    return_dict=True,
+                    tokenize=True,
+                    **chat_kwargs,
+                )
+            except TypeError:
+                if enable_thinking is not None:
+                    flag = "--enable-thinking" if enable_thinking else "--disable-thinking"
+                    print(
+                        f"warning: tokenizer.apply_chat_template does not accept enable_thinking; "
+                        f"{flag} has no effect for this template",
+                        file=sys.stderr,
+                    )
+                encoded = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": text}],
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    return_dict=True,
+                    tokenize=True,
+                )
+        else:
+            if enable_thinking is not None:
+                print(
+                    "warning: --enable-thinking/--disable-thinking is ignored when the chat "
+                    "template is not applied (--no-chat-template or tokenizer without chat_template)",
+                    file=sys.stderr,
+                )
+            encoded = tokenizer(
+                text,
+                return_tensors="pt",
+                add_special_tokens=True,
+            )
         return encoded["input_ids"]
 
     selected_prompt_text: str | None = None
@@ -1014,9 +1102,7 @@ def _energy_from_device_time_series(device_time_series: dict[str, list[dict[str,
     return _energy_from_device_time_series_common(device_time_series)
 
 
-def _vision_efficiency_metrics(
-    vision_energy_j: Sequence[float], batch_size: int
-) -> tuple[list[float], list[float]]:
+def _vision_efficiency_metrics(vision_energy_j: Sequence[float], batch_size: int) -> tuple[list[float], list[float]]:
     """Return (vision_img_per_j, vision_j_per_img) scaled by ``batch_size``.
 
     A single ``measure_vision`` invocation processes ``batch_size`` images under
@@ -1162,9 +1248,7 @@ def _attach_tps_per_w(
         if prefill_energy is not None and total_prefill_tokens > 0
         else None
     )
-    run.decode_tps_per_w = (
-        _safe_div(float(total_decode_tokens), decode_energy) if decode_energy is not None else None
-    )
+    run.decode_tps_per_w = _safe_div(float(total_decode_tokens), decode_energy) if decode_energy is not None else None
     run.decode_j_per_token = (
         _safe_div(decode_energy, float(total_decode_tokens))
         if decode_energy is not None and total_decode_tokens > 0
@@ -1509,10 +1593,10 @@ def _vlm_llm_aggregate_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
-def _llm_measure_run_payload(run: Any) -> dict[str, Any]:
+def _llm_measure_run_payload(run: Any, *, is_speculative: bool = False) -> dict[str, Any]:
     """Return a canonical JSON payload for a text LLM measurement run."""
     payload: dict[str, Any] = _llm_measure_identifying_fields(run)
-    payload.update(_render_run_json(SECTION_LLM_MEASURE, run))
+    payload.update(_render_run_json(SECTION_LLM_MEASURE, run, is_speculative=is_speculative))
     return payload
 
 
@@ -1533,14 +1617,17 @@ def _llm_sweep_aggregate_payload(result: Any) -> dict[str, Any]:
 
 
 def _units_for_section(
-    section: str, values_by_key: dict[str, Sequence[float]]
+    section: str,
+    values_by_key: dict[str, Sequence[float]],
+    *,
+    is_speculative: bool = False,
 ) -> dict[str, str]:
     """Return the ``units`` metadata block for ``section`` filtered by data."""
     keys_present: set[str] = set()
-    for row in _iter_json_rows(section):
+    for row in _iter_json_rows(section, is_speculative=is_speculative):
         if row.key in values_by_key:
             keys_present.add(_json_key_for(row, section))
-    return _render_units(section, keys_present)
+    return _render_units(section, keys_present, is_speculative=is_speculative)
 
 
 def _cmd_measure(args: argparse.Namespace) -> int:
@@ -1595,6 +1682,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         hashlib.sha256(selected_prompt_text.encode("utf-8")).hexdigest() if selected_prompt_text is not None else None
     )
 
+    temperature = float(getattr(args, "temperature", 0.0) or 0.0)
+    print_output = bool(getattr(args, "print_output", False))
     for i in tqdm(range(args.warmup), desc="warmup runs", leave=False):
         measurer.measure(
             num_prefill=measure_num_prefill,
@@ -1605,6 +1694,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
             show_progress=True,
             progress_desc=f"warmup generate {i + 1}/{args.warmup}",
             batch_size=batch_size,
+            temperature=temperature,
         )
     runs = []
     run_phase_device_time_series: list[dict[str, dict[str, list[dict[str, float]]]]] = []
@@ -1628,6 +1718,8 @@ def _run_text_measure(args: argparse.Namespace) -> int:
                     on_decode_start=((lambda: tracker_decode.start()) if tracker_decode is not None else None),
                     on_decode_end=((lambda: tracker_decode.stop()) if tracker_decode is not None else None),
                     batch_size=batch_size,
+                    temperature=temperature,
+                    collect_generated_token_ids=print_output,
                 )
             finally:
                 _stop_tracker_safe(tracker_prefill)
@@ -1721,15 +1813,28 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     decode_tps_per_w = [r.decode_tps_per_w for r in runs if r.decode_tps_per_w is not None]
     prefill_j_per_tok = [r.prefill_j_per_token for r in runs if r.prefill_j_per_token is not None]
     decode_j_per_tok = [r.decode_j_per_token for r in runs if r.decode_j_per_token is not None]
+    # Speculative-decoding acceptance metrics.
+    #   accept_steps    : number of iterations
+    #   tokens_sum      : total tokens emitted = drafts_sum + steps (root token per step)
+    #   tokens_per_step : mean tokens per iteration = drafts_avg + 1 (root token per step)
+    #     Matches the reference EAGLE-3 script's `accepts.append(accept_length+1)` and
+    #     `sum(accepts)/len(accepts)` so side-by-side comparisons agree.
+    #   draft_accept_ratio : fraction of proposed draft tokens accepted (drafts concept).
     acceptance_steps = [float(r.acceptance_steps) for r in runs if r.acceptance_steps is not None]
-    acceptance_tokens_sum = [float(r.acceptance_tokens_sum) for r in runs if r.acceptance_tokens_sum is not None]
-    acceptance_tokens_avg = [r.acceptance_tokens_avg for r in runs if r.acceptance_tokens_avg is not None]
-    acceptance_ratio_pct = [(r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None]
+    tokens_sum = [
+        float(r.acceptance_tokens_sum) + float(r.acceptance_steps)
+        for r in runs
+        if r.acceptance_tokens_sum is not None and r.acceptance_steps is not None
+    ]
+    tokens_per_step = [float(r.acceptance_tokens_avg) + 1.0 for r in runs if r.acceptance_tokens_avg is not None]
+    draft_accept_ratio = [(r.acceptance_ratio * 100.0) for r in runs if r.acceptance_ratio is not None]
+    is_speculative = _is_speculative_decoding_model(pipeline.model)
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
     print(f"prefill tokens: {runs[0].num_prefill} | decode tokens: {runs[0].num_decode}")
+    print(f"temperature: {_format_temperature_display(temperature)}")
     values_by_key: dict[str, Sequence[float]] = {
         "prefill_tps": prefill_tps,
         "decode_tps": decode_tps,
@@ -1740,9 +1845,9 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         "decode_npu_lat": decode_npu_latency_pct,
         "total_npu_lat": total_npu_latency_pct,
         "accept_steps": acceptance_steps,
-        "accept_tok_sum": acceptance_tokens_sum,
-        "accept_tok_avg": acceptance_tokens_avg,
-        "accept_ratio": acceptance_ratio_pct,
+        "tokens_sum": tokens_sum,
+        "tokens_per_step": tokens_per_step,
+        "draft_accept_ratio": draft_accept_ratio,
     }
     if args.device_metrics:
         values_by_key.update(
@@ -1793,20 +1898,29 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         values_by_key,
         device_metrics=args.device_metrics,
         print_summary=_print_summary,
+        is_speculative=is_speculative,
     )
     _print_summary_footer()
+
+    if print_output:
+        _print_generated_output(pipeline, runs, args.decode)
 
     if args.json:
         payload = {
             "repeat": args.repeat,
             "batch_size": batch_size,
+            _TEMPERATURE_JSON_KEY: temperature,
             "input": {
                 "mode": str(getattr(args, "input_mode", "random")),
                 "prompt_sha256": selected_prompt_sha256,
+                "apply_chat_template": bool(getattr(args, "apply_chat_template", True)),
+                "enable_thinking": getattr(args, "enable_thinking", None),
             },
-            "units": _units_for_section(SECTION_LLM_MEASURE, values_by_key),
-            "runs": [_llm_measure_run_payload(r) for r in runs],
-            "summary": _render_summary_json(SECTION_LLM_MEASURE, values_by_key, _summary),
+            "units": _units_for_section(SECTION_LLM_MEASURE, values_by_key, is_speculative=is_speculative),
+            "runs": [_llm_measure_run_payload(r, is_speculative=is_speculative) for r in runs],
+            "summary": _render_summary_json(
+                SECTION_LLM_MEASURE, values_by_key, _summary, is_speculative=is_speculative
+            ),
             "device_time_series_runs": run_phase_device_time_series,
         }
         _write_json(args.json, payload)
@@ -1815,10 +1929,59 @@ def _run_text_measure(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_generated_output(pipeline: Any, runs: Sequence[Any], decode_budget: int) -> None:
+    """Print the token IDs decoded on the last measured run in two versions.
+
+    The first version keeps special tokens so callers can visually confirm whether an EOS
+    token (for example ``<|im_end|>``) was actually emitted. The second version strips them
+    for a clean readout of the natural-language output.
+
+    The trailing footer reports the decode-token count using the same convention as
+    ``decode_tps``: the first emitted token is the TTFT sample and is excluded from the
+    decode count, then labelled separately alongside the total emitted count and the
+    ``--decode`` budget.
+    """
+    if not runs:
+        return
+    last = runs[-1]
+    token_ids = getattr(last, "generated_token_ids", None)
+    if not token_ids:
+        print("--- generated text: unavailable (no token IDs were captured) ---")
+        return
+    tokenizer = getattr(pipeline, "tokenizer", None)
+    if tokenizer is None:
+        print("--- generated text: unavailable (pipeline has no tokenizer) ---")
+        return
+    try:
+        raw_text = tokenizer.decode(token_ids, skip_special_tokens=False)
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raw_text = f"<decode failed: {exc}>"
+    try:
+        clean_text = tokenizer.decode(token_ids, skip_special_tokens=True)
+    except (ValueError, RuntimeError, TypeError) as exc:
+        clean_text = f"<decode failed: {exc}>"
+    print("--- generated text (special tokens preserved) ---")
+    print(raw_text)
+    print("--- generated text (clean) ---")
+    print(clean_text)
+    decode_count = max(0, len(token_ids) - 1)
+    print(
+        f"--- token count: {decode_count} decode tokens "
+        f"(+ 1 TTFT sample = {len(token_ids)} emitted; --decode {decode_budget} max) ---"
+    )
+
+
 def _run_vlm_measure(args: argparse.Namespace) -> int:
     """Run a single VLM TPS measurement with separate vision and LLM metrics."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
+    if getattr(args, "print_output", False):
+        warnings.warn(
+            "--print-output is only supported for text-only `tps measure` tasks; ignoring for VLM.",
+            UserWarning,
+            stacklevel=2,
+        )
+        args.print_output = False
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -1843,6 +2006,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         SingleMeasurement,
         VLMSingleMeasurement,
         VLMTPSMeasurer,
+        _supports_fake_decode_prefill,
     )
 
     def _single_llm_measurement(result: Any) -> SingleMeasurement:
@@ -1930,16 +2094,21 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         return measurement
 
     measurer = VLMTPSMeasurer(pipeline)
+    temperature = float(getattr(args, "temperature", 0.0) or 0.0)
+    if temperature > 0.0 and _supports_fake_decode_prefill(measurer._get_language_model()):
+        raise SystemExit(
+            "VLM `tps measure` decode TPS is measured with a greedy argmax on the "
+            "fake-prefill decode path; --temperature > 0 is not supported for this "
+            "pipeline. Re-run with --temperature 0 (default) for greedy decoding."
+        )
     tracker = _build_device_tracker(args, pipeline)
     _print_device_status(args, tracker)
 
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
-    print(
-        f"image resolution: {args.image_resolution} | "
-        f"prefill tokens: {args.prefill} | decode tokens: {args.decode}"
-    )
+    print(f"image resolution: {args.image_resolution} | prefill tokens: {args.prefill} | decode tokens: {args.decode}")
+    print(f"temperature: {_format_temperature_display(temperature)}")
 
     for _ in tqdm(range(args.warmup), desc="vision warmup runs", leave=False):
         measurer.measure_vision(
@@ -1990,6 +2159,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             show_progress=True,
             progress_prefix=f"llm warmup {warmup_idx + 1}/{args.warmup}",
             batch_size=batch_size,
+            temperature=temperature,
         )
 
     llm_results = []
@@ -2012,6 +2182,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
                     on_prefill_end=(lambda: llm_tracker_prefill.stop()) if llm_tracker_prefill is not None else None,
                     on_decode_start=(lambda: llm_tracker_decode.start()) if llm_tracker_decode is not None else None,
                     on_decode_end=(lambda: llm_tracker_decode.stop()) if llm_tracker_decode is not None else None,
+                    temperature=temperature,
                 )
             finally:
                 _stop_tracker_safe(llm_tracker_prefill)
@@ -2211,12 +2382,8 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             return None
         return float(phase_tps) / float(phase_power)
 
-    prefill_tps_per_w = [
-        v for v in (_phase_tps_per_w(r, "prefill") for r in runs) if v is not None
-    ]
-    decode_tps_per_w = [
-        v for v in (_phase_tps_per_w(r, "decode") for r in runs) if v is not None
-    ]
+    prefill_tps_per_w = [v for v in (_phase_tps_per_w(r, "prefill") for r in runs) if v is not None]
+    decode_tps_per_w = [v for v in (_phase_tps_per_w(r, "decode") for r in runs) if v is not None]
     prefill_j_per_tok = [
         r.llm.prefill_j_per_token for r in runs if getattr(r.llm, "prefill_j_per_token", None) is not None
     ]
@@ -2350,6 +2517,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             "image_resolution": args.image_resolution,
             "repeat": args.repeat,
             "batch_size": batch_size,
+            _TEMPERATURE_JSON_KEY: temperature,
             "units": _units_for_section(SECTION_VLM_MEASURE, values_by_key),
             "runs": [_vlm_measure_run_payload(r) for r in runs],
             "summary": _render_summary_json(SECTION_VLM_MEASURE, values_by_key, _summary),
@@ -2647,12 +2815,8 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     decode_last = [r.decode_sweep.tps_values[-1] for r in runs if r.decode_sweep.tps_values]
     ttft_last_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in runs if r.prefill_sweep.time_values]
     decode_duration_last_ms = [r.decode_sweep.time_values[-1] * 1000.0 for r in runs if r.decode_sweep.time_values]
-    prefill_energy_last = [
-        float(v) for r in runs if (v := getattr(r, "prefill_energy_j", None)) is not None
-    ]
-    decode_energy_last = [
-        float(v) for r in runs if (v := getattr(r, "decode_energy_j", None)) is not None
-    ]
+    prefill_energy_last = [float(v) for r in runs if (v := getattr(r, "prefill_energy_j", None)) is not None]
+    decode_energy_last = [float(v) for r in runs if (v := getattr(r, "decode_energy_j", None)) is not None]
     prefill_npu_latency_pct_last = [
         pct
         for r in runs
@@ -2708,18 +2872,10 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         )
         if total is not None:
             total_npu_latency_pct_last.append(float(total))
-    prefill_tps_per_w = [
-        r.prefill_tps_per_w for r in runs if getattr(r, "prefill_tps_per_w", None) is not None
-    ]
-    decode_tps_per_w = [
-        r.decode_tps_per_w for r in runs if getattr(r, "decode_tps_per_w", None) is not None
-    ]
-    prefill_j_per_token = [
-        r.prefill_j_per_token for r in runs if getattr(r, "prefill_j_per_token", None) is not None
-    ]
-    decode_j_per_token = [
-        r.decode_j_per_token for r in runs if getattr(r, "decode_j_per_token", None) is not None
-    ]
+    prefill_tps_per_w = [r.prefill_tps_per_w for r in runs if getattr(r, "prefill_tps_per_w", None) is not None]
+    decode_tps_per_w = [r.decode_tps_per_w for r in runs if getattr(r, "decode_tps_per_w", None) is not None]
+    prefill_j_per_token = [r.prefill_j_per_token for r in runs if getattr(r, "prefill_j_per_token", None) is not None]
+    decode_j_per_token = [r.decode_j_per_token for r in runs if getattr(r, "decode_j_per_token", None) is not None]
     print(f"warmup: {args.warmup}")
     print(f"runs: {args.repeat}")
     print(f"batch size: {batch_size}")
@@ -3135,13 +3291,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "repeat": args.repeat,
                     "batch_size": batch_size,
                     "units": _units_for_section(SECTION_VLM_SWEEP_VISION, vision_values_by_key),
-                    "runs": [
-                        _render_run_json(SECTION_VLM_SWEEP_VISION, holder)
-                        for holder in vision_run_holders
-                    ],
-                    "summary": _render_summary_json(
-                        SECTION_VLM_SWEEP_VISION, vision_values_by_key, _summary
-                    ),
+                    "runs": [_render_run_json(SECTION_VLM_SWEEP_VISION, holder) for holder in vision_run_holders],
+                    "summary": _render_summary_json(SECTION_VLM_SWEEP_VISION, vision_values_by_key, _summary),
                     "device_time_series_runs": vision_device_time_series_runs,
                 }
             )
@@ -3185,8 +3336,10 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
             finally:
                 _stop_tracker_safe(llm_tracker_prefill)
                 _stop_tracker_safe(llm_tracker_decode)
-            if llm_tracker_prefill is not None and llm_tracker_decode is not None and (
-                run.prefill_sweep.x_values or run.decode_sweep.x_values
+            if (
+                llm_tracker_prefill is not None
+                and llm_tracker_decode is not None
+                and (run.prefill_sweep.x_values or run.decode_sweep.x_values)
             ):
                 prefill_metric = _extract_device_metric(llm_tracker_prefill)
                 decode_metric = _extract_device_metric(llm_tracker_decode)
@@ -3213,9 +3366,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     # row that the schema declares — ``runs[i]`` and ``summary`` populate them
     # but ``aggregate`` extractors would fall back to ``None``.
     _attach_vlm_llm_aggregate_scalars(llm_result, llm_runs)
-    _attach_aggregate_sweep_device(
-        llm_result, llm_runs, batch_size=batch_size, decode_window=args.decode_window
-    )
+    _attach_aggregate_sweep_device(llm_result, llm_runs, batch_size=batch_size, decode_window=args.decode_window)
     llm_prefill_tps = [r.prefill_sweep.tps_values[-1] for r in llm_runs if r.prefill_sweep.tps_values]
     llm_decode_tps = [r.decode_sweep.tps_values[-1] for r in llm_runs if r.decode_sweep.tps_values]
     llm_ttft_ms = [r.prefill_sweep.time_values[-1] * 1000.0 for r in llm_runs if r.prefill_sweep.time_values]
@@ -3343,12 +3494,8 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         r.llm_decode_energy_j for r in llm_runs if getattr(r, "llm_decode_energy_j", None) is not None
     ]
     llm_total_energy_j = [r.total_energy_j for r in llm_runs if getattr(r, "total_energy_j", None) is not None]
-    llm_prefill_tps_per_w = [
-        r.prefill_tps_per_w for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None
-    ]
-    llm_decode_tps_per_w = [
-        r.decode_tps_per_w for r in llm_runs if getattr(r, "decode_tps_per_w", None) is not None
-    ]
+    llm_prefill_tps_per_w = [r.prefill_tps_per_w for r in llm_runs if getattr(r, "prefill_tps_per_w", None) is not None]
+    llm_decode_tps_per_w = [r.decode_tps_per_w for r in llm_runs if getattr(r, "decode_tps_per_w", None) is not None]
     llm_prefill_j_per_token = [
         r.prefill_j_per_token for r in llm_runs if getattr(r, "prefill_j_per_token", None) is not None
     ]
@@ -3503,9 +3650,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
                     "aggregate": _vlm_llm_aggregate_payload(llm_result),
                     "runs": [_vlm_llm_run_payload(r) for r in llm_runs],
                     "device_time_series_runs": llm_device_time_series_runs,
-                    "summary": _render_summary_json(
-                        SECTION_VLM_SWEEP_LLM, llm_values_by_key, _summary
-                    ),
+                    "summary": _render_summary_json(SECTION_VLM_SWEEP_LLM, llm_values_by_key, _summary),
                 },
             },
         )
@@ -3676,7 +3821,15 @@ def add_tps_parser(
     p_measure = tps_sub.add_parser("measure", help="Single TPS measurement")
     add_common(p_measure)
     p_measure.add_argument("--prefill", type=_parse_positive_int, default=128, help="input token count")
-    p_measure.add_argument("--decode", type=_parse_positive_int, default=32, help="new tokens to generate")
+    p_measure.add_argument(
+        "--decode",
+        type=_parse_positive_int,
+        default=32,
+        help=(
+            "new tokens to generate; for non-speculative decode this is exact, "
+            "for EAGLE-3 it is an upper bound and early EOS terminates measurement"
+        ),
+    )
     p_measure.add_argument(
         "--input-mode",
         choices=["random", "synthetic-text", "file"],
@@ -3706,6 +3859,42 @@ def add_tps_parser(
         help="random seed used when --prompt-file-strategy is random",
     )
     p_measure.add_argument(
+        "--no-chat-template",
+        dest="apply_chat_template",
+        action="store_false",
+        default=True,
+        help=(
+            "disable the default chat-template scaffolding applied to text prompts "
+            "(--input-mode synthetic-text|file); by default the prompt is inserted as a "
+            "single-turn user message with add_generation_prompt=True when the tokenizer "
+            "exposes a chat_template"
+        ),
+    )
+    thinking_group = p_measure.add_mutually_exclusive_group()
+    thinking_group.add_argument(
+        "--enable-thinking",
+        dest="enable_thinking",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "for thinking-capable models (e.g., Qwen3), force enable_thinking=True in the "
+            "chat template so the model emits a <think> block; if unspecified the tokenizer "
+            "default is used"
+        ),
+    )
+    thinking_group.add_argument(
+        "--disable-thinking",
+        dest="enable_thinking",
+        action="store_const",
+        const=False,
+        help=(
+            "for thinking-capable models (e.g., Qwen3), force enable_thinking=False in the "
+            "chat template so the <think> block is suppressed; useful when a small --decode "
+            "budget would otherwise be consumed entirely by thinking tokens"
+        ),
+    )
+    p_measure.add_argument(
         "--image-resolution",
         type=_parse_positive_int,
         default=224,
@@ -3716,7 +3905,30 @@ def add_tps_parser(
         default="Describe the image in one sentence.",
         help="VLM only: fixed prompt used for synthetic image-text input",
     )
+    p_measure.add_argument(
+        "--temperature",
+        type=_parse_non_negative_float,
+        default=0.0,
+        help=(
+            "sampling temperature; 0 (default) = greedy decoding, >0 = do_sample=True with that "
+            "temperature. VLM (image-text-to-text) `tps measure` decode uses a greedy argmax on "
+            "the fake-prefill path, so --temperature > 0 is rejected there"
+        ),
+    )
     p_measure.add_argument("--json", default=None, help="write result as JSON")
+    p_measure.add_argument(
+        "--print-output",
+        action="store_true",
+        default=False,
+        help=(
+            "diagnostic (text-only tasks; ignored for VLM measure with a warning): after the "
+            "results table, decode and print the tokens actually generated by the last measured "
+            "run (excludes the prompt). Prints two versions: special tokens preserved and "
+            "cleaned. The footer reports the decode-token count with the TTFT sample labelled "
+            "separately, matching the decode_tps convention. Useful for confirming whether EOS "
+            "terminated decoding early."
+        ),
+    )
     p_measure.set_defaults(_handler=_cmd_measure)
 
     p_sweep = tps_sub.add_parser("sweep", help="Prefill/decode TPS sweep")

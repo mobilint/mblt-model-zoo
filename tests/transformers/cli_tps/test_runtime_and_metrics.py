@@ -328,9 +328,10 @@ class _DummyVisionLatencyVLMTPSMeasurer(_DummyVLMTPSMeasurer):
         npu_prefill_chunk_size=None,
         show_progress: bool = False,
         progress_desc=None,
+        temperature: float = 0.0,
     ) -> SingleMeasurement:
         """Return a lightweight LLM measurement without running generation."""
-        del inputs_embeds, npu_prefill_chunk_size, show_progress, progress_desc
+        del inputs_embeds, npu_prefill_chunk_size, show_progress, progress_desc, temperature
         return SingleMeasurement(
             num_prefill=2,
             num_decode=int(num_decode),
@@ -410,8 +411,6 @@ class _RoutingTPSMeasurer(TPSMeasurer):
             avg_npu_decode_token_latency=None,
             decode_prefill_mode="fake",
         )
-
-
 
 
 def test_enrich_single_run_device_uses_batched_token_count_for_energy_metrics():
@@ -1798,6 +1797,113 @@ def test_run_vlm_measure_ignores_tracker_stop_errors(monkeypatch):
     assert tps_cli._run_vlm_measure(args) == 0
 
 
+class _SentinelVlmGuardPassed(Exception):
+    """Raised by a monkeypatched ``_build_device_tracker`` to short-circuit after the VLM guard."""
+
+
+def _build_vlm_measure_guard_args(temperature: float) -> argparse.Namespace:
+    """Namespace shaped for ``_run_vlm_measure`` up through the temperature guard."""
+    return argparse.Namespace(
+        task="image-text-to-text",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=1,
+        warmup=0,
+        repeat=1,
+        image_resolution=224,
+        prefill=8,
+        decode=2,
+        prompt="Describe the image.",
+        npu_prefill_chunk_size=None,
+        device_metrics=False,
+        json=None,
+        device_backend="none",
+        print_output=False,
+        temperature=temperature,
+    )
+
+
+def _install_vlm_measure_guard_fixtures(monkeypatch, language_model) -> None:
+    """Wire ``_run_vlm_measure`` up to the temperature guard with the given language model."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeGuardVLMTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def _get_language_model(self):
+            return language_model
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(benchmark_utils, "VLMTPSMeasurer", _FakeGuardVLMTPSMeasurer)
+
+
+def test_run_vlm_measure_rejects_positive_temperature_when_fake_prefill_supported(monkeypatch):
+    """Reject ``--temperature > 0`` on a VLM whose LM decode uses the greedy fake-prefill path."""
+    _install_vlm_measure_guard_fixtures(monkeypatch, _DummyNPUModel())
+
+    args = _build_vlm_measure_guard_args(temperature=0.7)
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._run_vlm_measure(args)
+
+    message = str(excinfo.value)
+    assert "greedy argmax" in message
+    assert "fake-prefill" in message
+    assert "--temperature 0" in message
+
+
+def test_run_vlm_measure_allows_positive_temperature_when_fake_prefill_unsupported(monkeypatch):
+    """Do not reject ``--temperature > 0`` when the LM does not use the fake-prefill decode path."""
+    _install_vlm_measure_guard_fixtures(monkeypatch, _DummyNonNPUModel())
+
+    def _stop_after_guard(_args, _pipeline):
+        raise _SentinelVlmGuardPassed()
+
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", _stop_after_guard)
+    args = _build_vlm_measure_guard_args(temperature=0.7)
+    with pytest.raises(_SentinelVlmGuardPassed):
+        tps_cli._run_vlm_measure(args)
+
+
+def test_run_vlm_measure_allows_greedy_temperature_when_fake_prefill_supported(monkeypatch):
+    """Do not reject ``--temperature 0`` (greedy) even when the LM uses the fake-prefill path."""
+    _install_vlm_measure_guard_fixtures(monkeypatch, _DummyNPUModel())
+
+    def _stop_after_guard(_args, _pipeline):
+        raise _SentinelVlmGuardPassed()
+
+    monkeypatch.setattr(tps_cli, "_build_device_tracker", _stop_after_guard)
+    args = _build_vlm_measure_guard_args(temperature=0.0)
+    with pytest.raises(_SentinelVlmGuardPassed):
+        tps_cli._run_vlm_measure(args)
+
+
 def test_text_fake_prefill_generate_uses_cache_length_plus_decode_seed():
     model = _DummyGenerateNPUModel()
     measurer = TPSMeasurer(_DummyTextPipeline(model))
@@ -2043,9 +2149,7 @@ def test_non_generative_models_do_not_expose_generation_hook(caplog: pytest.LogC
                 f"{cls.__name__} must not expose prepare_inputs_for_generation"
             )
 
-    generative_warnings = [
-        record for record in caplog.records if "has generative capabilities" in record.getMessage()
-    ]
+    generative_warnings = [record for record in caplog.records if "has generative capabilities" in record.getMessage()]
     assert not generative_warnings, (
         "can_generate() emitted generative-capability warnings for non-generative classes: "
         + "; ".join(record.getMessage().splitlines()[0] for record in generative_warnings)
@@ -2683,6 +2787,7 @@ def _trace_scope_args(**overrides):
         prompt_file=None,
         prompt_file_strategy="first",
         prompt_file_seed=0,
+        apply_chat_template=True,
         image_resolution=224,
         image_resolutions=[224],
         llm_resolution=224,
@@ -2920,3 +3025,211 @@ def test_run_vlm_sweep_traces_all_measured_repeats(monkeypatch):
         "llm:224",
         "stop",
     ]
+
+
+def _base_measure_args(**overrides) -> argparse.Namespace:
+    """Return a fully-populated ``argparse.Namespace`` for ``_run_text_measure``."""
+    defaults = dict(
+        task="text-generation",
+        model="dummy",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        batch_size=None,
+        warmup=0,
+        repeat=1,
+        prefill=8,
+        decode=2,
+        npu_prefill_chunk_size=None,
+        trace=None,
+        device_metrics=False,
+        json=None,
+        device_backend="none",
+        temperature=0.0,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _install_fake_tps_measurer(monkeypatch) -> list[dict[str, object]]:
+    """Install a fake ``TPSMeasurer`` that captures ``measure`` kwargs."""
+    import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
+
+    calls: list[dict[str, object]] = []
+    pipeline = SimpleNamespace(model=SimpleNamespace(config=_DummyConfig(max_batch_size=1)))
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline_arg) -> None:
+            assert pipeline_arg is pipeline
+
+        def measure(self, **kwargs) -> SingleMeasurement:
+            calls.append(dict(kwargs))
+            return SingleMeasurement(
+                num_prefill=kwargs["num_prefill"],
+                num_decode=kwargs["num_decode"],
+                prefill_latency=1.0,
+                prefill_tps=1.0,
+                decode_duration=1.0,
+                decode_tps=1.0,
+                total_time=2.0,
+                avg_total_prefill_token_latency=1.0,
+                avg_npu_prefill_token_latency=None,
+                avg_total_decode_token_latency=1.0,
+                avg_npu_decode_token_latency=None,
+            )
+
+    monkeypatch.setattr(tps_cli, "_build_pipeline", lambda **kwargs: pipeline)
+    monkeypatch.setattr(tps_cli, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(tps_cli, "_print_device_status", lambda args, tracker: None)
+    monkeypatch.setattr(benchmark_utils, "TPSMeasurer", _FakeTPSMeasurer)
+    return calls
+
+
+def test_run_text_measure_default_temperature_is_greedy(monkeypatch):
+    """Default ``--temperature 0.0`` must reach the measurer as ``temperature=0.0``."""
+    calls = _install_fake_tps_measurer(monkeypatch)
+
+    assert tps_cli._run_text_measure(_base_measure_args()) == 0
+    assert calls, "measurer.measure was not called"
+    for call in calls:
+        assert call.get("temperature") == 0.0
+
+
+def test_run_text_measure_forwards_sampling_temperature(monkeypatch):
+    """``--temperature 0.7`` must reach the measurer as ``temperature=0.7``."""
+    calls = _install_fake_tps_measurer(monkeypatch)
+
+    assert tps_cli._run_text_measure(_base_measure_args(temperature=0.7, warmup=1)) == 0
+    assert calls, "measurer.measure was not called"
+    for call in calls:
+        assert call.get("temperature") == pytest.approx(0.7)
+
+
+def test_run_text_measure_writes_temperature_to_json(monkeypatch, tmp_path):
+    """The JSON payload for ``tps measure`` must record the sampling temperature."""
+    _install_fake_tps_measurer(monkeypatch)
+
+    json_path = tmp_path / "measure.json"
+    args = _base_measure_args(temperature=0.5, json=str(json_path))
+
+    assert tps_cli._run_text_measure(args) == 0
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["temperature"] == pytest.approx(0.5)
+
+
+def test_cli_tps_measure_rejects_negative_temperature():
+    """Argparse must reject a negative ``--temperature``."""
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--temperature",
+                "-0.1",
+            ]
+        )
+    assert excinfo.value.code == 2
+
+
+def test_cli_tps_measure_temperature_default_is_zero():
+    """Argparse default ``--temperature`` is greedy (``0.0``)."""
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+        ]
+    )
+    assert args.temperature == 0.0
+
+
+def test_cli_tps_measure_temperature_positive_parses_as_float():
+    """Argparse parses a positive ``--temperature`` as a float."""
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+            "--temperature",
+            "0.7",
+        ]
+    )
+    assert args.temperature == pytest.approx(0.7)
+
+
+def test_tps_measurer_greedy_omits_temperature_generate_kwarg():
+    """Greedy ``TPSMeasurer.measure`` must not forward a temperature to ``generate``."""
+    model = _DummyGenerateNPUModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+
+    measurer.measure(num_prefill=8, num_decode=2)
+
+    assert model.generate_kwargs is not None
+    assert model.generate_kwargs.get("do_sample") is False
+    assert "temperature" not in model.generate_kwargs
+
+
+def test_tps_measurer_sampling_forwards_temperature_generate_kwarg():
+    """Sampling ``TPSMeasurer.measure`` must pass ``temperature`` to ``generate``."""
+    model = _DummyGenerateNPUModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+
+    measurer.measure(num_prefill=8, num_decode=2, temperature=0.7)
+
+    assert model.generate_kwargs is not None
+    assert model.generate_kwargs.get("do_sample") is True
+    assert model.generate_kwargs.get("temperature") == pytest.approx(0.7)
+
+
+def test_tps_measurer_batch_greedy_omits_temperature_generate_kwarg():
+    """Greedy batched ``TPSMeasurer.measure`` must not forward a temperature."""
+    model = _DummyBatchedGenerateNPUModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+
+    measurer.measure(num_prefill=8, num_decode=2, batch_size=2)
+
+    assert model.generate_kwargs is not None
+    assert model.generate_kwargs.get("do_sample") is False
+    assert "temperature" not in model.generate_kwargs
+
+
+def test_tps_measurer_batch_sampling_forwards_temperature_generate_kwarg():
+    """Sampling batched ``TPSMeasurer.measure`` must pass ``temperature`` to ``generate``."""
+    model = _DummyBatchedGenerateNPUModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+
+    measurer.measure(num_prefill=8, num_decode=2, batch_size=2, temperature=0.3)
+
+    assert model.generate_kwargs is not None
+    assert model.generate_kwargs.get("do_sample") is True
+    assert model.generate_kwargs.get("temperature") == pytest.approx(0.3)

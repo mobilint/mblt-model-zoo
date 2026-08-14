@@ -61,6 +61,9 @@ Before editing, run `git status --short` and preserve unrelated work.
   reject them with the documented `NotImplementedError`. Call
   `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model()` only for an MXQ override that differs
   from the shipped `config.dynamic_vision` setting.
+- Follow `.agents/skills/mblt-transformers/SKILL.md` for EAGLE-3 speculative-decoding contracts:
+  preserve Hugging Face sampling semantics, keep TPS metrics centralized in `tps_table.py`, and
+  use same-process repeats when measuring MXQ backends.
 
 ## Validation and Git Safety
 

@@ -32,7 +32,7 @@ label helpers, so the JSON key set stays in lockstep with the printed table.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 SECTION_LLM_MEASURE = "llm_measure"
@@ -60,6 +60,7 @@ class TpsRow:
     device_metric: bool = False
     llm_prefix: bool = False
     sweep_suffix: bool = False
+    spec_decode_only: bool = False
     from_run: Optional[Extractor] = None
     from_aggregate: Optional[Extractor] = None
     from_runs_for_summary: Optional[RunsExtractor] = None
@@ -84,20 +85,25 @@ def _get_optional(obj: Any, name: str) -> Any:
 
 def _attr(name: str) -> Extractor:
     """Return an extractor that reads ``obj.name`` (with ``.llm`` fallback)."""
+
     def _f(obj: Any) -> Any:
         return _get_optional(obj, name)
+
     return _f
 
 
 def _direct_attr(name: str) -> Extractor:
     """Return an extractor that reads ``obj.name`` without the ``.llm`` fallback."""
+
     def _f(obj: Any) -> Any:
         return getattr(obj, name, None)
+
     return _f
 
 
 def _sweep_curve(sweep_attr: str, values_attr: str) -> Extractor:
     """Return an extractor that reads a full sweep curve as a list."""
+
     def _f(obj: Any) -> Any:
         sweep = getattr(obj, sweep_attr, None)
         if sweep is None:
@@ -110,6 +116,7 @@ def _sweep_curve(sweep_attr: str, values_attr: str) -> Extractor:
         if values is None:
             return None
         return list(values)
+
     return _f
 
 
@@ -125,6 +132,7 @@ def _sweep_last(sweep_attr: str, values_attr: str) -> Extractor:
         if last is None:
             return None
         return last
+
     return _f
 
 
@@ -137,11 +145,13 @@ def _sweep_last_ms(sweep_attr: str, values_attr: str) -> Extractor:
         if v is None:
             return None
         return float(v) * 1000.0
+
     return _f
 
 
 def _list_attr(name: str, *, scale: float = 1.0) -> RunsExtractor:
     """Return a from_runs_for_summary that pulls ``obj.name`` from every run."""
+
     def _f(runs: Sequence[Any]) -> list[float]:
         out: list[float] = []
         for run in runs:
@@ -150,6 +160,7 @@ def _list_attr(name: str, *, scale: float = 1.0) -> RunsExtractor:
                 continue
             out.append(float(v) * scale)
         return out
+
     return _f
 
 
@@ -165,6 +176,7 @@ def _list_sweep_last(sweep_attr: str, values_attr: str, *, scale: float = 1.0) -
                 continue
             out.append(float(v) * scale)
         return out
+
     return _f
 
 
@@ -310,6 +322,7 @@ def _sweep_last_npu_pct(sweep_attr: str) -> Extractor:
         if not totals or not npus:
             return None
         return _npu_latency_pct(totals[-1], npus[-1])
+
     return _f
 
 
@@ -365,16 +378,8 @@ def _total_npu_latency_row() -> TpsRow:
             return None
         prefill_sweep = getattr(run, "prefill_sweep", None)
         decode_sweep = getattr(run, "decode_sweep", None)
-        p_t = (
-            float(prefill_sweep.time_values[-1])
-            if prefill_sweep and prefill_sweep.time_values
-            else 0.0
-        )
-        d_t = (
-            float(decode_sweep.time_values[-1])
-            if decode_sweep and decode_sweep.time_values
-            else 0.0
-        )
+        p_t = float(prefill_sweep.time_values[-1]) if prefill_sweep and prefill_sweep.time_values else 0.0
+        d_t = float(decode_sweep.time_values[-1]) if decode_sweep and decode_sweep.time_values else 0.0
         weight_sum = p_t + d_t
         if weight_sum <= 0:
             return None
@@ -425,6 +430,7 @@ def _scalar_device_row(
     scale: float = 1.0,
 ) -> TpsRow:
     """Row for a scalar device metric that reads ``obj.attr`` uniformly."""
+
     def _from_run(obj: Any) -> Any:
         v = _get_optional(obj, attr)
         if v is None:
@@ -459,7 +465,13 @@ def _accept_row(
     *,
     scale: float = 1.0,
 ) -> TpsRow:
-    """Acceptance metric row (LLM measure only)."""
+    """Acceptance metric row (LLM measure only; speculative-decoding models only).
+
+    Rows built here are gated by ``spec_decode_only=True`` so non-speculative
+    (plain autoregressive) LLM runs skip them in both the CLI table and the
+    JSON payload.  The underlying ``SingleMeasurement`` fields remain populated
+    with the raw draft-only quantities regardless.
+    """
     return TpsRow(
         key=key,
         label=label,
@@ -468,10 +480,88 @@ def _accept_row(
         device_metric=False,
         llm_prefix=False,
         sweep_suffix=False,
+        spec_decode_only=True,
         from_run=lambda obj, _attr=attr, _s=scale: (
             None if _get_optional(obj, _attr) is None else float(_get_optional(obj, _attr)) * _s
         ),
         from_runs_for_summary=_list_attr(attr, scale=scale),
+    )
+
+
+def _tokens_per_step_row() -> TpsRow:
+    """Speculative-decoding row: total tokens emitted per iteration.
+
+    Value = ``acceptance_tokens_avg + 1`` — the ``+1`` accounts for the base
+    model's forced-root token that is emitted before drafts are evaluated.
+    Matches the reference EAGLE-3 script's ``accepts.append(accept_length+1)``
+    definition so side-by-side numbers agree.
+    """
+
+    def _from_run(obj: Any) -> Optional[float]:
+        avg = _get_optional(obj, "acceptance_tokens_avg")
+        if avg is None:
+            return None
+        return float(avg) + 1.0
+
+    def _from_runs_for_summary(runs: Sequence[Any]) -> list[float]:
+        out: list[float] = []
+        for run in runs:
+            v = _from_run(run)
+            if v is None:
+                continue
+            out.append(float(v))
+        return out
+
+    return TpsRow(
+        key="tokens_per_step",
+        label="tokens_per_step",
+        unit="tok",
+        sections=frozenset((SECTION_LLM_MEASURE,)),
+        device_metric=False,
+        llm_prefix=False,
+        sweep_suffix=False,
+        spec_decode_only=True,
+        from_run=_from_run,
+        from_runs_for_summary=_from_runs_for_summary,
+    )
+
+
+def _tokens_sum_row() -> TpsRow:
+    """Speculative-decoding row: total tokens generated across the run.
+
+    Value = ``acceptance_tokens_sum + acceptance_steps`` — the raw sum in
+    ``SingleMeasurement`` counts accepted draft tokens only; each iteration
+    also emits the base's forced root token, so total generated tokens equals
+    drafts summed plus one per iteration (``steps``).
+    """
+
+    def _from_run(obj: Any) -> Optional[float]:
+        tok_sum = _get_optional(obj, "acceptance_tokens_sum")
+        steps = _get_optional(obj, "acceptance_steps")
+        if tok_sum is None or steps is None:
+            return None
+        return float(tok_sum) + float(steps)
+
+    def _from_runs_for_summary(runs: Sequence[Any]) -> list[float]:
+        out: list[float] = []
+        for run in runs:
+            v = _from_run(run)
+            if v is None:
+                continue
+            out.append(float(v))
+        return out
+
+    return TpsRow(
+        key="tokens_sum",
+        label="tokens_sum",
+        unit="tok",
+        sections=frozenset((SECTION_LLM_MEASURE,)),
+        device_metric=False,
+        llm_prefix=False,
+        sweep_suffix=False,
+        spec_decode_only=True,
+        from_run=_from_run,
+        from_runs_for_summary=_from_runs_for_summary,
     )
 
 
@@ -512,14 +602,10 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         "ms",
         _VLM_VISION,
         from_run=lambda obj: (
-            None
-            if getattr(obj, "vision_encode_latency", None) is None
-            else float(obj.vision_encode_latency) * 1000.0
+            None if getattr(obj, "vision_encode_latency", None) is None else float(obj.vision_encode_latency) * 1000.0
         ),
         from_runs_for_summary=lambda runs: [
-            float(v) * 1000.0
-            for r in runs
-            if (v := getattr(r, "vision_encode_latency", None)) is not None
+            float(v) * 1000.0 for r in runs if (v := getattr(r, "vision_encode_latency", None)) is not None
         ],
     ),
     _row(
@@ -532,7 +618,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
             float(v) for r in runs if (v := getattr(r, "vision_fps", None)) is not None
         ],
     ),
-
     # --- LLM throughput/latency (all four LLM sections; llm_ prefix in VLM) ---
     _throughput_row(
         "prefill_tps",
@@ -568,7 +653,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         sweep_values_attr="time_values",
         ms_scale=True,
     ),
-
     # --- Total wall time (measure only; represents phase totals) ---
     _row(
         "total",
@@ -578,36 +662,29 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         from_run=_total_measure_from_run,
         from_runs_for_summary=_list_attr("total_time", scale=1000.0),
     ),
-
     # --- NPU latency ---
     _npu_latency_row("prefill_npu_lat", "prefill_npu_lat", "prefill_npu_latency_pct", "prefill_sweep"),
     _npu_latency_row("decode_npu_lat", "decode_npu_lat", "decode_npu_latency_pct", "decode_sweep"),
     _total_npu_latency_row(),
-
-    # --- EAGLE-3 acceptance (LLM measure only) ---
+    # --- Speculative decoding acceptance (LLM measure only; EAGLE-3 today) ---
+    # accept_steps: number of speculative-decoding iterations.
+    # tokens_sum: total tokens generated = drafts accepted + steps (base's forced root per step).
+    # tokens_per_step: mean tokens per iteration = drafts_avg + 1; matches the reference
+    #   EAGLE-3 script's `accepts.append(accept_length+1)` definition for side-by-side comparison.
+    # draft_accept_ratio: fraction of proposed draft tokens accepted (drafts concept).
     _accept_row("accept_steps", "accept_steps", "count", "acceptance_steps"),
-    _accept_row("accept_tok_sum", "accept_tok_sum", "tok", "acceptance_tokens_sum"),
-    _accept_row("accept_tok_avg", "accept_tok_avg", "tok", "acceptance_tokens_avg"),
-    _accept_row("accept_ratio", "accept_ratio", "%", "acceptance_ratio", scale=100.0),
-
+    _tokens_sum_row(),
+    _tokens_per_step_row(),
+    _accept_row("draft_accept_ratio", "draft_accept_ratio", "%", "acceptance_ratio", scale=100.0),
     # --- Device metrics: power ---
     _scalar_device_row("avg_power", "avg_power", "W", _ALL_LLM, "avg_power_w", llm_prefix=True),
     _scalar_device_row("p99_power", "p99_power", "W", _ALL_LLM, "p99_power_w", llm_prefix=True),
-    _scalar_device_row(
-        "prefill_avg_power", "prefill_avg_power", "W", _ALL_LLM, "prefill_avg_power_w", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "prefill_p99_power", "prefill_p99_power", "W", _ALL_LLM, "prefill_p99_power_w", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "decode_avg_power", "decode_avg_power", "W", _ALL_LLM, "decode_avg_power_w", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "decode_p99_power", "decode_p99_power", "W", _ALL_LLM, "decode_p99_power_w", llm_prefix=True
-    ),
+    _scalar_device_row("prefill_avg_power", "prefill_avg_power", "W", _ALL_LLM, "prefill_avg_power_w", llm_prefix=True),
+    _scalar_device_row("prefill_p99_power", "prefill_p99_power", "W", _ALL_LLM, "prefill_p99_power_w", llm_prefix=True),
+    _scalar_device_row("decode_avg_power", "decode_avg_power", "W", _ALL_LLM, "decode_avg_power_w", llm_prefix=True),
+    _scalar_device_row("decode_p99_power", "decode_p99_power", "W", _ALL_LLM, "decode_p99_power_w", llm_prefix=True),
     _scalar_device_row("vision_avg_power", "vision_avg_power", "W", _VLM_VISION, "vision_avg_power_w"),
     _scalar_device_row("vision_p99_power", "vision_p99_power", "W", _VLM_VISION, "vision_p99_power_w"),
-
     # --- Device metrics: utilization ---
     _scalar_device_row("avg_util", "avg_util", "%", _ALL_LLM, "avg_utilization_pct", llm_prefix=True),
     _scalar_device_row("p99_util", "p99_util", "%", _ALL_LLM, "p99_utilization_pct", llm_prefix=True),
@@ -625,7 +702,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
     ),
     _scalar_device_row("vision_avg_util", "vision_avg_util", "%", _VLM_VISION, "vision_avg_utilization_pct"),
     _scalar_device_row("vision_p99_util", "vision_p99_util", "%", _VLM_VISION, "vision_p99_utilization_pct"),
-
     # --- Device metrics: temperature ---
     _scalar_device_row("avg_temp", "avg_temp", "C", _ALL_LLM, "avg_temperature_c", llm_prefix=True),
     _scalar_device_row("p99_temp", "p99_temp", "C", _ALL_LLM, "p99_temperature_c", llm_prefix=True),
@@ -643,14 +719,9 @@ TPS_TABLE_SPEC: list[TpsRow] = [
     ),
     _scalar_device_row("vision_avg_temp", "vision_avg_temp", "C", _VLM_VISION, "vision_avg_temperature_c"),
     _scalar_device_row("vision_p99_temp", "vision_p99_temp", "C", _VLM_VISION, "vision_p99_temperature_c"),
-
     # --- Device metrics: memory (MB) ---
-    _scalar_device_row(
-        "avg_mem_used", "avg_mem_used", "MB", _ALL_LLM, "avg_memory_used_mb", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "p99_mem_used", "p99_mem_used", "MB", _ALL_LLM, "p99_memory_used_mb", llm_prefix=True
-    ),
+    _scalar_device_row("avg_mem_used", "avg_mem_used", "MB", _ALL_LLM, "avg_memory_used_mb", llm_prefix=True),
+    _scalar_device_row("p99_mem_used", "p99_mem_used", "MB", _ALL_LLM, "p99_memory_used_mb", llm_prefix=True),
     _scalar_device_row(
         "prefill_avg_mem_used",
         "prefill_avg_mem_used",
@@ -683,25 +754,13 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         "decode_p99_memory_used_mb",
         llm_prefix=True,
     ),
-    _scalar_device_row(
-        "vision_avg_mem_used", "vision_avg_mem_used", "MB", _VLM_VISION, "vision_avg_memory_used_mb"
-    ),
-    _scalar_device_row(
-        "vision_p99_mem_used", "vision_p99_mem_used", "MB", _VLM_VISION, "vision_p99_memory_used_mb"
-    ),
-
+    _scalar_device_row("vision_avg_mem_used", "vision_avg_mem_used", "MB", _VLM_VISION, "vision_avg_memory_used_mb"),
+    _scalar_device_row("vision_p99_mem_used", "vision_p99_mem_used", "MB", _VLM_VISION, "vision_p99_memory_used_mb"),
     # --- Total memory (aggregate; no llm_ prefix; appears in every device section) ---
-    _scalar_device_row(
-        "total_mem", "total_mem", "MB", _ALL_DEVICE_SECTIONS, "total_memory_mb"
-    ),
-
+    _scalar_device_row("total_mem", "total_mem", "MB", _ALL_DEVICE_SECTIONS, "total_memory_mb"),
     # --- Device metrics: memory (%) ---
-    _scalar_device_row(
-        "avg_mem_used_pct", "avg_mem_used_pct", "%", _ALL_LLM, "avg_memory_used_pct", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "p99_mem_used_pct", "p99_mem_used_pct", "%", _ALL_LLM, "p99_memory_used_pct", llm_prefix=True
-    ),
+    _scalar_device_row("avg_mem_used_pct", "avg_mem_used_pct", "%", _ALL_LLM, "avg_memory_used_pct", llm_prefix=True),
+    _scalar_device_row("p99_mem_used_pct", "p99_mem_used_pct", "%", _ALL_LLM, "p99_memory_used_pct", llm_prefix=True),
     _scalar_device_row(
         "prefill_avg_mem_used_pct",
         "prefill_avg_mem_used_pct",
@@ -748,17 +807,10 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         _VLM_VISION,
         "vision_p99_memory_used_pct",
     ),
-
     # --- Energy ---
-    _scalar_device_row(
-        "prefill_energy", "prefill_energy", "J", _ALL_LLM, "prefill_energy_j", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "decode_energy", "decode_energy", "J", _ALL_LLM, "decode_energy_j", llm_prefix=True
-    ),
-    _scalar_device_row(
-        "vision_energy", "vision_energy", "J", _VLM_VISION, "vision_energy_j"
-    ),
+    _scalar_device_row("prefill_energy", "prefill_energy", "J", _ALL_LLM, "prefill_energy_j", llm_prefix=True),
+    _scalar_device_row("decode_energy", "decode_energy", "J", _ALL_LLM, "decode_energy_j", llm_prefix=True),
+    _scalar_device_row("vision_energy", "vision_energy", "J", _VLM_VISION, "vision_energy_j"),
     # llm_total_energy: LLM-only aggregate energy in VLM contexts.  Sourced
     # from ``llm_total_energy_j`` so it never accidentally reads the
     # vision+LLM combined ``total_energy_j``.  The label is literal (no
@@ -785,7 +837,6 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         (SECTION_LLM_MEASURE, SECTION_LLM_SWEEP, SECTION_VLM_MEASURE),
         "total_energy_j",
     ),
-
     # --- Efficiency (per-phase, phase-wide aggregate) ---
     _scalar_device_row(
         "prefill_tps_per_w",
@@ -819,12 +870,8 @@ TPS_TABLE_SPEC: list[TpsRow] = [
         "decode_j_per_token",
         llm_prefix=True,
     ),
-    _scalar_device_row(
-        "vision_img_per_j", "vision_img_per_j", "img/J", _VLM_VISION, "vision_img_per_j"
-    ),
-    _scalar_device_row(
-        "vision_j_per_img", "vision_j_per_img", "J/img", _VLM_VISION, "vision_j_per_img"
-    ),
+    _scalar_device_row("vision_img_per_j", "vision_img_per_j", "img/J", _VLM_VISION, "vision_img_per_j"),
+    _scalar_device_row("vision_j_per_img", "vision_j_per_img", "J/img", _VLM_VISION, "vision_j_per_img"),
 ]
 
 
@@ -857,26 +904,42 @@ def json_key_for(row: TpsRow, section: str, *, is_summary: bool = False) -> str:
     return key
 
 
-def iter_section_rows(section: str, *, device_metrics: bool) -> list[TpsRow]:
-    """Return the rows that should be emitted in ``section`` (CLI table view)."""
+def iter_section_rows(
+    section: str,
+    *,
+    device_metrics: bool,
+    is_speculative: bool = False,
+) -> list[TpsRow]:
+    """Return the rows that should be emitted in ``section`` (CLI table view).
+
+    ``is_speculative`` gates rows whose metric only exists on a speculative-
+    decoding runtime (acceptance stats).  Callers pass the model-class-based
+    detection here so plain autoregressive LLM runs never surface acceptance
+    rows.  The gate is independent of ``device_metrics``: acceptance metrics
+    are not device telemetry and must survive ``--no-device-metrics``.
+    """
     rows: list[TpsRow] = []
     for row in TPS_TABLE_SPEC:
         if section not in row.sections:
             continue
         if row.device_metric and not device_metrics:
             continue
+        if row.spec_decode_only and not is_speculative:
+            continue
         rows.append(row)
     return rows
 
 
-def iter_json_rows(section: str) -> list[TpsRow]:
+def iter_json_rows(section: str, *, is_speculative: bool = False) -> list[TpsRow]:
     """Return the rows that should appear in the JSON output for ``section``.
 
     Unlike :func:`iter_section_rows`, this does *not* apply the
     ``device_metrics`` gate — JSON payloads always dump whatever the run
-    produced; the CLI table is what respects ``--device-metrics``.
+    produced; the CLI table is what respects ``--device-metrics``.  The
+    ``is_speculative`` gate does apply here: non-speculative runs omit the
+    acceptance rows entirely so the JSON schema stays clean.
     """
-    return [row for row in TPS_TABLE_SPEC if section in row.sections]
+    return [row for row in TPS_TABLE_SPEC if section in row.sections and (not row.spec_decode_only or is_speculative)]
 
 
 def emit_table(
@@ -885,6 +948,7 @@ def emit_table(
     *,
     device_metrics: bool,
     print_summary,
+    is_speculative: bool = False,
 ) -> None:
     """Emit a summary table for ``section`` using ``values_by_key``.
 
@@ -897,13 +961,33 @@ def emit_table(
     ``print_summary`` is injected so this module stays free of the display
     formatting concerns living in :mod:`mblt_model_zoo.cli.tps`.
     """
-    for row in iter_section_rows(section, device_metrics=device_metrics):
+    for row in iter_section_rows(section, device_metrics=device_metrics, is_speculative=is_speculative):
         if row.key not in values_by_key:
             continue
         print_summary(label_for(row, section), values_by_key[row.key], row.unit)
 
 
-def render_units(section: str, keys_present: Optional[set[str]] = None) -> dict[str, str]:
+TEMPERATURE_JSON_KEY = "temperature"
+TEMPERATURE_LABEL = "temperature"
+
+
+def format_temperature_display(temperature: float) -> str:
+    """Return the CLI display string for a sampling temperature.
+
+    Greedy decoding (``temperature == 0.0``) is rendered as ``0.0 (greedy)``
+    so the printed header conveys the semantics without ambiguity.
+    """
+    if float(temperature) == 0.0:
+        return "0.0 (greedy)"
+    return f"{float(temperature):g}"
+
+
+def render_units(
+    section: str,
+    keys_present: Optional[set[str]] = None,
+    *,
+    is_speculative: bool = False,
+) -> dict[str, str]:
     """Return a ``{canonical_key: unit}`` dict for JSON's ``units`` metadata.
 
     ``keys_present``, when provided, filters the output to canonical keys
@@ -913,7 +997,7 @@ def render_units(section: str, keys_present: Optional[set[str]] = None) -> dict[
     curves and to the derived ``_last`` summary scalars.
     """
     out: dict[str, str] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         key = json_key_for(row, section)
         if keys_present is not None and key not in keys_present:
             continue
@@ -925,6 +1009,8 @@ def render_summary_json(
     section: str,
     values_by_key: Mapping[str, Sequence[float]],
     summary_fn: Callable[[Sequence[float]], dict[str, float]],
+    *,
+    is_speculative: bool = False,
 ) -> dict[str, dict[str, float]]:
     """Build the ``summary`` JSON block for ``section``.
 
@@ -934,7 +1020,7 @@ def render_summary_json(
     :func:`json_key_for`).
     """
     out: dict[str, dict[str, float]] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         values = values_by_key.get(row.key)
         if values is None:
             continue
@@ -946,6 +1032,8 @@ def render_summary_json_from_runs(
     section: str,
     runs: Sequence[Any],
     summary_fn: Callable[[Sequence[float]], dict[str, float]],
+    *,
+    is_speculative: bool = False,
 ) -> dict[str, dict[str, float]]:
     """Build the ``summary`` block by invoking each row's ``from_runs_for_summary``.
 
@@ -953,7 +1041,7 @@ def render_summary_json_from_runs(
     keys (``_last`` suffix for sweep-suffix rows).
     """
     out: dict[str, dict[str, float]] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         if row.from_runs_for_summary is None:
             continue
         values = row.from_runs_for_summary(runs)
@@ -961,7 +1049,7 @@ def render_summary_json_from_runs(
     return out
 
 
-def render_run_json(section: str, run: Any) -> dict[str, Any]:
+def render_run_json(section: str, run: Any, *, is_speculative: bool = False) -> dict[str, Any]:
     """Build a per-run canonical projection for ``run``.
 
     Missing/None extractions are skipped, matching the CLI table gating.
@@ -969,7 +1057,7 @@ def render_run_json(section: str, run: Any) -> dict[str, Any]:
     suffix is reserved for summary scalars.
     """
     out: dict[str, Any] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         if row.from_run is None:
             continue
         value = row.from_run(run)
@@ -983,10 +1071,10 @@ def render_run_json(section: str, run: Any) -> dict[str, Any]:
     return out
 
 
-def render_aggregate_json(section: str, aggregate: Any) -> dict[str, Any]:
+def render_aggregate_json(section: str, aggregate: Any, *, is_speculative: bool = False) -> dict[str, Any]:
     """Build a canonical projection of the aggregate object for ``section``."""
     out: dict[str, Any] = {}
-    for row in iter_json_rows(section):
+    for row in iter_json_rows(section, is_speculative=is_speculative):
         if row.from_aggregate is None:
             continue
         value = row.from_aggregate(aggregate)

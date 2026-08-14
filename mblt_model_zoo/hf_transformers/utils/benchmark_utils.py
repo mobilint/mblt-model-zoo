@@ -297,6 +297,33 @@ def _supports_fake_decode_prefill(model: object) -> bool:
     return _is_mobilint_npu_model(model) and _get_cache_mxq_model(model) is not None
 
 
+def _is_eagle3_model(model: object) -> bool:
+    """Return whether ``model`` is a Mobilint EAGLE-3 speculative-decoding model.
+
+    EAGLE-3 wrappers expose the base LM under ``eagle3_base_model``; the attribute is unique
+    to that stack, so a ``hasattr`` probe is a stable detector without importing the mixin.
+    """
+    return hasattr(model, "eagle3_base_model")
+
+
+def _apply_eagle3_gen_kwargs(gen_kwargs: dict, model: object) -> None:
+    """Adjust ``gen_kwargs`` in place so EAGLE-3 generate honors real EOS early stopping.
+
+    EAGLE-3's ``generate`` ignores ``min_new_tokens`` and ``pad_token_id`` and emits warnings when
+    they are supplied. It also falls back to the model's configured EOS when
+    ``eos_token_id=None``. TPS measurement paths pin these values to force ``N`` deterministic
+    tokens on the non-speculative path; for EAGLE-3 we instead drop the pin so the measurement
+    reflects the real workload (stops at EOS, capped by ``max_new_tokens``).
+
+    No-op for non-EAGLE-3 models to preserve exact-N generation semantics.
+    """
+    if not _is_eagle3_model(model):
+        return
+    for key in ("min_new_tokens", "pad_token_id"):
+        gen_kwargs.pop(key, None)
+    gen_kwargs["eos_token_id"] = None
+
+
 def _resolve_config_vocab_size(config) -> int:
     """Resolve vocabulary size from text-only or vision-language model configs.
 
@@ -421,6 +448,11 @@ def _resolve_decoder_logits(outputs: object) -> torch.Tensor:
 
 
 class TokenIteratorStreamer(TextIteratorStreamer):
+    def __init__(self, *args, collect_token_ids: bool = False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._collect_token_ids = bool(collect_token_ids)
+        self.token_ids: List[int] = []
+
     def put(self, value):
         if len(value.shape) > 1 and value.shape[0] > 1:
             raise ValueError("TokenIteratorStreamer only supports batch size 1")
@@ -431,7 +463,9 @@ class TokenIteratorStreamer(TextIteratorStreamer):
             self.next_tokens_are_prompt = False
             return
 
-        for _ in value.tolist():
+        for token_id in value.tolist():
+            if self._collect_token_ids:
+                self.token_ids.append(int(token_id))
             self.text_queue.put("", timeout=self.timeout)
 
     def end(self):
@@ -509,6 +543,7 @@ class SingleMeasurement:
     acceptance_tokens_avg: Optional[float] = None
     acceptance_ratio: Optional[float] = None
     decode_prefill_mode: str = "real"
+    generated_token_ids: Optional[List[int]] = None
 
     def __post_init__(self) -> None:
         """Populate nanosecond timing fields from second-based fields when omitted."""
@@ -856,6 +891,8 @@ class TPSMeasurer:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        temperature: float = 0.0,
+        collect_generated_token_ids: bool = False,
     ) -> SingleMeasurement:
         """Measure batched generation without a streamer and report total throughput."""
         batch_size = _validate_batch_size(int(input_ids.shape[0]))
@@ -863,10 +900,14 @@ class TPSMeasurer:
             input_ids=input_ids,
             min_new_tokens=num_decode if fake_prefill else num_decode + 1,
             max_new_tokens=num_decode if fake_prefill else num_decode + 1,
-            do_sample=False,
             eos_token_id=None,
             pad_token_id=self.tokenizer.eos_token_id,
         )
+        if temperature > 0.0:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = float(temperature)
+        else:
+            gen_kwargs["do_sample"] = False
         if past_key_values is not None:
             gen_kwargs["past_key_values"] = past_key_values
         if npu_prefill_chunk_size is not None:
@@ -874,6 +915,7 @@ class TPSMeasurer:
         if npu_timing_target is not None:
             gen_kwargs["count_npu_time"] = True
             _reset_npu_timing(npu_timing_target)
+        _apply_eagle3_gen_kwargs(gen_kwargs, self.model)
 
         phase_callbacks = _GenerationPhaseCallbacks(
             on_prefill_start=on_prefill_start,
@@ -902,6 +944,15 @@ class TPSMeasurer:
         output_len = int(outputs.shape[1]) if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2 else 0
         input_len = int(input_ids.shape[1])
         generated_per_row = max(output_len - input_len, 0) if output_len else num_decode + (0 if fake_prefill else 1)
+        generated_token_ids: Optional[List[int]] = None
+        if (
+            collect_generated_token_ids
+            and isinstance(outputs, torch.Tensor)
+            and outputs.ndim >= 2
+            and output_len > input_len
+        ):
+            # Only decode the first row of the batch; full batch decoding is out of scope.
+            generated_token_ids = outputs[0, input_len:].detach().cpu().tolist()
         decode_count = max(generated_per_row if fake_prefill else generated_per_row - 1, 0)
         if decode_count == 0:
             decode_count = num_decode
@@ -970,6 +1021,7 @@ class TPSMeasurer:
             acceptance_tokens_avg=cast(Optional[float], acceptance_stats["acceptance_tokens_avg"]),
             acceptance_ratio=cast(Optional[float], acceptance_stats["acceptance_ratio"]),
             decode_prefill_mode="fake" if fake_prefill else "real",
+            generated_token_ids=generated_token_ids,
         )
 
     def measure(
@@ -986,6 +1038,8 @@ class TPSMeasurer:
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
         batch_size: int = 1,
+        temperature: float = 0.0,
+        collect_generated_token_ids: bool = False,
     ) -> SingleMeasurement:
         trace_handle = self._start_trace(trace_path)
         try:
@@ -1023,25 +1077,37 @@ class TPSMeasurer:
                     on_prefill_end=on_prefill_end,
                     on_decode_start=on_decode_start,
                     on_decode_end=on_decode_end,
+                    temperature=temperature,
+                    collect_generated_token_ids=collect_generated_token_ids,
                 )
 
             # 2. Setup
-            streamer = TokenIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+            streamer = TokenIteratorStreamer(
+                self.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True,
+                collect_token_ids=collect_generated_token_ids,
+            )
             gen_kwargs = dict(
                 input_ids=measure_input_ids,
                 streamer=streamer,
                 min_new_tokens=num_decode + 1,
                 max_new_tokens=num_decode + 1,
-                do_sample=False,
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if temperature > 0.0:
+                gen_kwargs["do_sample"] = True
+                gen_kwargs["temperature"] = float(temperature)
+            else:
+                gen_kwargs["do_sample"] = False
             if npu_prefill_chunk_size is not None:
                 gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
             npu_timing_target = _get_npu_timing_target(self.model)
             if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
                 _reset_npu_timing(npu_timing_target)
+            _apply_eagle3_gen_kwargs(gen_kwargs, self.model)
             phase_callbacks = _GenerationPhaseCallbacks(
                 on_prefill_start=on_prefill_start,
                 on_prefill_end=on_prefill_end,
@@ -1160,7 +1226,7 @@ class TPSMeasurer:
             acceptance_stats = self._get_eagle3_acceptance_stats()
             return SingleMeasurement(
                 num_prefill=num_prefill,
-                num_decode=num_decode,
+                num_decode=decode_count,
                 prefill_latency=prefill_latency,
                 prefill_tps=prefill_tps,
                 decode_duration=decode_duration,
@@ -1190,6 +1256,7 @@ class TPSMeasurer:
                 acceptance_tokens_sum=cast(Optional[int], acceptance_stats["acceptance_tokens_sum"]),
                 acceptance_tokens_avg=cast(Optional[float], acceptance_stats["acceptance_tokens_avg"]),
                 acceptance_ratio=cast(Optional[float], acceptance_stats["acceptance_ratio"]),
+                generated_token_ids=list(streamer.token_ids) if collect_generated_token_ids else None,
             )
         finally:
             self._stop_trace(trace_handle)
@@ -1707,6 +1774,7 @@ class VLMTPSMeasurer:
         npu_prefill_chunk_size: Optional[int] = None,
         show_progress: bool = False,
         progress_desc: Union[str, None] = None,
+        temperature: float = 0.0,
     ) -> SingleMeasurement:
         seq_len = int(inputs_embeds.shape[1])
         lm_for_npu = self._get_language_model()
@@ -1727,16 +1795,21 @@ class VLMTPSMeasurer:
                 position_ids=position_ids,
                 min_new_tokens=num_decode + 1,
                 max_new_tokens=num_decode + 1,
-                do_sample=False,
                 eos_token_id=None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
+            if temperature > 0.0:
+                gen_kwargs["do_sample"] = True
+                gen_kwargs["temperature"] = float(temperature)
+            else:
+                gen_kwargs["do_sample"] = False
             if npu_prefill_chunk_size is not None:
                 gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
             npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
             if npu_timing_target is not None:
                 gen_kwargs["count_npu_time"] = True
                 _reset_npu_timing(npu_timing_target)
+            _apply_eagle3_gen_kwargs(gen_kwargs, gen_model)
             t_start_ns = time.perf_counter_ns()
             with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
                 outputs = gen_model.generate(**gen_kwargs)
@@ -1819,16 +1892,21 @@ class VLMTPSMeasurer:
             streamer=streamer,
             min_new_tokens=num_decode + 1,
             max_new_tokens=num_decode + 1,
-            do_sample=False,
             eos_token_id=None,
             pad_token_id=self.tokenizer.eos_token_id,
         )
+        if temperature > 0.0:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = float(temperature)
+        else:
+            gen_kwargs["do_sample"] = False
         if npu_prefill_chunk_size is not None:
             gen_kwargs["npu_prefill_chunk_size"] = int(npu_prefill_chunk_size)
         npu_timing_target = _get_npu_timing_target(lm_for_npu) or _get_npu_timing_target(gen_model)
         if npu_timing_target is not None:
             gen_kwargs["count_npu_time"] = True
             _reset_npu_timing(npu_timing_target)
+        _apply_eagle3_gen_kwargs(gen_kwargs, gen_model)
 
         thread_error: list[Exception] = []
 
@@ -2142,6 +2220,7 @@ class VLMTPSMeasurer:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        temperature: float = 0.0,
     ) -> BenchmarkResult:
         full_result = BenchmarkResult()
         batch_size = _validate_batch_size(batch_size)
@@ -2180,6 +2259,7 @@ class VLMTPSMeasurer:
                     npu_prefill_chunk_size=npu_prefill_chunk_size,
                     show_progress=show_progress,
                     progress_desc=f"{prefix}vlm llm prefill generate ({p_len})",
+                    temperature=temperature,
                 )
                 full_result.prefill_sweep.x_values.append(p_len)
                 full_result.prefill_sweep.tps_values.append(res.prefill_tps)
@@ -2233,6 +2313,7 @@ class VLMTPSMeasurer:
                         npu_prefill_chunk_size=npu_prefill_chunk_size,
                         show_progress=show_progress,
                         progress_desc=progress_desc,
+                        temperature=temperature,
                     )
                 full_result.decode_sweep.x_values.append(cache_len)
                 full_result.decode_sweep.tps_values.append(res.decode_tps)
@@ -2333,6 +2414,7 @@ class VLMTPSMeasurer:
         npu_prefill_chunk_size: Optional[int] = None,
         batch_size: int = 1,
         show_progress: bool = False,
+        temperature: float = 0.0,
     ) -> list[VLMSingleMeasurement]:
         assert repeat > 0, "repeat must be > 0"
         batch_size = _validate_batch_size(batch_size)
@@ -2350,6 +2432,7 @@ class VLMTPSMeasurer:
                 inputs_embeds=inputs_embeds,
                 num_decode=num_decode,
                 npu_prefill_chunk_size=npu_prefill_chunk_size,
+                temperature=temperature,
             )
             results.append(
                 VLMSingleMeasurement(

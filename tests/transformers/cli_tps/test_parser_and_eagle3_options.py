@@ -61,6 +61,198 @@ def test_cli_tps_measure_batch_size_override():
     assert args.batch_size == 4
 
 
+def test_cli_tps_measure_print_output_defaults_false():
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])
+
+    assert args.print_output is False
+
+
+def test_cli_tps_measure_print_output_flag():
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--print-output"])
+
+    assert args.print_output is True
+
+
+@pytest.mark.parametrize("value", ["nan", "NaN", "inf", "-inf", "Infinity"])
+def test_cli_tps_measure_temperature_rejects_non_finite(value):
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--temperature",
+                value,
+            ]
+        )
+
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize(("value", "expected"), [("0.0", 0.0), ("0.5", 0.5), ("1.0", 1.0)])
+def test_cli_tps_measure_temperature_accepts_finite_non_negative(value, expected):
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/Llama-3.2-1B-Instruct",
+            "--temperature",
+            value,
+        ]
+    )
+
+    assert args.temperature == pytest.approx(expected)
+
+
+def test_cli_tps_measure_temperature_rejects_negative():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--temperature",
+                "-0.1",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+
+
+def test_cli_tps_measure_thinking_defaults_to_none():
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])
+
+    assert args.enable_thinking is None
+
+
+def test_cli_tps_measure_enable_thinking_flag():
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--enable-thinking"])
+
+    assert args.enable_thinking is True
+
+
+def test_cli_tps_measure_disable_thinking_flag():
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--disable-thinking"])
+
+    assert args.enable_thinking is False
+
+
+def test_cli_tps_measure_thinking_flags_are_mutually_exclusive():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "tps",
+                "measure",
+                "--model",
+                "mobilint/Llama-3.2-1B-Instruct",
+                "--enable-thinking",
+                "--disable-thinking",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+
+
+class _RecordingTokenizer:
+    """Minimal tokenizer stub that records apply_chat_template calls."""
+
+    def __init__(self, *, chat_template: str | None = "dummy", accepts_enable_thinking: bool = True):
+        self.chat_template = chat_template
+        self.accepts_enable_thinking = accepts_enable_thinking
+        self.calls: list[dict] = []
+
+    def apply_chat_template(self, messages, **kwargs):
+        if not self.accepts_enable_thinking and "enable_thinking" in kwargs:
+            raise TypeError("apply_chat_template() got an unexpected keyword argument 'enable_thinking'")
+        self.calls.append({"messages": messages, "kwargs": kwargs})
+        import torch
+
+        return {"input_ids": torch.zeros((1, 3), dtype=torch.long)}
+
+    def __call__(self, text, **kwargs):  # pragma: no cover - fallback branch
+        import torch
+
+        return {"input_ids": torch.zeros((1, 2), dtype=torch.long)}
+
+
+def _measure_args(**overrides) -> argparse.Namespace:
+    defaults = dict(
+        input_mode="synthetic-text",
+        prompt_text="hello",
+        prompt_file=None,
+        prompt_file_strategy="first",
+        prompt_file_seed=0,
+        apply_chat_template=True,
+        enable_thinking=None,
+        prefill=8,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def test_tokenize_prompt_text_omits_enable_thinking_when_unset():
+    tokenizer = _RecordingTokenizer()
+    pipeline = SimpleNamespace(tokenizer=tokenizer)
+
+    tps_cli._resolve_text_measure_inputs(_measure_args(), pipeline)
+
+    assert len(tokenizer.calls) == 1
+    assert "enable_thinking" not in tokenizer.calls[0]["kwargs"]
+
+
+def test_tokenize_prompt_text_forwards_enable_thinking_true():
+    tokenizer = _RecordingTokenizer()
+    pipeline = SimpleNamespace(tokenizer=tokenizer)
+
+    tps_cli._resolve_text_measure_inputs(_measure_args(enable_thinking=True), pipeline)
+
+    assert tokenizer.calls[0]["kwargs"].get("enable_thinking") is True
+
+
+def test_tokenize_prompt_text_forwards_enable_thinking_false():
+    tokenizer = _RecordingTokenizer()
+    pipeline = SimpleNamespace(tokenizer=tokenizer)
+
+    tps_cli._resolve_text_measure_inputs(_measure_args(enable_thinking=False), pipeline)
+
+    assert tokenizer.calls[0]["kwargs"].get("enable_thinking") is False
+
+
+def test_tokenize_prompt_text_falls_back_when_tokenizer_rejects_kwarg(capsys):
+    tokenizer = _RecordingTokenizer(accepts_enable_thinking=False)
+    pipeline = SimpleNamespace(tokenizer=tokenizer)
+
+    tps_cli._resolve_text_measure_inputs(_measure_args(enable_thinking=False), pipeline)
+
+    assert len(tokenizer.calls) == 1
+    assert "enable_thinking" not in tokenizer.calls[0]["kwargs"]
+    stderr = capsys.readouterr().err
+    assert "--disable-thinking" in stderr
+
+
+def test_tokenize_prompt_text_warns_when_chat_template_disabled(capsys):
+    tokenizer = _RecordingTokenizer()
+    pipeline = SimpleNamespace(tokenizer=tokenizer)
+
+    tps_cli._resolve_text_measure_inputs(_measure_args(enable_thinking=True, apply_chat_template=False), pipeline)
+
+    assert tokenizer.calls == []
+    stderr = capsys.readouterr().err
+    assert "--enable-thinking/--disable-thinking is ignored" in stderr
+
+
 def test_cli_tps_sweep_defaults():
     parser = build_parser()
     args = parser.parse_args(["tps", "sweep", "--model", "mobilint/Llama-3.2-1B-Instruct"])
@@ -189,7 +381,9 @@ def test_build_pipeline_eagle3_prefixed_options_override_global_with_warning(mon
 
 def test_build_pipeline_eagle3_prefixed_options_no_warning_when_same_values(monkeypatch) -> None:
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
-    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
 
     eagle3_options = tps_cli.Eagle3PipelineOptions(
         base_core_mode="single",
@@ -229,7 +423,9 @@ def test_build_pipeline_eagle3_prefixed_options_no_warning_when_same_values(monk
 def test_build_pipeline_single_mode_can_omit_default_target_cores(monkeypatch) -> None:
     """Verify batch TPS paths can keep single-mode target cores unset."""
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
-    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
 
     pipe = tps_cli._build_pipeline(
         task="text-generation",
@@ -255,7 +451,9 @@ def test_build_pipeline_single_mode_can_omit_default_target_cores(monkeypatch) -
 def test_build_pipeline_single_mode_preserves_explicit_target_cores(monkeypatch) -> None:
     """Verify explicit target cores still override batch TPS default suppression."""
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
-    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
 
     pipe = tps_cli._build_pipeline(
         task="text-generation",
