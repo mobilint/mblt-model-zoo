@@ -50,11 +50,11 @@ class MobilintNPUBackend:
     def __init__(
         self,
         mxq_path: str = "",
-        dev_no: int = 0,
+        dev_no: Union[int, List[int]] = 0,
         max_batch_size: int = 1,
         core_mode: CoreMode = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
-        target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
+        target_clusters: Optional[List[Union[int, str, "Cluster"]]] = None,
         revision: Optional[str] = None,
         commit_hash: Optional[str] = None,
         **kwargs,
@@ -63,16 +63,30 @@ class MobilintNPUBackend:
 
         Args:
             mxq_path: Path to the compiled MXQ model file.
-            dev_no: Accelerator device number to use.
+            dev_no: Accelerator device number(s). Accepts either a single
+                index or a list of indices. Callers that pass the fully
+                qualified target strings (``"d:c:k"`` / ``"d:c"``) may
+                also pass a list here to declare the covered device set.
+                Otherwise ``dev_no`` acts as syntactic sugar: it is
+                expanded into ``target_cores`` / ``target_clusters`` when
+                those lists are empty, and prepends the device prefix to
+                legacy 2-part items.
             core_mode: Execution mode that determines how NPU cores are
                 allocated. One of ``"single"``, ``"multi"``, ``"global4"``,
                 or ``"global8"``.
-            target_cores: List of core identifiers (as ``"cluster:core"``
-                strings or :class:`~qbruntime.CoreId` objects) used in
-                ``"single"`` mode. ``None`` means all cores.
-            target_clusters: List of cluster identifiers (as integers or
-                :class:`~qbruntime.Cluster` objects) used in ``"multi"``,
-                ``"global4"``, and ``"global8"`` modes.
+            target_cores: List of core identifiers used in ``"single"``
+                mode. The canonical form is a fully-qualified
+                ``"d:c:k"`` string (device : cluster : core). Legacy
+                ``"c:k"`` strings and :class:`~qbruntime.CoreId` objects
+                are accepted and rewritten to canonical form using
+                ``dev_no`` as the device prefix. ``None`` leaves the
+                configuration to be filled by ``dev_no`` sugar.
+            target_clusters: List of cluster identifiers used in
+                ``"multi"``, ``"global4"``, and ``"global8"`` modes. The
+                canonical form is a fully-qualified ``"d:c"`` string.
+                Legacy integers, :class:`~qbruntime.Cluster` objects, and
+                bare ``"c"`` strings are accepted and rewritten to
+                canonical form using ``dev_no`` as the device prefix.
             revision: HuggingFace Hub revision (branch, tag, or commit SHA)
                 to use when downloading the model file.
             commit_hash: Explicit commit hash for the Hub revision.
@@ -394,73 +408,101 @@ class MobilintNPUBackend:
         """
         self.mxq_model.dispose()
 
+    def _fallback_dev(self) -> int:
+        """Return a single device index to prepend when migrating legacy target items."""
+        dev = getattr(self, "dev_no", 0)
+        if isinstance(dev, (list, tuple)):
+            return int(dev[0]) if dev else 0
+        return int(dev)
+
     @property
     def target_cores(self) -> List["CoreId"]:
-        """Deserializes and returns the list of target :class:`~qbruntime.CoreId` objects.
+        """Deserialize and return the list of target :class:`~qbruntime.CoreId` objects.
 
-        Cores are stored internally as ``"cluster:core"`` strings and
-        converted to :class:`~qbruntime.CoreId` instances on access.
+        Cores are stored internally as canonical ``"d:c:k"`` strings.
+        Entries whose device does not match ``self.dev_no`` are skipped so
+        the existing single-device ``create()`` path keeps its selection.
 
         When no explicit per-core list has been set, the getter falls back
         to expanding ``target_clusters`` into every core of each listed
-        cluster. This makes ``target_clusters=[0, 1]`` a short-hand for
-        "use all 8 cores across both clusters" in ``single`` core mode,
-        without listing ``["0:0","0:1",...,"1:3"]`` by hand.
+        cluster. This preserves the historical ``target_clusters=[0, 1]``
+        short-hand for "use all 8 cores across both clusters" in
+        ``single`` core mode without listing every core by hand.
 
         Returns:
             A list of :class:`~qbruntime.CoreId` objects representing the
-            configured NPU cores.
+            NPU cores selected on this device.
         """
         result: List["CoreId"] = []
-        serialized = getattr(self, "_target_cores_serialized", None)
-        if serialized:
-            for s in serialized:
-                try:
-                    c_val, r_val = map(int, s.split(":"))
-                    result.append(CoreId(cluster_map[c_val], core_map[r_val]))
-                except Exception as e:
-                    logger.warning("Target cores not serialized: %s", s)
-                    logger.warning("Error: %s", e)
+        serialized = getattr(self, "_target_cores_serialized", None) or []
+        my_dev = self._fallback_dev()
+        for s in serialized:
+            try:
+                parts = s.split(":")
+                if len(parts) == 3:
+                    d_val, c_val, r_val = int(parts[0]), int(parts[1]), int(parts[2])
+                elif len(parts) == 2:
+                    # Tolerate a stale legacy entry that slipped past normalization.
+                    d_val, c_val, r_val = my_dev, int(parts[0]), int(parts[1])
+                else:
+                    raise ValueError(f"invalid entry: {s}")
+                if d_val != my_dev:
+                    continue
+                result.append(CoreId(cluster_map[c_val], core_map[r_val]))
+            except Exception as e:
+                logger.warning("Target cores not serialized: %s", s)
+                logger.warning("Error: %s", e)
+        if result:
             return result
 
-        # Fallback: expand target_clusters into their full 4-core set. Only
-        # kicks in when the caller left target_cores empty — an explicit
-        # target_cores list always wins so callers can pick a proper subset.
-        cluster_serialized = getattr(self, "_target_clusters_serialized", None)
-        if cluster_serialized:
-            for cluster_str in cluster_serialized:
-                try:
-                    c_val = int(cluster_str)
-                    cluster_enum = cluster_map[c_val]
-                except Exception as e:
-                    logger.warning("Target cluster not serialized (fallback path): %s", cluster_str)
-                    logger.warning("Error: %s", e)
+        # Fallback: expand target_clusters into their full 4-core set on this
+        # device. Only kicks in when the caller left target_cores empty.
+        cluster_serialized = getattr(self, "_target_clusters_serialized", None) or []
+        for cluster_str in cluster_serialized:
+            try:
+                if isinstance(cluster_str, str) and ":" in cluster_str:
+                    d_val, c_val = int(cluster_str.split(":")[0]), int(cluster_str.split(":")[1])
+                else:
+                    d_val, c_val = my_dev, int(cluster_str)
+                if d_val != my_dev:
                     continue
-                for core_enum in (Core.Core0, Core.Core1, Core.Core2, Core.Core3):
-                    result.append(CoreId(cluster_enum, core_enum))
+                cluster_enum = cluster_map[c_val]
+            except Exception as e:
+                logger.warning("Target cluster not serialized (fallback path): %s", cluster_str)
+                logger.warning("Error: %s", e)
+                continue
+            for core_enum in (Core.Core0, Core.Core1, Core.Core2, Core.Core3):
+                result.append(CoreId(cluster_enum, core_enum))
         return result
 
     @target_cores.setter
     def target_cores(self, values: List[Union[str, "CoreId"]]):
-        """Serializes and stores the list of target cores.
+        """Serialize and store the list of target cores.
+
+        Accepts canonical fully-qualified ``"d:c:k"`` strings, legacy
+        ``"c:k"`` strings, and :class:`~qbruntime.CoreId` objects. Legacy
+        entries and ``CoreId`` objects are migrated to the canonical form
+        using ``self.dev_no`` as the fallback device prefix.
 
         Args:
-            values: A list of core identifiers, either as
-                :class:`~qbruntime.CoreId` objects or ``"cluster:core"``
-                formatted strings.
+            values: A list of core identifiers.
 
         Raises:
-            ValueError: If a string value does not contain ``":"``.
-            TypeError: If a value is neither a :class:`~qbruntime.CoreId`
+            ValueError: If a string value has an unrecognized shape.
+            TypeError: If a value is neither :class:`~qbruntime.CoreId`
                 nor a string.
         """
+        fallback_dev = self._fallback_dev()
         serialized = []
         for v in values:
             if isinstance(v, CoreId):
-                serialized.append(f"{v.cluster.value}:{v.core.value}")
+                serialized.append(f"{fallback_dev}:{v.cluster.value}:{v.core.value}")
             elif isinstance(v, str):
-                if ":" in v:
+                n_colons = v.count(":")
+                if n_colons == 2:
                     serialized.append(v)
+                elif n_colons == 1:
+                    serialized.append(f"{fallback_dev}:{v}")
                 else:
                     raise ValueError(f"Invalid format: {v}")
             else:
@@ -470,22 +512,28 @@ class MobilintNPUBackend:
 
     @property
     def target_clusters(self) -> List["Cluster"]:
-        """Deserializes and returns the list of target :class:`~qbruntime.Cluster` objects.
+        """Deserialize and return the list of target :class:`~qbruntime.Cluster` objects.
 
-        Clusters are stored internally as integer strings and converted to
-        :class:`~qbruntime.Cluster` instances on access.
+        Clusters are stored internally as canonical ``"d:c"`` strings.
+        Entries whose device does not match ``self.dev_no`` are skipped so
+        the existing single-device ``create()`` path keeps its selection.
 
         Returns:
             A list of :class:`~qbruntime.Cluster` objects representing the
-            configured NPU clusters.
+            NPU clusters selected on this device.
         """
         result = []
-        if not hasattr(self, "_target_clusters_serialized"):
-            return []
-
-        for s in self._target_clusters_serialized:
+        serialized = getattr(self, "_target_clusters_serialized", None) or []
+        my_dev = self._fallback_dev()
+        for s in serialized:
             try:
-                c_val = int(s)
+                if isinstance(s, str) and ":" in s:
+                    d_val, c_val = int(s.split(":")[0]), int(s.split(":")[1])
+                else:
+                    # Tolerate a stale legacy entry (bare int) that slipped past normalization.
+                    d_val, c_val = my_dev, int(s)
+                if d_val != my_dev:
+                    continue
                 result.append(cluster_map[c_val])
             except Exception as e:
                 logger.warning("Target clusters not serialized: %s", s)
@@ -493,23 +541,39 @@ class MobilintNPUBackend:
         return result
 
     @target_clusters.setter
-    def target_clusters(self, values: List[Union[int, "Cluster"]]):
-        """Serializes and stores the list of target clusters.
+    def target_clusters(self, values: List[Union[int, str, "Cluster"]]):
+        """Serialize and store the list of target clusters.
+
+        Accepts canonical fully-qualified ``"d:c"`` strings, legacy bare
+        ``"c"`` strings, integer cluster indices, and
+        :class:`~qbruntime.Cluster` objects. Legacy entries are migrated
+        to the canonical form using ``self.dev_no`` as the fallback
+        device prefix.
 
         Args:
-            values: A list of cluster identifiers, either as
-                :class:`~qbruntime.Cluster` objects or integer indices.
+            values: A list of cluster identifiers.
 
         Raises:
-            TypeError: If a value is neither a :class:`~qbruntime.Cluster`
-                nor an integer.
+            ValueError: If a string value has an unrecognized shape.
+            TypeError: If a value is not one of the accepted types.
         """
+        fallback_dev = self._fallback_dev()
         serialized = []
         for v in values:
             if isinstance(v, Cluster):
-                serialized.append(v.value)
+                serialized.append(f"{fallback_dev}:{v.value}")
+            elif isinstance(v, bool):
+                raise TypeError(f"Unsupported type: {type(v)}")
             elif isinstance(v, int):
-                serialized.append(v)
+                serialized.append(f"{fallback_dev}:{v}")
+            elif isinstance(v, str):
+                n_colons = v.count(":")
+                if n_colons == 1:
+                    serialized.append(v)
+                elif n_colons == 0 and v.isdigit():
+                    serialized.append(f"{fallback_dev}:{v}")
+                else:
+                    raise ValueError(f"Invalid format: {v}")
             else:
                 raise TypeError(f"Unsupported type: {type(v)}")
 

@@ -1,7 +1,10 @@
 import inspect
+import warnings
+from collections import defaultdict
 from inspect import Parameter, Signature
 from typing import Any, TypeVar, Union
 
+from qbruntime import Cluster, CoreId
 from transformers.configuration_utils import PretrainedConfig
 
 try:
@@ -15,13 +18,302 @@ except ImportError:
             bound=PretrainedConfig,
         )
 
+from ...utils.core_mode import normalize_core_mode
 from ...utils.npu_backend import MobilintNPUBackend
+
+# NPU target-field normalization
+# ------------------------------
+# The canonical wire representation for NPU targets is fully-qualified:
+#   - ``target_cores``:    list of ``"d:c:k"`` strings (device : cluster : core)
+#   - ``target_clusters``: list of ``"d:c"`` strings   (device : cluster)
+#
+# ``dev_no`` is *syntactic sugar* for the device-prefix component. When both
+# target lists are absent it is expanded into a canonical target list. When
+# legacy 2-part items are provided, ``dev_no`` supplies the missing device
+# prefix. Callers that need per-target device control should use the fully
+# qualified form directly and pass ``dev_no`` as a list.
+
+
+def _normalize_dev_list(dev_no: Any) -> list[int]:
+    """Coerce a ``dev_no`` sugar value into a list of device indices."""
+    if isinstance(dev_no, (list, tuple)):
+        return [int(d) for d in dev_no]
+    return [int(dev_no)]
+
+
+def _migrate_target_cores(
+    values: list, fallback_dev: int, dev_no_is_list: bool
+) -> list[str]:
+    """Migrate a mixed ``target_cores`` list to the canonical ``"d:c:k"`` form.
+
+    Args:
+        values: Raw ``target_cores`` list. Items may be ``CoreId`` objects,
+            fully-qualified ``"d:c:k"`` strings, or legacy ``"c:k"`` strings.
+        fallback_dev: Device prefix to apply to legacy items when ``dev_no``
+            is a scalar.
+        dev_no_is_list: ``True`` if the caller passed a list-shaped ``dev_no``.
+            Legacy items are ambiguous in that case and must be rejected.
+
+    Returns:
+        A list of canonical ``"d:c:k"`` strings.
+
+    Raises:
+        ValueError: If entries mix legacy and new forms, or if a legacy entry
+            appears with a list-shaped ``dev_no``.
+        TypeError: If an entry is neither ``CoreId`` nor a string.
+    """
+    result: list[str] = []
+    modes: set[str] = set()
+    for v in values:
+        if isinstance(v, CoreId):
+            result.append(f"{fallback_dev}:{v.cluster.value}:{v.core.value}")
+            modes.add("legacy")
+            continue
+        if not isinstance(v, str):
+            raise TypeError(f"Unsupported target_cores entry: {v!r} ({type(v).__name__})")
+        parts = v.split(":")
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            result.append(v)
+            modes.add("new")
+        elif len(parts) == 2 and all(p.isdigit() for p in parts):
+            if dev_no_is_list:
+                raise ValueError(
+                    f"Legacy target_cores item {v!r} is ambiguous when dev_no is a list; "
+                    "use the fully-qualified 'd:c:k' form."
+                )
+            c_val, r_val = parts
+            result.append(f"{fallback_dev}:{c_val}:{r_val}")
+            modes.add("legacy")
+        else:
+            raise ValueError(f"Invalid target_cores entry: {v!r}")
+    if len(modes) > 1:
+        raise ValueError(
+            "target_cores mixes legacy 'c:k' and canonical 'd:c:k' items; "
+            "use one form for every entry."
+        )
+    return result
+
+
+def _migrate_target_clusters(
+    values: list, fallback_dev: int, dev_no_is_list: bool
+) -> list[str]:
+    """Migrate a mixed ``target_clusters`` list to the canonical ``"d:c"`` form.
+
+    Args:
+        values: Raw ``target_clusters`` list. Items may be ``Cluster`` objects,
+            fully-qualified ``"d:c"`` strings, bare integers, or bare
+            ``"c"`` strings (legacy).
+        fallback_dev: Device prefix to apply to legacy items when ``dev_no``
+            is a scalar.
+        dev_no_is_list: ``True`` if the caller passed a list-shaped ``dev_no``.
+            Legacy items are ambiguous in that case and must be rejected.
+
+    Returns:
+        A list of canonical ``"d:c"`` strings.
+
+    Raises:
+        ValueError: If entries mix legacy and new forms, or if a legacy entry
+            appears with a list-shaped ``dev_no``.
+        TypeError: If an entry is neither ``Cluster``, ``int``, nor a string.
+    """
+    result: list[str] = []
+    modes: set[str] = set()
+    for v in values:
+        if isinstance(v, Cluster):
+            result.append(f"{fallback_dev}:{v.value}")
+            modes.add("legacy")
+            continue
+        if isinstance(v, bool):
+            raise TypeError(f"Unsupported target_clusters entry: {v!r}")
+        if isinstance(v, int):
+            if dev_no_is_list:
+                raise ValueError(
+                    f"Legacy target_clusters int {v} is ambiguous when dev_no is a list; "
+                    "use the fully-qualified 'd:c' form."
+                )
+            result.append(f"{fallback_dev}:{v}")
+            modes.add("legacy")
+            continue
+        if not isinstance(v, str):
+            raise TypeError(f"Unsupported target_clusters entry: {v!r} ({type(v).__name__})")
+        parts = v.split(":")
+        if len(parts) == 2 and all(p.isdigit() for p in parts):
+            result.append(v)
+            modes.add("new")
+        elif len(parts) == 1 and parts[0].isdigit():
+            if dev_no_is_list:
+                raise ValueError(
+                    f"Legacy target_clusters item {v!r} is ambiguous when dev_no is a list; "
+                    "use the fully-qualified 'd:c' form."
+                )
+            result.append(f"{fallback_dev}:{v}")
+            modes.add("legacy")
+        else:
+            raise ValueError(f"Invalid target_clusters entry: {v!r}")
+    if len(modes) > 1:
+        raise ValueError(
+            "target_clusters mixes legacy and canonical items; use one form for every entry."
+        )
+    return result
+
+
+def _expand_clusters_to_cores(clusters: list[str]) -> list[str]:
+    """Expand each canonical ``"d:c"`` cluster string into its four ``"d:c:k"`` cores."""
+    result: list[str] = []
+    for cs in clusters:
+        d_val, c_val = cs.split(":")
+        for k in range(4):
+            result.append(f"{d_val}:{c_val}:{k}")
+    return result
+
+
+def _fold_cores_to_clusters(cores: list[str], *, stacklevel: int) -> list[str]:
+    """Fold canonical ``"d:c:k"`` core strings up to their unique ``"d:c"`` cluster prefixes.
+
+    Emits a ``UserWarning`` for each cluster whose covered cores are a strict
+    subset of ``{0, 1, 2, 3}``, so that callers know the effective target was
+    rounded up.
+    """
+    per_cluster: dict[tuple[int, int], set[int]] = defaultdict(set)
+    order: list[tuple[int, int]] = []
+    for cs in cores:
+        d_val, c_val, k_val = (int(x) for x in cs.split(":"))
+        key = (d_val, c_val)
+        if key not in per_cluster:
+            order.append(key)
+        per_cluster[key].add(k_val)
+    for key in order:
+        ks = per_cluster[key]
+        if ks != {0, 1, 2, 3}:
+            warnings.warn(
+                f"target_cores {sorted(ks)} for cluster {key[0]}:{key[1]} do not cover all "
+                f"four cores; rounded up to whole cluster.",
+                UserWarning,
+                stacklevel=stacklevel,
+            )
+    return [f"{d_val}:{c_val}" for (d_val, c_val) in order]
+
+
+def _devices_from_targets(cores: list[str], clusters: list[str]) -> set[int]:
+    """Return the set of device indices referenced by any canonical target string."""
+    devs: set[int] = set()
+    for cs in cores:
+        devs.add(int(cs.split(":", 1)[0]))
+    for cs in clusters:
+        devs.add(int(cs.split(":", 1)[0]))
+    return devs
+
+
+def _validate_global8_coverage(clusters: list[str]) -> None:
+    """Ensure every unique device in ``clusters`` covers both clusters 0 and 1."""
+    per_dev: dict[int, set[int]] = defaultdict(set)
+    for cs in clusters:
+        d_val, c_val = (int(x) for x in cs.split(":"))
+        per_dev[d_val].add(c_val)
+    for d_val, cs_set in per_dev.items():
+        if cs_set != {0, 1}:
+            raise ValueError(
+                f"core_mode='global8' requires both clusters for device {d_val}; got "
+                f"clusters {sorted(cs_set)}."
+            )
+
+
+def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> None:
+    """Normalize NPU target fields inside ``kwargs`` in place.
+
+    Rewrites ``{prefix}target_cores`` and ``{prefix}target_clusters`` to the
+    canonical fully-qualified representations, expands ``{prefix}dev_no`` sugar
+    when both target lists are absent, and unifies grain to the field
+    appropriate for ``{prefix}core_mode``. See task 8d97d for the full spec.
+
+    Args:
+        kwargs: The keyword-argument dict handed to a config mixin's
+            ``__init__`` or ``__post_init__``. Mutated in place: the target
+            fields are replaced with canonical values.
+        prefix: Optional prefix that scopes the NPU keys (e.g. ``"encoder_"``,
+            ``"vision_"``, ``"base_"``). Empty for the default backend.
+
+    Raises:
+        ValueError: For any inconsistency the spec calls out — mixed legacy
+            and new items, list-shaped ``dev_no`` combined with legacy items,
+            device-set mismatch, or incomplete global8 coverage.
+        TypeError: When a target entry has an unsupported type.
+    """
+    core_mode_key = f"{prefix}core_mode"
+    dev_no_key = f"{prefix}dev_no"
+    cores_key = f"{prefix}target_cores"
+    clusters_key = f"{prefix}target_clusters"
+
+    core_mode = normalize_core_mode(kwargs.get(core_mode_key, "single"))
+    dev_no = kwargs.get(dev_no_key, 0)
+    dev_no_is_list = isinstance(dev_no, (list, tuple))
+    dev_list = _normalize_dev_list(dev_no)
+    fallback_dev = dev_list[0]
+    dev_no_given = dev_no_key in kwargs
+
+    raw_cores = kwargs.get(cores_key)
+    raw_clusters = kwargs.get(clusters_key)
+
+    cores = (
+        _migrate_target_cores(list(raw_cores), fallback_dev, dev_no_is_list)
+        if raw_cores
+        else []
+    )
+    clusters = (
+        _migrate_target_clusters(list(raw_clusters), fallback_dev, dev_no_is_list)
+        if raw_clusters
+        else []
+    )
+
+    if not cores and not clusters:
+        # (2) dev_no sugar expansion when both target lists are absent.
+        if core_mode == "single":
+            cores = [
+                f"{d}:{c}:{k}"
+                for d in dev_list
+                for c in (0, 1)
+                for k in range(4)
+            ]
+        else:
+            clusters = [f"{d}:{c}" for d in dev_list for c in (0, 1)]
+    else:
+        # (3) grain unification per core_mode.
+        if core_mode == "single":
+            if not cores and clusters:
+                cores = _expand_clusters_to_cores(clusters)
+        else:
+            if not clusters and cores:
+                clusters = _fold_cores_to_clusters(cores, stacklevel=4)
+
+        # (5) device-set consistency check when the user explicitly set dev_no.
+        if dev_no_given:
+            target_devs = _devices_from_targets(cores, clusters)
+            explicit_devs = set(dev_list)
+            if target_devs != explicit_devs:
+                raise ValueError(
+                    f"target device set {sorted(target_devs)} does not match "
+                    f"{dev_no_key} {sorted(explicit_devs)}."
+                )
+
+    # (4) global8 must cover both clusters on every unique device.
+    if core_mode == "global8":
+        _validate_global8_coverage(clusters)
+
+    if cores:
+        kwargs[cores_key] = cores
+    if clusters:
+        kwargs[clusters_key] = clusters
 
 
 class MobilintConfigMixin(PretrainedConfig):
+    # ``dev_no`` is exposed as syntactic sugar for the device-prefix component
+    # of the canonical target strings. It accepts either a single device index
+    # or a list of indices; downstream normalization expands it into
+    # ``target_cores`` / ``target_clusters`` when the caller does not specify
+    # targets directly.
     _NPU_SIGNATURE_FIELDS = (
         ("mxq_path", "", str),
-        ("dev_no", 0, int),
+        ("dev_no", 0, Union[int, list[int]]),
         ("max_batch_size", 1, int),
         ("core_mode", "single", str),
         ("target_cores", None, Any),
@@ -55,6 +347,7 @@ class MobilintConfigMixin(PretrainedConfig):
 
     def _ensure_npu_backend(self, kwargs: dict[str, Any]) -> None:
         if not hasattr(self, "npu_backend"):
+            _normalize_npu_target_kwargs(kwargs, prefix="")
             self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
 
     def __init__(self, *args, **kwargs):
@@ -156,9 +449,11 @@ class MobilintConfigMixin(PretrainedConfig):
 class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     def _ensure_encoder_decoder_npu_backends(self, kwargs: dict[str, Any]) -> None:
         if not hasattr(self, "encoder_npu_backend"):
+            _normalize_npu_target_kwargs(kwargs, prefix="encoder_")
             self.encoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="encoder_")
 
         if not hasattr(self, "decoder_npu_backend"):
+            _normalize_npu_target_kwargs(kwargs, prefix="decoder_")
             self.decoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="decoder_")
 
     def __init__(self, **kwargs):
@@ -544,14 +839,17 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
             return backend_kwargs
 
         if not hasattr(self, "base_npu_backend"):
-            self.base_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("base_"), prefix="base_")
+            base_kwargs = _resolve_backend_kwargs("base_")
+            _normalize_npu_target_kwargs(base_kwargs, prefix="base_")
+            self.base_npu_backend = MobilintNPUBackend.from_dict(base_kwargs, prefix="base_")
         if not hasattr(self, "draft_npu_backend"):
-            self.draft_npu_backend = MobilintNPUBackend.from_dict(
-                _resolve_backend_kwargs("draft_"),
-                prefix="draft_",
-            )
+            draft_kwargs = _resolve_backend_kwargs("draft_")
+            _normalize_npu_target_kwargs(draft_kwargs, prefix="draft_")
+            self.draft_npu_backend = MobilintNPUBackend.from_dict(draft_kwargs, prefix="draft_")
         if not hasattr(self, "fc_npu_backend"):
-            self.fc_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("fc_"), prefix="fc_")
+            fc_kwargs = _resolve_backend_kwargs("fc_")
+            _normalize_npu_target_kwargs(fc_kwargs, prefix="fc_")
+            self.fc_npu_backend = MobilintNPUBackend.from_dict(fc_kwargs, prefix="fc_")
 
     def _ensure_eagle3_runtime_fields(self, kwargs: dict[str, Any]) -> None:
         for field_name, default_value, _annotation in self._EAGLE3_RUNTIME_FIELDS:

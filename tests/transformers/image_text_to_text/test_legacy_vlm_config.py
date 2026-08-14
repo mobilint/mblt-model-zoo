@@ -47,7 +47,7 @@ def test_qwen2_vl_flat_text_backend_fields_are_routed_into_text_config() -> None
     assert config.text_mxq_path == "legacy-text.mxq"
     assert config.text_core_mode == "global4"
     assert config.text_config.hidden_size == 1536
-    assert config.text_config.to_dict()["target_clusters"] == [0]
+    assert config.text_config.to_dict()["target_clusters"] == ["0:0"]
     assert config.vision_mxq_path == "vision.mxq"
 
 
@@ -68,4 +68,4 @@ def test_qwen2_vl_nested_text_backend_fields_take_precedence() -> None:
 
     assert config.text_mxq_path == "nested-text.mxq"
     assert config.text_core_mode == "global8"
-    assert config.text_config.to_dict()["target_clusters"] == [0, 1]
+    assert config.text_config.to_dict()["target_clusters"] == ["0:0", "0:1"]
