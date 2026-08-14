@@ -162,6 +162,9 @@ class Eagle3PipelineOptions:
     base_target_clusters: list[int] | None = None
     draft_target_clusters: list[int] | None = None
     fc_target_clusters: list[int] | None = None
+    base_dev_no: int | list[int] | None = None
+    draft_dev_no: int | list[int] | None = None
+    fc_dev_no: int | list[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,8 @@ class SubconfigPipelineOptions:
     text_target_clusters: list[int] | None = None
     vision_mxq_path: str | None = None
     text_mxq_path: str | None = None
+    vision_dev_no: int | list[int] | None = None
+    text_dev_no: int | list[int] | None = None
 
 
 def _warn_eagle3_override(
@@ -220,6 +225,9 @@ def _warn_eagle3_applied_options_summary(model_kwargs: dict[str, Any]) -> None:
         "base_mxq_path",
         "draft_mxq_path",
         "fc_mxq_path",
+        "base_dev_no",
+        "draft_dev_no",
+        "fc_dev_no",
     ]
     applied = {key: model_kwargs[key] for key in tracked_keys if key in model_kwargs}
     if not applied:
@@ -365,6 +373,32 @@ def _apply_sweep_batch_auto_scale(args: argparse.Namespace, pipeline: Any) -> No
         )
     if skipped:
         print(f"[tps] batch={batch_size} detected; skipping auto-scale for explicit flag(s): " + ", ".join(skipped))
+
+
+def _parse_dev_no(spec: Union[str, None]) -> Union[int, list[int], None]:
+    """Parse ``--dev-no`` as a scalar int or a comma-separated list of ints.
+
+    A single value (``--dev-no 0``) returns ``int``; a list (``--dev-no 0,1``)
+    returns ``list[int]``. Non-negative integers are required so the value can
+    stand in for the device-prefix component of a canonical NPU target.
+    """
+    if spec is None:
+        return None
+    text = spec.strip()
+    if not text:
+        return None
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if not parts:
+        return None
+    try:
+        values = [int(p) for p in parts]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--dev-no values must be integers") from exc
+    if any(v < 0 for v in values):
+        raise argparse.ArgumentTypeError("--dev-no values must be >= 0")
+    if len(values) == 1:
+        return values[0]
+    return values
 
 
 def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
@@ -639,6 +673,7 @@ def _build_pipeline(
     default_single_target_cores: Sequence[str] | None = ("0:0",),
     subconfig_options: SubconfigPipelineOptions | None = None,
     max_batch_size: Union[int, None] = None,
+    dev_no: Union[int, list[int], None] = None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -687,6 +722,9 @@ def _build_pipeline(
             eagle3_options.base_target_clusters,
             eagle3_options.draft_target_clusters,
             eagle3_options.fc_target_clusters,
+            eagle3_options.base_dev_no,
+            eagle3_options.draft_dev_no,
+            eagle3_options.fc_dev_no,
         )
     )
     subconfig_options = subconfig_options or SubconfigPipelineOptions()
@@ -708,6 +746,15 @@ def _build_pipeline(
             model_kwargs["vision_mxq_path"] = subconfig_options.vision_mxq_path
         if subconfig_options.text_mxq_path:
             model_kwargs["text_mxq_path"] = subconfig_options.text_mxq_path
+        # VLM sub-configs pop only their prefixed dev_no; expand bare --dev-no
+        # into both prefixes, honoring any per-prefix override.
+        for prefix, prefix_dev_no in (
+            ("vision", subconfig_options.vision_dev_no),
+            ("text", subconfig_options.text_dev_no),
+        ):
+            effective_dev_no = prefix_dev_no if prefix_dev_no is not None else dev_no
+            if effective_dev_no is not None:
+                model_kwargs[f"{prefix}_dev_no"] = effective_dev_no
     elif eagle3_prefix_requested:
         _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
         _warn_eagle3_override("--core-mode", "--draft-core-mode", core_mode, eagle3_options.draft_core_mode)
@@ -736,28 +783,34 @@ def _build_pipeline(
         _warn_eagle3_override("--mxq-path", "--base-mxq-path", mxq_path, eagle3_options.base_mxq_path)
         _warn_eagle3_override("--mxq-path", "--draft-mxq-path", mxq_path, eagle3_options.draft_mxq_path)
         _warn_eagle3_override("--mxq-path", "--fc-mxq-path", mxq_path, eagle3_options.fc_mxq_path)
+        _warn_eagle3_override("--dev-no", "--base-dev-no", dev_no, eagle3_options.base_dev_no)
+        _warn_eagle3_override("--dev-no", "--draft-dev-no", dev_no, eagle3_options.draft_dev_no)
+        _warn_eagle3_override("--dev-no", "--fc-dev-no", dev_no, eagle3_options.fc_dev_no)
 
         def _coalesce(preferred: Any, fallback: Any) -> Any:
             return preferred if preferred is not None else fallback
 
-        for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters in (
+        for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters, prefix_dev_no in (
             (
                 "base",
                 _coalesce(eagle3_options.base_core_mode, core_mode),
                 _coalesce(eagle3_options.base_target_cores, target_cores),
                 _coalesce(eagle3_options.base_target_clusters, target_clusters),
+                _coalesce(eagle3_options.base_dev_no, dev_no),
             ),
             (
                 "draft",
                 _coalesce(eagle3_options.draft_core_mode, core_mode),
                 _coalesce(eagle3_options.draft_target_cores, target_cores),
                 _coalesce(eagle3_options.draft_target_clusters, target_clusters),
+                _coalesce(eagle3_options.draft_dev_no, dev_no),
             ),
             (
                 "fc",
                 _coalesce(eagle3_options.fc_core_mode, core_mode),
                 _coalesce(eagle3_options.fc_target_cores, target_cores),
                 _coalesce(eagle3_options.fc_target_clusters, target_clusters),
+                _coalesce(eagle3_options.fc_dev_no, dev_no),
             ),
         ):
             model_kwargs = _apply_core_mode_model_kwargs_common(
@@ -768,6 +821,8 @@ def _build_pipeline(
                 default_single_target_cores=default_single_target_cores,
                 prefix=prefix,
             )
+            if prefix_dev_no is not None:
+                model_kwargs[f"{prefix}_dev_no"] = prefix_dev_no
         _warn_eagle3_applied_options_summary(model_kwargs)
     else:
         model_kwargs = _apply_core_mode_model_kwargs_common(
@@ -777,6 +832,8 @@ def _build_pipeline(
             target_clusters=target_clusters,
             default_single_target_cores=default_single_target_cores,
         )
+        if dev_no is not None:
+            model_kwargs["dev_no"] = dev_no
     if max_batch_size is not None:
         # Propagate to the config layer so the backend launches N = ceil(B / K) slots at construction time.
         if _is_vlm_task(task):
@@ -831,6 +888,8 @@ def _extract_subconfig_pipeline_kwargs(args: argparse.Namespace) -> SubconfigPip
         text_target_clusters=getattr(args, "text_target_clusters", None),
         vision_mxq_path=getattr(args, "vision_mxq_path", None),
         text_mxq_path=getattr(args, "text_mxq_path", None),
+        vision_dev_no=getattr(args, "vision_dev_no", None),
+        text_dev_no=getattr(args, "text_dev_no", None),
     )
 
 
@@ -851,6 +910,9 @@ def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineO
         base_target_clusters=args.base_target_clusters,
         draft_target_clusters=args.draft_target_clusters,
         fc_target_clusters=args.fc_target_clusters,
+        base_dev_no=getattr(args, "base_dev_no", None),
+        draft_dev_no=getattr(args, "draft_dev_no", None),
+        fc_dev_no=getattr(args, "fc_dev_no", None),
     )
 
 
@@ -1678,6 +1740,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
         max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -2020,6 +2083,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
         max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -2581,6 +2645,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
         max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
@@ -3068,6 +3133,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
         max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
@@ -3776,6 +3842,19 @@ def add_tps_parser(
                 "--dev-no or the model config."
             ),
         )
+        p.add_argument(
+            "--dev-no",
+            type=_parse_dev_no,
+            default=None,
+            help=(
+                "Device-prefix sugar for canonical NPU targets. Scalar (e.g., "
+                '"--dev-no 1") pins one device; comma-separated (e.g., "--dev-no 0,1") '
+                "expands the target set across those devices. Fills in the device "
+                "component of legacy target entries and, when target lists are omitted, "
+                "supplies the device set for --core-mode expansion. EAGLE-3 prefix "
+                "options take precedence."
+            ),
+        )
         for prefix in ("base", "draft", "fc"):
             p.add_argument(
                 f"--{prefix}-core-mode",
@@ -3794,6 +3873,15 @@ def add_tps_parser(
                 type=_parse_target_clusters,
                 default=None,
                 help=f'{prefix} target clusters as canonical "d:c" (e.g., "0:0;1:0") or legacy bare "c".',
+            )
+            p.add_argument(
+                f"--{prefix}-dev-no",
+                type=_parse_dev_no,
+                default=None,
+                help=(
+                    f"{prefix} device-prefix sugar (scalar or comma-separated); falls back "
+                    "to --dev-no when unspecified."
+                ),
             )
         for prefix in ("vision", "text"):
             p.add_argument(
@@ -3818,6 +3906,15 @@ def add_tps_parser(
                 help=(
                     f'VLM only: {prefix} target clusters override as canonical "d:c" '
                     '(e.g., "0:0;1:0") or legacy bare "c".'
+                ),
+            )
+            p.add_argument(
+                f"--{prefix}-dev-no",
+                type=_parse_dev_no,
+                default=None,
+                help=(
+                    f"VLM only: {prefix} device-prefix sugar (scalar or comma-separated); "
+                    "falls back to --dev-no when unspecified."
                 ),
             )
         p.add_argument("--device-map", default=None, help="transformers device_map (optional)")

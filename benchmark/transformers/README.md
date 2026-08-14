@@ -775,6 +775,11 @@ python benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
 - `--target-clusters`: Explicit target clusters for the CLI. Canonical fully-qualified form is
   `"d:c"` per entry (e.g., `"0:0;1:0"`); the legacy bare `"c"` form (e.g., `"0;1"`) is still
   accepted and the missing device prefix is filled from `--dev-no` or the model config.
+- `--dev-no`: Device-prefix sugar for canonical NPU targets. Accepts a scalar (`--dev-no 1`) or
+  a comma-separated list (`--dev-no 0,1`). Fills the device component of legacy target entries,
+  and when target lists are omitted supplies the device set for `--core-mode` expansion.
+  Prefix variants `--base-dev-no`/`--draft-dev-no`/`--fc-dev-no` (EAGLE-3) and
+  `--vision-dev-no`/`--text-dev-no` (VLM) take precedence over `--dev-no` when set.
 - `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.
 - `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
   When omitted, benchmark scripts use `npu` for Mobilint/MXQ targets and `gpu` for other Hugging

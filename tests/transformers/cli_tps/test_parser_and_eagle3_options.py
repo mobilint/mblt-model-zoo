@@ -484,3 +484,225 @@ def test_default_single_target_cores_for_args_disables_explicit_batch_size() -> 
     assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=2)) is None
     assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=1)) == ("0:0",)
     assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=None)) == ("0:0",)
+
+
+def test_cli_tps_measure_dev_no_defaults_none() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])
+    assert args.dev_no is None
+    assert args.base_dev_no is None
+    assert args.draft_dev_no is None
+    assert args.fc_dev_no is None
+    assert args.vision_dev_no is None
+    assert args.text_dev_no is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("0", 0), ("1", 1), ("0,1", [0, 1]), ("2,3,4", [2, 3, 4])],
+)
+def test_cli_tps_measure_dev_no_accepts_scalar_and_list(value, expected) -> None:
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--dev-no", value])
+    assert args.dev_no == expected
+
+
+@pytest.mark.parametrize("value", ["-1", "abc", "0,-1", "1,foo"])
+def test_cli_tps_measure_dev_no_rejects_invalid(value) -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--dev-no", value])
+    assert excinfo.value.code == 2
+
+
+def test_cli_tps_sweep_dev_no_accepts_scalar() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        ["tps", "sweep", "--model", "mobilint/Llama-3.2-1B-Instruct", "--dev-no", "1", "--no-plot"]
+    )
+    assert args.dev_no == 1
+
+
+def test_extract_eagle3_pipeline_kwargs_includes_dev_no() -> None:
+    args = argparse.Namespace(
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        base_dev_no=1,
+        draft_dev_no=[0, 1],
+        fc_dev_no=0,
+    )
+    options = tps_cli._extract_eagle3_pipeline_kwargs(args)
+    assert options.base_dev_no == 1
+    assert options.draft_dev_no == [0, 1]
+    assert options.fc_dev_no == 0
+
+
+def test_extract_subconfig_pipeline_kwargs_includes_dev_no() -> None:
+    args = argparse.Namespace(
+        vision_core_mode=None,
+        text_core_mode=None,
+        vision_target_cores=None,
+        text_target_cores=None,
+        vision_target_clusters=None,
+        text_target_clusters=None,
+        vision_mxq_path=None,
+        text_mxq_path=None,
+        vision_dev_no=2,
+        text_dev_no=[3, 4],
+    )
+    options = tps_cli._extract_subconfig_pipeline_kwargs(args)
+    assert options.vision_dev_no == 2
+    assert options.text_dev_no == [3, 4]
+
+
+def test_build_pipeline_plain_sets_dev_no_when_scalar(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=1,
+    )
+    assert pipe.model_kwargs == {"dev_no": 1}
+
+
+def test_build_pipeline_plain_sets_dev_no_when_list(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=[0, 1],
+    )
+    assert pipe.model_kwargs == {"dev_no": [0, 1]}
+
+
+def test_build_pipeline_vlm_expands_dev_no_to_both_subconfigs(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=2,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+    )
+    assert pipe.model_kwargs == {"vision_dev_no": 2, "text_dev_no": 2}
+
+
+def test_build_pipeline_vlm_text_dev_no_override_takes_precedence(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=0,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(text_dev_no=3),
+    )
+    assert pipe.model_kwargs == {"vision_dev_no": 0, "text_dev_no": 3}
+
+
+def test_build_pipeline_eagle3_dev_no_prefix_warns_and_coalesces(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+
+    with pytest.warns(UserWarning, match="Conflicting options detected"):
+        pipe = tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/model",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(base_dev_no=5),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            dev_no=1,
+        )
+
+    assert pipe.model_kwargs["base_dev_no"] == 5
+    assert pipe.model_kwargs["draft_dev_no"] == 1
+    assert pipe.model_kwargs["fc_dev_no"] == 1
