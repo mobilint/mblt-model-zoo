@@ -55,7 +55,7 @@ class MobilintBackendAllocError(RuntimeError):
 
     Carries enough context (phase, slot index, device, how many slots had
     already succeeded, current sizing knobs) to help the caller locate the
-    HBM boundary and pick a safer ``max_batch_size``.
+    device memory boundary and pick a safer ``max_batch_size``.
 
     Attributes:
         phase: ``"create"`` when :func:`~qbruntime.Model` construction failed,
@@ -94,8 +94,8 @@ class MobilintBackendAllocError(RuntimeError):
             f"[Mobilint] NPU backend {phase} failed at slot {slot} on device {dev} "
             f"(succeeded {succeeded_so_far}/{n_total}). "
             f"max_batch_size={max_batch_size}, k_per_model={k_per_model}. "
-            "This typically indicates HBM BadAlloc; lower max_batch_size or spread the "
-            f"workload across more devices. Original error: {original}"
+            f"Original qbruntime error: {original}. "
+            "If this is a BadAlloc, lower max_batch_size or spread the workload across more devices."
         )
         super().__init__(message)
 
@@ -608,10 +608,10 @@ class MobilintNPUBackend:
         The MXQ artifact is resolved via :meth:`check_model_path` exactly
         once; the resolved path is reused by every subsequent slot.
 
-        On any :class:`~qbruntime.QbRuntimeError` (typically HBM BadAlloc),
-        every previously loaded slot is disposed and the failure is rethrown
-        as :class:`MobilintBackendAllocError` with slot / device / progress
-        context.
+        On any :class:`~qbruntime.QbRuntimeError` (typically a device-memory
+        ``BadAlloc``), every previously loaded slot is disposed and the
+        failure is rethrown as :class:`MobilintBackendAllocError` with slot /
+        device / progress context.
 
         Raises:
             MobilintBackendAllocError: If any slot fails to load.
