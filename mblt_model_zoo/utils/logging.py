@@ -21,7 +21,13 @@ def _md5_hash_from_file(file_path: str) -> str:
 
 
 def log_model_details(model_path: str, npu_backend: Optional["MobilintNPUBackend"] = None) -> None:
-    """Print model metadata when verbose logging is enabled."""
+    """Print model metadata when verbose logging is enabled.
+
+    When the backend hosts multiple slots (``n_models > 1``), an aggregate
+    summary is printed once (slot count, device distribution, compiled batch
+    axis ``K``, total capacity ``N * K``). Per-variant input/output shapes
+    are read from slot 0 because every slot loads the same MXQ artifact.
+    """
     if not _is_verbose_enabled():
         return
 
@@ -36,11 +42,22 @@ def log_model_details(model_path: str, npu_backend: Optional["MobilintNPUBackend
             print(f"Target Cores: {npu_backend.target_cores}")
         else:
             print(f"Target Clusters: {npu_backend.target_clusters}")
-        if npu_backend.mxq_model.get_num_model_variants() == 1:
-            print(f"Model Input Shape: {npu_backend.mxq_model.get_model_input_shape()}")
-            print(f"Model Output Shape: {npu_backend.mxq_model.get_model_output_shape()}")
+        n_models = getattr(npu_backend, "n_models", 0) or 0
+        if n_models > 0:
+            k_per_model = getattr(npu_backend, "k_per_model", 1) or 1
+            model_dev_no = getattr(npu_backend, "model_dev_no", [])
+            print(f"Backend Slots: {n_models}")
+            print(f"Slot Device Assignment: {list(model_dev_no)}")
+            print(f"K per Slot: {k_per_model}")
+            print(f"Total Capacity (N*K): {n_models * k_per_model}")
+        mxq_model = npu_backend.mxq_model
+        if mxq_model is None:
+            return
+        if mxq_model.get_num_model_variants() == 1:
+            print(f"Model Input Shape: {mxq_model.get_model_input_shape()}")
+            print(f"Model Output Shape: {mxq_model.get_model_output_shape()}")
         else:
-            for i in range(npu_backend.mxq_model.get_num_model_variants()):
+            for i in range(mxq_model.get_num_model_variants()):
                 print(f"Model Variant {i}")
-                print(f"\tInput Shape: {npu_backend.mxq_model.get_model_variant_handle(i).get_model_input_shape()}")
-                print(f"\tOutput Shape: {npu_backend.mxq_model.get_model_variant_handle(i).get_model_output_shape()}")
+                print(f"\tInput Shape: {mxq_model.get_model_variant_handle(i).get_model_input_shape()}")
+                print(f"\tOutput Shape: {mxq_model.get_model_variant_handle(i).get_model_output_shape()}")
