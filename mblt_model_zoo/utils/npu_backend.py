@@ -44,6 +44,11 @@ core_map = {
     3: Core.Core3,
 }
 
+# Default device index for ``dev_no`` when a caller does not pin one.
+# Kept as a single named constant so the backend signature, ``from_dict``
+# fallback, and config-layer normalizers stay in lock-step.
+_DEFAULT_DEV_NO: int = 0
+
 
 class MobilintBackendAllocError(RuntimeError):
     """Raised when a multi-slot backend fails to create or launch a slot.
@@ -115,7 +120,7 @@ class MobilintNPUBackend:
     def __init__(
         self,
         mxq_path: str = "",
-        dev_no: Union[int, List[int]] = 0,
+        dev_no: Union[int, List[int]] = _DEFAULT_DEV_NO,
         max_batch_size: int = 1,
         core_mode: CoreMode = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
@@ -974,7 +979,7 @@ class MobilintNPUBackend:
         return cls(
             name_or_path=data.pop("name_or_path", ""),
             mxq_path=data.pop(f"{p}mxq_path", ""),
-            dev_no=data.pop(f"{p}dev_no", 0),
+            dev_no=data.pop(f"{p}dev_no", _DEFAULT_DEV_NO),
             max_batch_size=data.pop(f"{p}max_batch_size", 1),
             core_mode=data.pop(f"{p}core_mode", "single"),
             target_cores=data.pop(f"{p}target_cores", None),

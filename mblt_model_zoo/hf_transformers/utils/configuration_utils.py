@@ -19,7 +19,7 @@ except ImportError:
         )
 
 from ...utils.core_mode import normalize_core_mode
-from ...utils.npu_backend import MobilintNPUBackend
+from ...utils.npu_backend import _DEFAULT_DEV_NO, MobilintNPUBackend
 
 # NPU target-field normalization
 # ------------------------------
@@ -245,7 +245,7 @@ def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> No
     clusters_key = f"{prefix}target_clusters"
 
     core_mode = normalize_core_mode(kwargs.get(core_mode_key, "single"))
-    dev_no = kwargs.get(dev_no_key, 0)
+    dev_no = kwargs.get(dev_no_key, _DEFAULT_DEV_NO)
     dev_no_is_list = isinstance(dev_no, (list, tuple))
     dev_list = _normalize_dev_list(dev_no)
     fallback_dev = dev_list[0]
@@ -313,7 +313,7 @@ class MobilintConfigMixin(PretrainedConfig):
     # targets directly.
     _NPU_SIGNATURE_FIELDS = (
         ("mxq_path", "", str),
-        ("dev_no", 0, Union[int, list[int]]),
+        ("dev_no", _DEFAULT_DEV_NO, Union[int, list[int]]),
         ("max_batch_size", 1, int),
         ("core_mode", "single", str),
         ("target_cores", None, Any),
