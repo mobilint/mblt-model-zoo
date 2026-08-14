@@ -285,6 +285,19 @@ def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> No
             if not clusters and cores:
                 clusters = _fold_cores_to_clusters(cores, stacklevel=4)
 
+        # (3b) Drop the grain that does not match core_mode. When both raw
+        # fields were provided, only the mode-appropriate one is authoritative
+        # (matching the ``from_dict`` warning); leaving the stale field in
+        # place would pollute the step (5) device-set check and the backend's
+        # per-slot dispatch, which reads both lists to enumerate covered
+        # devices.
+        if core_mode == "single":
+            clusters = []
+            kwargs.pop(clusters_key, None)
+        else:
+            cores = []
+            kwargs.pop(cores_key, None)
+
         # (5) device-set consistency check when the user explicitly set dev_no.
         if dev_no_given:
             target_devs = _devices_from_targets(cores, clusters)

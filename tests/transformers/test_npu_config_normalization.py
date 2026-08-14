@@ -187,6 +187,61 @@ def test_explicit_dev_no_must_match_target_device_set() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stale off-mode grain is dropped (PR #109 review P2 finding [4])
+# ---------------------------------------------------------------------------
+
+
+def test_single_mode_drops_stale_target_clusters() -> None:
+    """``single`` mode drops a ``target_clusters`` entry that would otherwise leak into device set."""
+    kwargs = {
+        "core_mode": "single",
+        "target_cores": ["0:0:0"],
+        "target_clusters": ["1:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_cores"] == ["0:0:0"]
+    assert "target_clusters" not in kwargs
+
+
+def test_single_mode_stale_target_clusters_does_not_break_dev_no_consistency() -> None:
+    """Stale ``target_clusters`` on a different device must not trigger the dev_no mismatch check."""
+    kwargs = {
+        "core_mode": "single",
+        "dev_no": 0,
+        "target_cores": ["0:0:0"],
+        "target_clusters": ["1:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_cores"] == ["0:0:0"]
+    assert "target_clusters" not in kwargs
+
+
+def test_global4_mode_drops_stale_target_cores() -> None:
+    """A non-``single`` mode drops a stale ``target_cores`` entry that references a foreign device."""
+    kwargs = {
+        "core_mode": "global4",
+        "target_cores": ["1:0:0"],
+        "target_clusters": ["0:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0"]
+    assert "target_cores" not in kwargs
+
+
+def test_global4_mode_stale_target_cores_does_not_break_dev_no_consistency() -> None:
+    """Stale ``target_cores`` on a foreign device must not trigger the dev_no mismatch check."""
+    kwargs = {
+        "core_mode": "global4",
+        "dev_no": 0,
+        "target_cores": ["1:0:0"],
+        "target_clusters": ["0:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0"]
+    assert "target_cores" not in kwargs
+
+
+# ---------------------------------------------------------------------------
 # Backend round-trip
 # ---------------------------------------------------------------------------
 
