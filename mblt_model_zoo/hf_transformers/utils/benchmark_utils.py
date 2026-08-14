@@ -297,6 +297,60 @@ def _supports_fake_decode_prefill(model: object) -> bool:
     return _is_mobilint_npu_model(model) and _get_cache_mxq_model(model) is not None
 
 
+def _resolve_multi_slot_backend(model: object) -> object | None:
+    """Return the Mobilint NPU backend that owns one or more Model slots.
+
+    Prefers the backend attached directly to ``model``; falls back to the
+    nested language-model backend for VLM wrappers whose top-level object
+    delegates NPU dispatch to ``model.language_model``.
+    """
+    for candidate in (model, _get_language_model_candidate(model)):
+        if candidate is None:
+            continue
+        backend = getattr(candidate, "npu_backend", None)
+        if backend is None:
+            continue
+        if getattr(backend, "mxq_models", None):
+            return backend
+    return None
+
+
+def _build_batched_mobilint_cache(model: object, batch_size: int) -> MobilintCache:
+    """Build a ``MobilintCache`` sized to route ``batch_size`` rows across every backend slot.
+
+    Uses the multi-slot ``MobilintCache([m0, m1, ...], per_model_batch=K)``
+    signature when the backend exposes ``mxq_models`` so ``slot_of`` routes
+    each flat row to its owning ``qbruntime.Model``. Falls back to the
+    legacy single-Model constructor only when the backend cannot be
+    resolved (e.g. non-NPU models in unit tests).
+
+    Growing beyond ``n_models * k_per_model`` is only supported on the
+    legacy single-slot hardware-batch path; the underlying
+    :meth:`MobilintCache.ensure_batch_size` enforces that invariant.
+    """
+    backend = _resolve_multi_slot_backend(model)
+    if backend is None:
+        mxq_model = _get_cache_mxq_model(model)
+        if mxq_model is None:
+            raise RuntimeError(
+                "Cannot build MobilintCache: no Mobilint NPU backend on this model."
+            )
+        cache = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
+        return cache
+
+    mxq_models = list(getattr(backend, "mxq_models", []) or [])
+    if not mxq_models:
+        raise RuntimeError("Mobilint NPU backend has no loaded Model slots.")
+    k_per_model = int(getattr(backend, "k_per_model", 1) or 1)
+    cache = MobilintCache(mxq_models, per_model_batch=k_per_model)
+    if batch_size > cache.batch_size:
+        # Only the single-Model legacy path can grow beyond aggregate capacity.
+        # ``ensure_batch_size`` raises for multi-Model caches, which is the
+        # correct behavior — the backend must be sized upfront in that case.
+        cache.ensure_batch_size(batch_size)
+    return cache
+
+
 def _is_eagle3_model(model: object) -> bool:
     """Return whether ``model`` is a Mobilint EAGLE-3 speculative-decoding model.
 
@@ -908,6 +962,13 @@ class TPSMeasurer:
             gen_kwargs["temperature"] = float(temperature)
         else:
             gen_kwargs["do_sample"] = False
+        # Real-prefill path (past_key_values is None) still needs a multi-slot
+        # cache when the backend hosts ``N > 1`` Model slots — otherwise HF's
+        # ``_prepare_cache_for_generation`` falls back to the legacy
+        # ``MobilintCache(slot_0_model, batch_size=B)`` constructor that pins
+        # every logical row to slot 0 and defeats the sw-batch dispatch.
+        if past_key_values is None and _is_mobilint_npu_model(self.model):
+            past_key_values = _build_batched_mobilint_cache(self.model, batch_size)
         if past_key_values is not None:
             gen_kwargs["past_key_values"] = past_key_values
         if npu_prefill_chunk_size is not None:
@@ -1284,7 +1345,7 @@ class TPSMeasurer:
             vocab_size = _resolve_config_vocab_size(self.model.config)
             low = 100 if vocab_size > 100 else 0
             input_ids = torch.randint(low, vocab_size, (batch_size, cache_len + 1), device=self.device)
-            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
+            past_key_values = _build_batched_mobilint_cache(self.model, batch_size)
             past_key_values.fake_prefill(cache_len)
 
             if batch_size > 1:
@@ -2038,11 +2099,20 @@ class VLMTPSMeasurer:
         low = 100 if vocab_size > 100 else 0
         input_ids = torch.randint(low, vocab_size, (batch_size, 1), device=device)
         inputs_embeds = lm_for_npu.get_input_embeddings()(input_ids)
-        cache_factory = getattr(lm_for_npu, "_get_cache", None) or getattr(gen_model, "_get_cache", None)
-        if callable(cache_factory):
-            past_key_values = cache_factory("mobilint", batch_size, cache_len)
+        # Prefer the multi-slot builder over the legacy ``_get_cache`` factory:
+        # ``_get_cache`` still builds a single-Model cache from slot 0, which
+        # loses ``slot_of`` routing on multi-slot backends. Fall back to the
+        # factory (or the legacy constructor) only when no NPU backend is
+        # resolvable, matching test doubles that do not expose ``npu_backend``.
+        multi_slot_backend = _resolve_multi_slot_backend(lm_for_npu) or _resolve_multi_slot_backend(gen_model)
+        if multi_slot_backend is not None:
+            past_key_values = _build_batched_mobilint_cache(lm_for_npu, batch_size)
         else:
-            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
+            cache_factory = getattr(lm_for_npu, "_get_cache", None) or getattr(gen_model, "_get_cache", None)
+            if callable(cache_factory):
+                past_key_values = cache_factory("mobilint", batch_size, cache_len)
+            else:
+                past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
         past_key_values.fake_prefill(cache_len)
 
         npu_timing_target = _get_npu_timing_target(lm_for_npu)
