@@ -448,7 +448,7 @@ def test_default_asr_model_filter_excludes_whisper_cpp(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         asr_bench,
         "list_models",
-        lambda tasks=None: {
+        lambda tasks=None, include_private=False: {
             "automatic-speech-recognition": [
                 "mobilint/whisper-small",
                 "mobilint/whisper.cpp",
@@ -461,6 +461,30 @@ def test_default_asr_model_filter_excludes_whisper_cpp(monkeypatch: pytest.Monke
         "mobilint/whisper-small",
         "mobilint/Qwen3-ASR-1.7B",
     ]
+
+
+def test_include_private_flag_defaults_false_and_forwards_to_list_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify --include-private threads through to list_models; default remains public-only."""
+
+    observed: list[bool] = []
+
+    def fake_list_models(tasks=None, include_private=False):  # type: ignore[no-untyped-def]
+        observed.append(bool(include_private))
+        return {"automatic-speech-recognition": ["mobilint/whisper-small"]}
+
+    monkeypatch.setattr(asr_bench, "list_models", fake_list_models)
+
+    default_args = asr_bench._parse_args([])
+    assert default_args.include_private is False
+    asr_bench._build_run_targets(default_args)
+
+    private_args = asr_bench._parse_args(["--include-private"])
+    assert private_args.include_private is True
+    asr_bench._build_run_targets(private_args)
+
+    assert observed == [False, True]
 
 
 def test_qwen3_asr_uses_encoder_decoder_core_mode_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2306,7 +2330,11 @@ def test_build_run_targets_warns_when_core_mode_is_explicit_for_original_models(
 ) -> None:
     """Verify native original-model runs explicitly warn that core mode is ignored."""
 
-    monkeypatch.setattr(asr_bench, "_list_default_asr_models", lambda: ["Qwen/Qwen3-ASR-1.7B"])
+    monkeypatch.setattr(
+        asr_bench,
+        "_list_default_asr_models",
+        lambda include_private=False: ["Qwen/Qwen3-ASR-1.7B"],
+    )
     args = asr_bench._parse_args(["--original-models", "--core-mode", "all"])
     args._core_mode_explicit = True
 

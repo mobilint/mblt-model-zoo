@@ -201,8 +201,20 @@ def _select_revision(model_id: str, candidates: list[str | None]) -> str | None:
     return _select_revision_shared(model_id, candidates)
 
 
-def _list_default_asr_models() -> list[str]:
-    available = list_models(tasks="automatic-speech-recognition")
+def _list_default_asr_models(*, include_private: bool = False) -> list[str]:
+    """Return the default ASR benchmark target ids, optionally including private mobilint releases.
+
+    Args:
+        include_private: When True, include private mobilint/* models. Requires an authenticated
+            Hugging Face session (`hf auth login`).
+
+    Returns:
+        A list of ASR model ids with pipeline-incompatible whisper.cpp entries filtered out.
+    """
+    available = list_models(
+        tasks="automatic-speech-recognition",
+        include_private=include_private,
+    )
     return [
         str(model_id)
         for model_id in available.get("automatic-speech-recognition", [])
@@ -380,6 +392,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument("--model", dest="models", nargs="+", default=None, help="model id list to benchmark")
+    parser.add_argument(
+        "--include-private",
+        action="store_true",
+        help=(
+            "Include private mobilint/* models in the default target list. "
+            "Requires an authenticated Hugging Face session (hf auth login)."
+        ),
+    )
     parser.add_argument("--revision", default=None, help="model revision (e.g. W8)")
     parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only")
     parser.add_argument("--mxq-dir", default=None, help="directory containing local mxq files")
@@ -990,8 +1010,9 @@ def _resolve_output_dir(args: argparse.Namespace) -> Path:
 
 def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarget, str | None, str, str]]:
     targets: list[ASRBenchmarkTarget]
+    include_private = bool(getattr(args, "include_private", False))
     if args.mxq_dir:
-        available_model_ids = _list_default_asr_models()
+        available_model_ids = _list_default_asr_models(include_private=include_private)
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
@@ -1004,7 +1025,11 @@ def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarge
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
-        model_ids = [str(item) for item in args.models] if args.models else _list_default_asr_models()
+        model_ids = (
+            [str(item) for item in args.models]
+            if args.models
+            else _list_default_asr_models(include_private=include_private)
+        )
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)

@@ -278,6 +278,8 @@ consumed before measurement. In other words, the loader fetches enough candidate
 - Original/native Qwen3-ASR runs selected via `--original-models` do not use Mobilint
   `--core-mode`. If you pass `--core-mode` explicitly in that mode, the script prints a notice and
   ignores the value.
+- Pass `--include-private` to add private `mobilint/*` ASR releases to the default target list.
+  Requires an authenticated Hugging Face session (`hf auth login`).
 - Per-target JSON files are written as `<target>_beams<beam>.json`, for example
   `openai__whisper-small_beamsdefault.json` or `openai__whisper-small_beams5.json`.
 - The same `--output-dir` can store multiple beam-search runs side by side.
