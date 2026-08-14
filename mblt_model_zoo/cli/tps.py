@@ -376,18 +376,28 @@ def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
     return [item.strip() for item in text.split(";") if item.strip()]
 
 
-def _parse_target_clusters(spec: Union[str, None]) -> Union[list[int], None]:
+def _parse_target_clusters(spec: Union[str, None]) -> Union[list, None]:
+    """Parse ``--target-clusters`` accepting canonical ``"d:c"`` and legacy bare ``"c"``.
+
+    Canonical fully-qualified entries (``"0:0"``) are preserved as strings so
+    :func:`_normalize_npu_target_kwargs` can dispatch them across devices;
+    legacy bare integers are still converted to ``int`` for backward
+    compatibility with configs that pin a single device via ``dev_no``.
+    """
     if spec is None:
         return None
     text = spec.strip()
     if not text:
         return None
-    clusters: list[int] = []
+    clusters: list = []
     for item in text.split(";"):
         item = item.strip()
         if not item:
             continue
-        clusters.append(int(item))
+        if ":" in item:
+            clusters.append(item)
+        else:
+            clusters.append(int(item))
     return clusters
 
 
@@ -3737,13 +3747,21 @@ def add_tps_parser(
             "--target-cores",
             type=_parse_target_cores,
             default=None,
-            help='Target cores (e.g., "0:0;0:1;0:2;0:3")',
+            help=(
+                'Target cores as canonical "d:c:k" per entry (e.g., "0:0:0;0:0:1;1:0:0") '
+                'or legacy "c:k" (e.g., "0:0;0:1"). Legacy entries take their device prefix '
+                "from --dev-no or the model config."
+            ),
         )
         p.add_argument(
             "--target-clusters",
             type=_parse_target_clusters,
             default=None,
-            help='Target clusters (e.g., "0;1")',
+            help=(
+                'Target clusters as canonical "d:c" per entry (e.g., "0:0;1:0") or legacy '
+                'bare "c" (e.g., "0;1"). Legacy entries take their device prefix from '
+                "--dev-no or the model config."
+            ),
         )
         for prefix in ("base", "draft", "fc"):
             p.add_argument(
@@ -3756,13 +3774,13 @@ def add_tps_parser(
                 f"--{prefix}-target-cores",
                 type=_parse_target_cores,
                 default=None,
-                help=f'{prefix} target cores (e.g., "0:0;0:1")',
+                help=f'{prefix} target cores as canonical "d:c:k" (e.g., "0:0:0;1:0:0") or legacy "c:k".',
             )
             p.add_argument(
                 f"--{prefix}-target-clusters",
                 type=_parse_target_clusters,
                 default=None,
-                help=f'{prefix} target clusters (e.g., "0;1")',
+                help=f'{prefix} target clusters as canonical "d:c" (e.g., "0:0;1:0") or legacy bare "c".',
             )
         for prefix in ("vision", "text"):
             p.add_argument(
@@ -3775,13 +3793,19 @@ def add_tps_parser(
                 f"--{prefix}-target-cores",
                 type=_parse_target_cores,
                 default=None,
-                help=f'VLM only: {prefix} target cores override (e.g., "0:0;0:1")',
+                help=(
+                    f'VLM only: {prefix} target cores override as canonical "d:c:k" '
+                    '(e.g., "0:0:0;1:0:0") or legacy "c:k".'
+                ),
             )
             p.add_argument(
                 f"--{prefix}-target-clusters",
                 type=_parse_target_clusters,
                 default=None,
-                help=f'VLM only: {prefix} target clusters override (e.g., "0;1")',
+                help=(
+                    f'VLM only: {prefix} target clusters override as canonical "d:c" '
+                    '(e.g., "0:0;1:0") or legacy bare "c".'
+                ),
             )
         p.add_argument("--device-map", default=None, help="transformers device_map (optional)")
         p.add_argument("--dtype", default=None, help="dtype (e.g., auto, float16, bfloat16)")
@@ -3813,7 +3837,12 @@ def add_tps_parser(
             "--batch-size",
             type=_parse_positive_int,
             default=None,
-            help="batch size for synthetic inputs; defaults to model max_batch_size when available",
+            help=(
+                "batch size for synthetic inputs; defaults to model max_batch_size when available. "
+                "max_batch_size is the aggregate capacity N*K, where K is the MXQ's compiled batch "
+                "axis and N = ceil(max_batch_size / K) Model slots are launched across the target "
+                "device set. Non-batch MXQ (K=1) uses sw-batch across N slots."
+            ),
         )
         _add_device_tracking_args(p)
         p.set_defaults(device_backend=None)

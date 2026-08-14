@@ -168,6 +168,44 @@ truth when this snapshot becomes stale.
 ### Transformers and MeloTTS
 
 - Install the matching optional extra before running integration tests.
+- `MobilintNPUBackend` hosts `N` `qbruntime.Model` slots. `max_batch_size` is the aggregate batch
+  capacity `N * K`, where `K` is the compiled MXQ batch axis probed from slot 0; the backend
+  launches `N = ceil(max_batch_size / K)` slots and distributes them round-robin across the unique
+  devices referenced by the canonical target strings. For a non-batch MXQ (`K == 1`) with `B > 1`,
+  sw-batch fans a logical batch across `N = B` slots that dispatch in parallel via
+  `MobilintNPUBackend.infer_slot`; for a batched MXQ (`K > 1`) hardware batching is reused until
+  `N * K >= max_batch_size`. Beam search paths stay `N = 1`.
+- `dev_no` is syntactic sugar for the device-prefix component of the canonical target strings. A
+  scalar pins one device; a list expands to multiple devices. Do not read `dev_no` at dispatch
+  time — use the canonical `_target_cores_serialized` / `_target_clusters_serialized` lists (or
+  the public `target_cores` / `target_clusters` accessors) so multi-device backends behave
+  correctly.
+- The canonical NPU target wire form is fully-qualified: `target_cores` entries are `"d:c:k"`
+  strings and `target_clusters` entries are `"d:c"` strings. Legacy 2-part `c:k` cores, bare
+  integer clusters, and `qbruntime.CoreId` / `Cluster` objects are silently migrated to the
+  canonical form by `_normalize_npu_target_kwargs` using `dev_no` as the fallback prefix; no
+  explicit migration step is required for stored configs. Under `single` core mode, the config
+  layer expands `target_clusters` into every core of each cluster; under `multi` / `global4` /
+  `global8`, it folds `target_cores` up to their unique `"d:c"` cluster prefixes and warns when a
+  partial cluster is rounded up. `global8` requires both clusters `0` and `1` on every device
+  covered by the target set.
+- `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV state along
+  `(model_idx, cache_id)` with `N = len(mxq_models)` and total capacity `N * K` rows. Row `i`
+  maps to `(i // K, i % K)`; `slot_of`, `model_of`, and `group_by_model` expose the routing so
+  upstream dispatch groups rows by owning Model and issues one `Model.infer` per Model.
+  `ensure_batch_size` beyond `N * K` is only supported on the legacy single-Model
+  hardware-batch path (`N == 1`). The legacy `MobilintCache(model, batch_size=K)` constructor
+  still works as a shim for the historical `N = 1, K = K` case; do not pass both
+  `per_model_batch` and `batch_size` in the same call.
+- `MobilintBeamCache` (Whisper and other encoder-decoder beam searches) enforces `N == 1` because
+  the beam bookkeeping tracks one active qbruntime cache; constructing it with more than one
+  Model raises `NotImplementedError`. Use `MobilintCache` for multi-Model dispatch.
+- On HBM `BadAlloc` during `create` or `launch`, `MobilintNPUBackend` disposes every previously
+  loaded slot and re-raises the underlying `qbruntime.QbRuntimeError` as
+  `MobilintBackendAllocError` with `phase`, `slot`, `dev`, `succeeded_so_far`, `n_total`,
+  `max_batch_size`, and `k_per_model` context. Callers should lower `max_batch_size` or spread
+  the workload across additional devices via `dev_no` (or explicit fully-qualified target
+  strings) rather than retrying on the same target set.
 - Keep `mblt-model-zoo tps` table labels, JSON keys, units, and extraction behavior centralized in
   `mblt_model_zoo/cli/tps_table.py`; update its schema and focused CLI TPS tests together.
 - Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Route batch

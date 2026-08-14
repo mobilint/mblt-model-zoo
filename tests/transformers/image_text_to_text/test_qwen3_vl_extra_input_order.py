@@ -81,9 +81,7 @@ class _BareTextModel(MobilintQwen3VLTextModel):
         ([(1, -1, 4096), (1, -1, 256), (3, -1, 4096)], 3),
     ],
 )
-def test_get_num_mxq_inputs_reads_variant_handle(
-    shapes: list[tuple[int, ...]], expected_count: int
-) -> None:
+def test_get_num_mxq_inputs_reads_variant_handle(shapes: list[tuple[int, ...]], expected_count: int) -> None:
     """Counts must come from the variant handle, not ``get_input_buffer_info()``.
 
     ``get_input_buffer_info()`` returns a single fused entry on batch
@@ -282,7 +280,10 @@ def _make_batched_model(
         max_batch_size=1,
         use_cache=False,
     )
-    model.npu_backend = SimpleNamespace(mxq_model=mxq)
+    # ``_llm_forward_batch`` now dispatches through ``npu_backend.mxq_models``
+    # so per-slot ``.infer`` calls can address individual Model handles; the
+    # single-Model fake keeps the historical single-group fast path.
+    model.npu_backend = SimpleNamespace(mxq_model=mxq, mxq_models=[mxq])
     model.num_deepstack_layers = num_deepstack_layers
     model.npu_time = None
     model._uses_rope_input = uses_rope_input

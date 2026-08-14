@@ -12,6 +12,24 @@ Treat `mblt_model_zoo/cli/tps_table.py` as the source of truth for TPS printed r
 Keep VLM non-batch tests under `image_text_to_text/non_batch`; matrix-runner Phase B owns both batch
 text-generation and batch image-text-to-text suites.
 
+`MobilintNPUBackend` hosts `N` `qbruntime.Model` slots; `max_batch_size` is the aggregate `N*K`
+capacity with `K` = compiled MXQ batch axis. `N = ceil(max_batch_size / K)` slots are launched
+round-robin across the unique devices referenced by the canonical target strings. Non-batch MXQ
+(`K=1`) with `B>1` fans into `N=B` slots dispatched in parallel via
+`MobilintNPUBackend.infer_slot`. Beam search stays `N=1`. `dev_no` is syntactic sugar for the
+device-prefix component of the canonical target strings — scalar pins one device, list expands
+to many. Read the canonical `target_cores` (`"d:c:k"`) / `target_clusters` (`"d:c"`) accessors
+at dispatch time, not `dev_no`. Legacy 2-part cores, bare int clusters, and
+`qbruntime.CoreId`/`Cluster` objects are silently migrated to canonical form by
+`_normalize_npu_target_kwargs`; `single` unfolds clusters to cores, `multi`/`global4`/`global8`
+fold cores to clusters and warn on partial coverage, `global8` requires both clusters on every
+covered device. `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV along
+`(model_idx, cache_id)` — row `i` maps to `(i//K, i%K)`; `slot_of` / `model_of` /
+`group_by_model` expose the routing. `MobilintBeamCache` enforces `N=1`. On HBM `BadAlloc`,
+`create`/`launch` disposes every previously loaded slot and re-raises as
+`MobilintBackendAllocError` with phase/slot/dev/counts context — lower `max_batch_size` or
+spread across more devices via `dev_no`.
+
 Qwen3-VL treats the vision + text MXQ + processor as one release. The top-level
 `MobilintQwen3VLConfig.dynamic_vision` bool selects the release: a dynamic-vision release accepts
 video and per-prompt multi-image inputs, while a static-vision release supports one image per prompt

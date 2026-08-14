@@ -65,6 +65,32 @@
   checking taxonomy-specific layout, required metadata and targets, and the complete official split.
 - Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement, preserving
   an existing cache on failure; match WiderFace event/image identities exactly to `wider_face_val.mat`.
+- `MobilintNPUBackend` hosts `N` `qbruntime.Model` slots; `max_batch_size` is the aggregate `N*K`
+  capacity where `K` is the compiled MXQ batch axis. Slots are distributed round-robin across the
+  unique devices referenced by the canonical target strings. A non-batch MXQ (`K==1`) with `B>1`
+  fans out into `N=B` slots dispatched in parallel via `MobilintNPUBackend.infer_slot`.
+- `dev_no` is syntactic sugar for the device-prefix component of the canonical target strings.
+  Scalar pins one device; a list expands to multiple. Do not read `dev_no` at dispatch time —
+  read `_target_cores_serialized` / `_target_clusters_serialized` (or the public
+  `target_cores` / `target_clusters` accessors).
+- Canonical NPU target wire form: `target_cores` items are `"d:c:k"` strings and
+  `target_clusters` items are `"d:c"` strings. Legacy 2-part `c:k` cores, bare integer clusters,
+  and `qbruntime.CoreId` / `Cluster` objects are silently migrated by
+  `_normalize_npu_target_kwargs` using `dev_no` as the fallback prefix. Under `single`,
+  `target_clusters` unfolds into every core of each cluster; under `multi` / `global4` /
+  `global8`, `target_cores` folds up to `"d:c"` cluster prefixes and warns on partial coverage.
+  `global8` requires both clusters on every covered device.
+- `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV along `(model_idx, cache_id)`
+  with total capacity `N*K` rows. Row `i` maps to `(i // K, i % K)`. Use `slot_of`, `model_of`,
+  `group_by_model` for dispatch. `ensure_batch_size` beyond `N*K` is only allowed on the legacy
+  single-Model hardware-batch path (`N==1`). `MobilintCache(model, batch_size=K)` is the shim
+  for the historical `N=1, K=K` case.
+- `MobilintBeamCache` enforces `N==1` — beam search bookkeeping tracks one active qbruntime
+  cache. Multi-Model dispatch is a `MobilintCache`-only feature.
+- On HBM `BadAlloc`, `MobilintNPUBackend.create` / `.launch` disposes every previously loaded
+  slot and re-raises as `MobilintBackendAllocError` with `phase`, `slot`, `dev`,
+  `succeeded_so_far`, `n_total`, `max_batch_size`, `k_per_model` context. Callers should lower
+  `max_batch_size` or spread across more devices via `dev_no`.
 - Keep TPS table and JSON output synchronized through `mblt_model_zoo/cli/tps_table.py`.
 - Keep VLM non-batch tests under `image_text_to_text/non_batch`; matrix-runner Phase B owns the
   batch text-generation and image-text-to-text suites.
