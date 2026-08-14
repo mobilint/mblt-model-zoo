@@ -638,6 +638,7 @@ def _build_pipeline(
     target_clusters: Union[list[int], None],
     default_single_target_cores: Sequence[str] | None = ("0:0",),
     subconfig_options: SubconfigPipelineOptions | None = None,
+    max_batch_size: Union[int, None] = None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -776,6 +777,14 @@ def _build_pipeline(
             target_clusters=target_clusters,
             default_single_target_cores=default_single_target_cores,
         )
+    if max_batch_size is not None:
+        # Propagate to the config layer so the backend launches N = ceil(B / K) slots at construction time.
+        if _is_vlm_task(task):
+            model_kwargs["text_max_batch_size"] = int(max_batch_size)
+        elif eagle3_prefix_requested:
+            model_kwargs["base_max_batch_size"] = int(max_batch_size)
+        else:
+            model_kwargs["max_batch_size"] = int(max_batch_size)
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
@@ -1668,6 +1677,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -2009,6 +2019,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
@@ -2569,6 +2580,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
@@ -3055,6 +3067,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
     )
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
