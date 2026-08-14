@@ -330,3 +330,137 @@ def test_eagle3_cache_dump_load_roundtrip_restores_base_and_draft_seq_lengths() 
     assert cache.get_draft_seq_length() == 7
     assert base_mxq.loaded == [(0, [b"cache-0"])]
     assert draft_mxq.loaded == [(0, [b"cache-0"])]
+
+
+def test_mobilint_cache_legacy_batch_size_promotes_single_model_to_n1_k8() -> None:
+    """Legacy ``batch_size=8`` on a single Model should build one N=1, K=8 cache."""
+    mxq_model = _FakeMxqModel()
+    cache = MobilintCache(mxq_model, batch_size=8)
+
+    assert cache.n_models == 1
+    assert cache.k_per_model == 8
+    assert cache.batch_size == 8
+    assert len(cache.layers) == 8
+    assert all(layer.mxq_model is mxq_model for layer in cache.layers)
+    assert cache.mxq_model is mxq_model
+    assert cache.slot_of(0) == (0, 0)
+    assert cache.slot_of(7) == (0, 7)
+
+
+def test_mobilint_cache_two_models_per_model_batch_one_yields_flat_row_layout() -> None:
+    """Two Models with ``per_model_batch=1`` should map row i to model i, slot 0."""
+    model_0 = _FakeMxqModel()
+    model_1 = _FakeMxqModel()
+    cache = MobilintCache([model_0, model_1], per_model_batch=1)
+
+    assert cache.n_models == 2
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 2
+    assert cache.slot_of(0) == (0, 0)
+    assert cache.slot_of(1) == (1, 0)
+    assert cache.model_of(0) is model_0
+    assert cache.model_of(1) is model_1
+    assert cache.layers[0].mxq_model is model_0
+    assert cache.layers[0].cache_id == 0
+    assert cache.layers[1].mxq_model is model_1
+    assert cache.layers[1].cache_id == 0
+
+
+def test_mobilint_cache_four_models_per_model_batch_sixteen_slot_math() -> None:
+    """Four Models × K=16 should produce 64 flat rows with the divmod slot layout."""
+    models = [_FakeMxqModel() for _ in range(4)]
+    cache = MobilintCache(models, per_model_batch=16)
+
+    assert cache.n_models == 4
+    assert cache.k_per_model == 16
+    assert cache.batch_size == 64
+    assert len(cache.layers) == 64
+    assert cache.slot_of(17) == (1, 1)
+    assert cache.model_of(17) is models[1]
+    assert cache.slot_of(63) == (3, 15)
+    assert cache.model_of(63) is models[3]
+
+
+def test_mobilint_cache_group_by_model_preserves_row_order_per_model() -> None:
+    """group_by_model should bucket flat rows by owning Model in insertion order."""
+    models = [_FakeMxqModel() for _ in range(3)]
+    cache = MobilintCache(models, per_model_batch=4)
+
+    grouped = cache.group_by_model([9, 0, 5, 2, 4])
+
+    assert grouped == {
+        2: [(9, 1)],
+        0: [(0, 0), (2, 2)],
+        1: [(5, 1), (4, 0)],
+    }
+
+
+def test_mobilint_cache_update_seen_tokens_per_row_routes_via_slot_of() -> None:
+    """update_seen_tokens with a dict should route to the correct (model, cache_id) layer."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    cache = MobilintCache(models, per_model_batch=1)
+
+    cache.update_seen_tokens({0: 5, 1: 3})
+
+    assert cache.get_seq_length(0) == 5
+    assert cache.get_seq_length(1) == 3
+
+
+def test_mobilint_cache_ensure_batch_size_rejects_multi_model_growth() -> None:
+    """ensure_batch_size beyond N*K must fail for multi-Model caches."""
+    cache = MobilintCache([_FakeMxqModel(), _FakeMxqModel()], per_model_batch=1)
+
+    with pytest.raises(ValueError, match="multi-Model"):
+        cache.ensure_batch_size(4)
+
+
+def test_mobilint_cache_ensure_batch_size_grows_single_model_hardware_batch() -> None:
+    """ensure_batch_size on an N=1 cache should keep the legacy hardware-batch growth."""
+    mxq_model = _FakeMxqModel()
+    cache = MobilintCache(mxq_model, per_model_batch=2)
+
+    cache.ensure_batch_size(5)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 5
+    assert cache.k_per_model == 5
+    assert [layer.cache_id for layer in cache.layers] == [0, 1, 2, 3, 4]
+    assert all(layer.mxq_model is mxq_model for layer in cache.layers)
+
+
+def test_mobilint_cache_rejects_conflicting_batch_size_and_per_model_batch() -> None:
+    """Passing both per_model_batch and legacy batch_size should raise."""
+    with pytest.raises(TypeError, match="not both"):
+        MobilintCache(_FakeMxqModel(), per_model_batch=2, batch_size=3)
+
+
+def test_mobilint_cache_copy_preserves_multi_model_layout_and_seq_lengths() -> None:
+    """copy() should keep the same Model list identity and layer sequence lengths."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    cache = MobilintCache(models, per_model_batch=3)
+    cache.set_seq_length({0: 4, 5: 7})
+
+    copied = cache.copy()
+
+    assert copied.n_models == 2
+    assert copied.k_per_model == 3
+    assert copied.batch_size == 6
+    assert copied.mxq_models[0] is models[0]
+    assert copied.mxq_models[1] is models[1]
+    assert copied.get_seq_length(0) == 4
+    assert copied.get_seq_length(5) == 7
+    assert copied.slot_of(5) == (1, 2)
+
+
+def test_mobilint_beam_cache_rejects_multi_model_dispatch() -> None:
+    """Beam cache should refuse N > 1 because encoder-decoder tracking is N=1 only."""
+    with pytest.raises(NotImplementedError, match="multi-Model"):
+        MobilintBeamCache([_FakeMxqModel(), _FakeMxqModel()])
+
+
+def test_mobilint_beam_cache_accepts_single_element_list() -> None:
+    """Beam cache should accept a length-1 list because it stays N=1."""
+    cache = MobilintBeamCache([_FakeMxqModel()], batch_size=2)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2

@@ -3,7 +3,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import qbruntime
 import torch
@@ -122,25 +122,110 @@ class MobilintLayer(CacheLayerMixin):
 
 
 class MobilintCache(Cache):
-    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1):
-        """Create a cache with fresh logical cursors for the shared runtime model.
+    def __init__(
+        self,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
+        per_model_batch: int = 1,
+        *,
+        batch_size: Optional[int] = None,
+    ):
+        """Create a cache with fresh logical cursors across one or more runtime models.
+
+        The cache dualizes KV state along ``(model_idx, cache_id)``: it holds
+        ``N = len(mxq_models)`` Model handles with ``K = per_model_batch``
+        cache slots each, laid out as flat rows so external callers can keep
+        the historical row-index API. Row ``i`` maps to
+        ``(i // K, i % K)``; helpers :meth:`slot_of`, :meth:`model_of`, and
+        :meth:`group_by_model` expose that routing without leaking the slot
+        concept into upstream dispatch.
 
         qbruntime selects the readable KV prefix from the ``cache_size`` passed
-        to inference; it does not expose the old ``reset_cache_memory`` API.
-        Fresh layers therefore start at sequence length zero, causing the next
-        inference to overwrite cache entries from the beginning rather than
-        making a previous request's KV prefix addressable.
+        to inference; fresh layers therefore start at sequence length zero,
+        causing the next inference to overwrite cache entries from the
+        beginning rather than making a previous request's KV prefix
+        addressable.
+
+        Args:
+            mxq_models: One :class:`qbruntime.Model` or a list of them. A
+                single Model is promoted to a length-1 list for backward
+                compatibility.
+            per_model_batch: Cache slots per Model (``K``). Total rows =
+                ``N * K``.
+            batch_size: Legacy keyword-only alias for ``per_model_batch``.
+                Accepted when a single Model is used (``N = 1``) so that
+                ``MobilintCache(model, batch_size=K)`` keeps working.
+
+        Raises:
+            TypeError: If both ``per_model_batch`` and legacy ``batch_size``
+                are provided.
+            ValueError: If ``mxq_models`` is an empty list.
         """
-        self.mxq_model = mxq_model
-        self.batch_size = max(1, batch_size)
+        if batch_size is not None:
+            if per_model_batch != 1:
+                raise TypeError(
+                    "Pass either per_model_batch or the legacy batch_size, not both"
+                )
+            per_model_batch = int(batch_size)
+
+        if isinstance(mxq_models, list):
+            models_list: List[qbruntime.Model] = list(mxq_models)
+        else:
+            models_list = [mxq_models]
+
+        if not models_list:
+            raise ValueError("mxq_models must contain at least one Model")
+
+        self.mxq_models: List[qbruntime.Model] = models_list
+        self.k_per_model: int = max(1, int(per_model_batch))
+        self.n_models: int = len(self.mxq_models)
+        self.batch_size: int = self.n_models * self.k_per_model
 
         self.layers: list[MobilintLayer] = [
-            MobilintLayer(self.mxq_model, cache_id) for cache_id in range(self.batch_size)
+            MobilintLayer(self.mxq_models[model_idx], cache_id)
+            for model_idx in range(self.n_models)
+            for cache_id in range(self.k_per_model)
         ]
         self.layer_classes = MobilintLayer
 
         self.num_hidden_layers = 1
         self.cache_processor = None
+
+    @property
+    def mxq_model(self) -> Optional[qbruntime.Model]:
+        """First Model handle for callers written against the pre-multi-Model API."""
+        return self.mxq_models[0] if self.mxq_models else None
+
+    def slot_of(self, row: int) -> Tuple[int, int]:
+        """Return ``(model_idx, local_cache_id)`` for a flat row index."""
+        row = int(row)
+        if row < 0 or row >= len(self.layers):
+            raise IndexError(
+                f"row {row} out of range for cache with {len(self.layers)} rows "
+                f"(N={self.n_models}, K={self.k_per_model})"
+            )
+        return divmod(row, self.k_per_model)
+
+    def model_of(self, row: int) -> qbruntime.Model:
+        """Return the :class:`qbruntime.Model` that owns the KV state for ``row``."""
+        model_idx, _ = self.slot_of(row)
+        return self.mxq_models[model_idx]
+
+    def group_by_model(self, rows: Iterable[int]) -> Dict[int, List[Tuple[int, int]]]:
+        """Group flat rows by owning Model.
+
+        Args:
+            rows: Iterable of flat row indices.
+
+        Returns:
+            Mapping ``model_idx -> [(row, local_cache_id), ...]`` in the input
+            order, so upstream dispatch can issue one blocking
+            :meth:`qbruntime.Model.infer` per Model without inspecting slots.
+        """
+        grouped: Dict[int, List[Tuple[int, int]]] = {}
+        for row in rows:
+            model_idx, local_cache_id = self.slot_of(int(row))
+            grouped.setdefault(model_idx, []).append((int(row), local_cache_id))
+        return grouped
 
     def get_seq_length(self, index: int = 0) -> int:
         return self.layers[index].get_seq_length()
@@ -202,17 +287,31 @@ class MobilintCache(Cache):
             layer.reset()
 
     def ensure_batch_size(self, batch_size: int) -> None:
-        """Grow logical cache entries so batched generation can track each active row."""
+        """Grow logical cache entries so batched generation can track each active row.
+
+        Growth beyond ``N * K`` is only supported on the legacy single-Model
+        hardware-batch path (``N == 1``); multi-Model caches must be sized
+        upfront because slot count is fixed by the backend.
+        """
         batch_size = max(1, int(batch_size))
         if batch_size <= self.batch_size:
             return
+        if self.n_models != 1:
+            raise ValueError(
+                f"cannot grow multi-Model cache beyond {self.batch_size} rows "
+                f"(N={self.n_models}, K={self.k_per_model}); allocate a larger cache upfront"
+            )
+        only_model = self.mxq_models[0]
         for cache_id in range(self.batch_size, batch_size):
-            self.layers.append(MobilintLayer(self.mxq_model, cache_id))
+            self.layers.append(MobilintLayer(only_model, cache_id))
         self.batch_size = batch_size
+        self.k_per_model = batch_size
 
     def copy(self):
-        copied = MobilintCache(self.mxq_model, batch_size=self.batch_size)
-        for i in range(self.batch_size):
+        copied = MobilintCache(list(self.mxq_models), per_model_batch=self.k_per_model)
+        if len(copied.layers) < self.batch_size:
+            copied.ensure_batch_size(self.batch_size)
+        for i in range(len(self.layers)):
             copied.layers[i] = self.layers[i].copy()
         return copied
 
@@ -227,8 +326,17 @@ class MobilintBeamCache(MobilintCache):
     cache position.
     """
 
-    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
-        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+    def __init__(
+        self,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
+        batch_size: int = 1,
+    ) -> None:
+        if isinstance(mxq_models, list) and len(mxq_models) > 1:
+            raise NotImplementedError(
+                "MobilintBeamCache does not support multi-Model dispatch (N > 1); "
+                "beam search keeps N=1 (encoder-decoder) — use MobilintCache for N > 1"
+            )
+        super().__init__(mxq_models=mxq_models, batch_size=batch_size)
         self._beam_token_histories: list[list[int]] = [[] for _ in range(self.batch_size)]
         self._beam_source_indices: list[int | None] = [None for _ in range(self.batch_size)]
         self._active_token_history: list[int] = []
@@ -415,8 +523,10 @@ class MobilintBeamCache(MobilintCache):
 
     def copy(self) -> "MobilintBeamCache":
         """Return a copy preserving application-level beam token histories."""
-        copied = self.__class__(self.mxq_model, batch_size=self.batch_size)
-        for i in range(self.batch_size):
+        copied = self.__class__(list(self.mxq_models), batch_size=self.k_per_model)
+        if len(copied.layers) < self.batch_size:
+            copied.ensure_batch_size(self.batch_size)
+        for i in range(len(self.layers)):
             copied.layers[i] = self.layers[i].copy()
         copied._beam_token_histories = [list(tokens) for tokens in self._beam_token_histories]
         copied._beam_source_indices = list(self._beam_source_indices)
@@ -429,8 +539,12 @@ class MobilintBeamCache(MobilintCache):
 class MobilintWhisperCache(MobilintBeamCache):
     """Whisper cache using token-history beam replay."""
 
-    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
-        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+    def __init__(
+        self,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
+        batch_size: int = 1,
+    ) -> None:
+        super().__init__(mxq_models=mxq_models, batch_size=batch_size)
         self._encoder_source_count: int | None = None
 
     def reset(self) -> None:
@@ -468,12 +582,12 @@ class MobilintDeepStackCache(MobilintCache):
 
     def __init__(
         self,
-        mxq_model: qbruntime.Model,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
         batch_size: int = 1,
         num_deepstack_layers: int = 0,
         hidden_size: int = 0,
     ) -> None:
-        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+        super().__init__(mxq_models=mxq_models, batch_size=batch_size)
         if num_deepstack_layers < 0:
             raise ValueError(f"num_deepstack_layers must be non-negative, got {num_deepstack_layers}")
         if hidden_size < 0:
@@ -550,12 +664,14 @@ class MobilintDeepStackCache(MobilintCache):
     def copy(self) -> "MobilintDeepStackCache":
         """Return a copy preserving KV state and the current deepstack tensor."""
         copied = MobilintDeepStackCache(
-            self.mxq_model,
-            batch_size=self.batch_size,
+            list(self.mxq_models),
+            batch_size=self.k_per_model,
             num_deepstack_layers=self.num_deepstack_layers,
             hidden_size=self.hidden_size,
         )
-        for i in range(self.batch_size):
+        if len(copied.layers) < self.batch_size:
+            copied.ensure_batch_size(self.batch_size)
+        for i in range(len(self.layers)):
             copied.layers[i] = self.layers[i].copy()
         copied._deepstack_tensor = None if self._deepstack_tensor is None else self._deepstack_tensor.clone()
         return copied
