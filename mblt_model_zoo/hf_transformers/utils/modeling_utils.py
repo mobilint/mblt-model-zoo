@@ -15,7 +15,11 @@ from transformers.modeling_utils import PreTrainedModel
 from ...utils.npu_backend import MobilintNPUBackend
 from ..utils.cache_utils import MobilintCache
 from .base_utils import PretrainedOnlyMixin
-from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConfigMixin
+from .configuration_utils import (
+    MobilintConfigMixin,
+    MobilintEncoderDecoderConfigMixin,
+    _re_normalize_backend_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +87,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         commit_hash = getattr(self.config, "_commit_hash", None)
         if commit_hash:
             self.npu_backend._commit_hash = commit_hash
+        # HF ``from_pretrained`` applies ``model_kwargs`` (e.g. ``--dev-no 1``,
+        # ``--core-mode global4``, ``--text-dev-no 0``) via setter chains after
+        # the config layer already ran ``_normalize_npu_target_kwargs`` from the
+        # JSON payload. Those setters only touch the named attribute; without
+        # a second pass here the backend keeps stale ``_target_cores_serialized``
+        # / ``_target_clusters_serialized`` lists that ignore the CLI override
+        # and slot dispatch silently pins to the JSON device.
+        _re_normalize_backend_state(self.npu_backend, prefix="")
         self.npu_backend.create()
         if not no_launch:
             self.launch()

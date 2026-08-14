@@ -13,6 +13,7 @@ import pytest
 
 from mblt_model_zoo.hf_transformers.utils.configuration_utils import (
     _normalize_npu_target_kwargs,
+    _re_normalize_backend_state,
 )
 from mblt_model_zoo.utils.npu_backend import MobilintNPUBackend
 
@@ -364,3 +365,111 @@ def test_backend_roundtrip_multi_device_dev_no_stays_list() -> None:
     reloaded = MobilintNPUBackend.from_dict(dict(dumped))
     assert reloaded.to_dict()["dev_no"] == [0, 1]
     assert reloaded.to_dict()["target_cores"] == ["0:0:0", "1:0:0"]
+
+
+# ---------------------------------------------------------------------------
+# Post-setter re-normalization (`_re_normalize_backend_state`)
+#
+# HF ``from_pretrained`` applies CLI ``model_kwargs`` via ``setattr`` after
+# the config layer already normalized JSON kwargs. The setters only touch the
+# named attribute, so a bare ``--dev-no`` override leaves ``target_cores``
+# pinned to the JSON device. ``_re_normalize_backend_state`` rebuilds the
+# canonical target lists from the backend's post-override state.
+# ---------------------------------------------------------------------------
+
+
+def _load_backend(kwargs: dict) -> MobilintNPUBackend:
+    """Normalize ``kwargs`` and return a fresh backend loaded from it."""
+    _normalize_npu_target_kwargs(kwargs)
+    return MobilintNPUBackend.from_dict(dict(kwargs))
+
+
+def test_re_normalize_scalar_dev_no_override_rebuilds_targets_to_new_device() -> None:
+    """``dev_no`` override to device 1 clears device-0 targets and re-expands under ``single``."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    # Simulate the HF setattr path: only ``dev_no`` was overridden.
+    backend.dev_no = 1
+    with pytest.warns(UserWarning, match="rebuilding targets from dev_no"):
+        _re_normalize_backend_state(backend)
+    assert backend._target_cores_serialized == [
+        "1:0:0",
+        "1:0:1",
+        "1:0:2",
+        "1:0:3",
+        "1:1:0",
+        "1:1:1",
+        "1:1:2",
+        "1:1:3",
+    ]
+    assert backend._target_clusters_serialized == []
+
+
+def test_re_normalize_list_dev_no_override_rebuilds_targets_across_devices() -> None:
+    """``dev_no=[0, 1]`` override with stale single-device targets re-expands to both devices."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    backend.dev_no = [0, 1]
+    with pytest.warns(UserWarning, match="rebuilding targets from dev_no"):
+        _re_normalize_backend_state(backend)
+    # Sugar expansion under single mode fills all 8 cores on each device.
+    assert backend._target_cores_serialized == [f"{d}:{c}:{k}" for d in (0, 1) for c in (0, 1) for k in range(4)]
+    assert backend._target_clusters_serialized == []
+
+
+def test_re_normalize_consistent_state_is_noop_without_warning() -> None:
+    """Re-normalizing an already-consistent backend leaves it unchanged and silent."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1"],
+        }
+    )
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        _re_normalize_backend_state(backend)
+    assert backend._target_cores_serialized == ["0:0:0", "0:0:1"]
+    assert not [w for w in recorded if issubclass(w.category, UserWarning)]
+
+
+def test_re_normalize_core_mode_change_folds_cores_to_clusters() -> None:
+    """Switching ``core_mode`` to ``global4`` folds a full-cluster core list to a cluster string."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"],
+        }
+    )
+    backend.core_mode = "global4"
+    _re_normalize_backend_state(backend)
+    assert backend._target_clusters_serialized == ["0:0"]
+    # ``_normalize_npu_target_kwargs`` drops the off-mode grain under global4.
+    assert backend._target_cores_serialized == []
+
+
+def test_re_normalize_default_bare_dev_no_leaves_expanded_targets_intact() -> None:
+    """Bare ``dev_no=0`` default with sugar-expanded targets stays canonical without warning."""
+    kwargs = {"mxq_path": "model.mxq", "core_mode": "single", "dev_no": 0}
+    _normalize_npu_target_kwargs(kwargs)
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        _re_normalize_backend_state(backend)
+    assert backend._target_cores_serialized == [f"0:{c}:{k}" for c in (0, 1) for k in range(4)]
+    assert not [w for w in recorded if issubclass(w.category, UserWarning)]

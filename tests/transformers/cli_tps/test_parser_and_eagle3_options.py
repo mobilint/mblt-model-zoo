@@ -486,6 +486,19 @@ def test_default_single_target_cores_for_args_disables_explicit_batch_size() -> 
     assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=None)) == ("0:0",)
 
 
+def test_default_single_target_cores_for_args_disables_list_dev_no() -> None:
+    """List-shaped ``--dev-no`` skips the ``"0:0"`` sentinel so dev_no sugar drives expansion.
+
+    The sentinel is a legacy 2-part core string that would migrate to a single-device
+    canonical target under the backend setter's ``_fallback_dev()``. Combined with a
+    multi-device ``--dev-no 0,1``, the resulting mismatch used to trigger a silent
+    single-device pin; leaving ``target_cores`` unset lets sugar expansion cover both.
+    """
+    assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=1, dev_no=[0, 1])) is None
+    # Scalar dev_no keeps the sentinel; the initial CLI default remains stable.
+    assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=1, dev_no=0)) == ("0:0",)
+
+
 def test_cli_tps_measure_dev_no_defaults_none() -> None:
     parser = build_parser()
     args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])

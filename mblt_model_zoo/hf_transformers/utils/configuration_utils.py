@@ -318,6 +318,78 @@ def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> No
         kwargs[clusters_key] = clusters
 
 
+def _re_normalize_backend_state(backend: MobilintNPUBackend, prefix: str = "") -> None:
+    """Re-canonicalize an :class:`MobilintNPUBackend` after per-field setter overrides.
+
+    HF ``from_pretrained`` applies ``model_kwargs`` via ``setattr`` *after* the
+    initial :func:`_normalize_npu_target_kwargs` has already produced canonical
+    target lists from the JSON payload. The per-field setters (``dev_no``,
+    ``core_mode``, ``target_cores``, ``target_clusters``) only update the
+    backend attribute they are named after — they do not re-run the target
+    expansion or grain fold/unfold. As a result an override like
+    ``--dev-no 1`` (or the VLM ``--text-dev-no 1`` path) silently leaves
+    ``_target_cores_serialized`` pointing at the JSON's original device, and
+    slot dispatch runs against the stale target set.
+
+    This helper rebuilds ``kwargs`` from the backend's current attribute
+    state, detects target vs ``dev_no`` device-set divergence (assumed to be
+    caused by a ``dev_no`` override with stale targets), clears the stale
+    targets in that case, and re-runs :func:`_normalize_npu_target_kwargs`.
+    The resulting canonical ``target_cores`` / ``target_clusters`` are
+    written back onto the backend so ``create()`` sees the caller's intent.
+
+    Grain mismatches (``core_mode`` change turning a core list into a
+    cluster mode, or vice versa) do not need special handling — the
+    normalization step's built-in fold/unfold logic already reconciles them
+    when both a stale target list and the new ``core_mode`` are present.
+
+    Args:
+        backend: The backend to re-normalize in place.
+        prefix: Optional prefix scoping the NPU keys inside the temporary
+            kwargs dict. Empty for the default backend.
+    """
+    kwargs: dict[str, Any] = {
+        f"{prefix}dev_no": backend.dev_no,
+        f"{prefix}core_mode": backend.core_mode,
+    }
+    cores = list(getattr(backend, "_target_cores_serialized", None) or [])
+    clusters = list(getattr(backend, "_target_clusters_serialized", None) or [])
+
+    dev_list = set(_normalize_dev_list(backend.dev_no))
+    target_devs: set[int] = set()
+    for entry in cores + clusters:
+        if isinstance(entry, str) and ":" in entry:
+            try:
+                target_devs.add(int(entry.split(":", 1)[0]))
+            except ValueError:
+                continue
+    if target_devs and target_devs != dev_list:
+        # ``dev_no`` override diverged from the stale target list. Drop the
+        # targets so the sugar expansion path inside
+        # ``_normalize_npu_target_kwargs`` re-expands them to the new device
+        # set. Callers that meant to keep explicit targets on a different
+        # device must also set ``dev_no`` to match.
+        warnings.warn(
+            f"NPU backend targets covered devices {sorted(target_devs)} but dev_no is "
+            f"{sorted(dev_list)}; rebuilding targets from dev_no. If you intended to keep "
+            "the explicit targets, set dev_no to match the target device set.",
+            UserWarning,
+            stacklevel=3,
+        )
+        cores = []
+        clusters = []
+
+    if cores:
+        kwargs[f"{prefix}target_cores"] = cores
+    if clusters:
+        kwargs[f"{prefix}target_clusters"] = clusters
+
+    _normalize_npu_target_kwargs(kwargs, prefix=prefix)
+
+    backend._target_cores_serialized = list(kwargs.get(f"{prefix}target_cores", []))
+    backend._target_clusters_serialized = list(kwargs.get(f"{prefix}target_clusters", []))
+
+
 class MobilintConfigMixin(PretrainedConfig):
     # ``dev_no`` is exposed as syntactic sugar for the device-prefix component
     # of the canonical target strings. It accepts either a single device index
@@ -634,14 +706,26 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     def _apply_sub_backend_kwargs(
         self, text_kwargs: dict[str, Any], vision_kwargs: dict[str, Any]
     ) -> None:
+        # Overrides come from two paths: the JSON-load helper that unpacks
+        # top-level ``text_*`` / ``vision_*`` keys, and HF's ``from_pretrained``
+        # model-kwargs application. Both routes reach here as unprefixed keys
+        # (``dev_no`` etc.) that we route through the sub-config's own
+        # setters. After the setter loop the sub-config's backend can be
+        # inconsistent (``dev_no`` overridden but ``_target_cores_serialized``
+        # still pinned to the JSON device); re-normalize each affected
+        # backend so canonical targets track the override.
         text_config = getattr(self, "text_config", None)
         if text_config is not None:
             for key, value in text_kwargs.items():
                 setattr(text_config, key, value)
+            if text_kwargs and hasattr(text_config, "npu_backend"):
+                _re_normalize_backend_state(text_config.npu_backend, prefix="")
         vision_config = getattr(self, "vision_config", None)
         if vision_config is not None:
             for key, value in vision_kwargs.items():
                 setattr(vision_config, key, value)
+            if vision_kwargs and hasattr(vision_config, "npu_backend"):
+                _re_normalize_backend_state(vision_config.npu_backend, prefix="")
 
     @PretrainedConfig.name_or_path.setter
     def name_or_path(self, value):

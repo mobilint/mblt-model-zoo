@@ -613,8 +613,13 @@ def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[
 
     Explicit batched TPS runs should leave ``target_cores`` unset so qbruntime can use every
     available core in single mode. User-provided ``--target-cores`` still takes precedence.
+    A list-shaped ``--dev-no`` (e.g. ``--dev-no 0,1``) also skips the default because
+    the legacy ``"0:0"`` sentinel would migrate to a single-device canonical target during
+    setter application and force the model-init re-normalization to warn about the mismatch.
     """
     if getattr(args, "batch_size", None) is not None and int(args.batch_size) > 1:
+        return None
+    if isinstance(getattr(args, "dev_no", None), (list, tuple)):
         return None
     return ("0:0",)
 

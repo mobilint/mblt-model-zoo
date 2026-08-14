@@ -69,3 +69,29 @@ def test_qwen2_vl_nested_text_backend_fields_take_precedence() -> None:
     assert config.text_mxq_path == "nested-text.mxq"
     assert config.text_core_mode == "global8"
     assert config.text_config.to_dict()["target_clusters"] == ["0:0", "0:1"]
+
+
+def test_qwen2_vl_text_dev_no_override_rebuilds_text_target_cores() -> None:
+    """Overriding ``text_dev_no`` alone re-expands the text sub-config's canonical targets.
+
+    Reproduces PR #109 Codex finding [1]: ``_apply_sub_backend_kwargs`` used to hand
+    each override to ``setattr`` on the sub-config, which only routed to the
+    ``dev_no.setter`` chain without re-expanding stale ``target_cores`` inherited
+    from the sub-config's default construction. Post-fix the sub-config's backend
+    now carries canonical targets covering the requested device.
+    """
+    with pytest.warns(UserWarning, match="rebuilding targets from dev_no"):
+        config = MobilintQwen2VLConfig(text_dev_no=1)
+
+    text_dumped = config.text_config.to_dict()
+    assert text_dumped["dev_no"] == 1
+    assert text_dumped["target_cores"] == [
+        "1:0:0",
+        "1:0:1",
+        "1:0:2",
+        "1:0:3",
+        "1:1:0",
+        "1:1:1",
+        "1:1:2",
+        "1:1:3",
+    ]
