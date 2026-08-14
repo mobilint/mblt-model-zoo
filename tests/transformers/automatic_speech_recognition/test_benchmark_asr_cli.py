@@ -447,14 +447,12 @@ def test_default_asr_model_filter_excludes_whisper_cpp(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(
         asr_bench,
-        "list_models",
-        lambda tasks=None, include_private=False: {
-            "automatic-speech-recognition": [
-                "mobilint/whisper-small",
-                "mobilint/whisper.cpp",
-                "mobilint/Qwen3-ASR-1.7B",
-            ]
-        },
+        "list_default_model_ids",
+        lambda task, *, include_private=False: [
+            "mobilint/whisper-small",
+            "mobilint/whisper.cpp",
+            "mobilint/Qwen3-ASR-1.7B",
+        ],
     )
 
     assert asr_bench._list_default_asr_models() == [
@@ -470,11 +468,11 @@ def test_include_private_flag_defaults_false_and_forwards_to_list_models(
 
     observed: list[bool] = []
 
-    def fake_list_models(tasks=None, include_private=False):  # type: ignore[no-untyped-def]
+    def fake_list_default_model_ids(task, *, include_private=False):  # type: ignore[no-untyped-def]
         observed.append(bool(include_private))
-        return {"automatic-speech-recognition": ["mobilint/whisper-small"]}
+        return ["mobilint/whisper-small"]
 
-    monkeypatch.setattr(asr_bench, "list_models", fake_list_models)
+    monkeypatch.setattr(asr_bench, "list_default_model_ids", fake_list_default_model_ids)
 
     default_args = asr_bench._parse_args([])
     assert default_args.include_private is False

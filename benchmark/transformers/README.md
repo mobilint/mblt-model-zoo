@@ -426,6 +426,9 @@ python benchmark/transformers/benchmark_text_generation_models.py measure \
 `mobilint/Llama-3.2-1B-Instruct`). It benchmarks only that model when provided; when omitted, all
 listed text-generation models are benchmarked.
 
+Pass `--include-private` to add private `mobilint/*` text-generation releases to the default target
+list. Requires an authenticated Hugging Face session (`hf auth login`).
+
 Default output directory: `benchmark/transformers/results/text_generation/`.
 
 - `{model}[-{revision}]-{core_mode}.json`: Per-model detailed sweep payload.
@@ -559,6 +562,9 @@ python benchmark/transformers/benchmark_image_text_to_text_models.py sweep \
   --skip-existing
 ```
 
+Pass `--include-private` to add private `mobilint/*` image-text-to-text releases to the default
+target list. Requires an authenticated Hugging Face session (`hf auth login`).
+
 Default output directory: `benchmark/transformers/results/image_text_to_text/`.
 
 - `{model}[-{revision}]-{core_mode}.json`: Per-model full sweep payload.
@@ -672,8 +678,10 @@ python benchmark/transformers/search_npu_prefill_chunk_size.py \
 ```
 
 If `--mxq-dir` is omitted, the script searches public `mobilint/` text-generation models for `W4V8`
-and `W8` revisions. Default output directory: `benchmark/transformers/results/prefill_chunk_search/`.
-Use `--model` to limit the search to one or more model ids:
+and `W8` revisions. Pass `--include-private` to add private `mobilint/*` text-generation releases to
+the default target list. Requires an authenticated Hugging Face session (`hf auth login`). Default
+output directory: `benchmark/transformers/results/prefill_chunk_search/`. Use `--model` to limit the
+search to one or more model ids:
 
 ```bash
 python benchmark/transformers/search_npu_prefill_chunk_size.py \

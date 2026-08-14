@@ -32,7 +32,7 @@ from benchmark.common.io_utils import write_json as _write_json
 from benchmark.common.runtime_utils import clear_cuda_memory as _clear_cuda_memory
 from benchmark.common.runtime_utils import is_cuda_device as _is_cuda_device
 from benchmark.common.runtime_utils import release_pipeline as _release_pipeline
-from mblt_model_zoo.hf_transformers.utils import list_models
+from benchmark.transformers.benchmark_target_utils import list_default_model_ids
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_SWEEP_VALUES as _CORE_MODE_SWEEP_VALUES_COMMON,
 )
@@ -725,6 +725,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="output directory (default: benchmark/transformers/results/prefill_chunk_search)",
     )
+    parser.add_argument(
+        "--include-private",
+        action="store_true",
+        help=(
+            "Include private mobilint/* models in the default target list. "
+            "Requires an authenticated Hugging Face session (hf auth login)."
+        ),
+    )
     return parser
 
 
@@ -736,9 +744,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     script_dir = Path(__file__).resolve().parent
-    output_dir = (
-        Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "prefill_chunk_search"
-    )
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "prefill_chunk_search"
     records_dir = output_dir / "records"
     records_dir.mkdir(parents=True, exist_ok=True)
 
@@ -760,7 +766,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         mxq_dir = None
 
-    available = list_models(tasks="text-generation").get("text-generation", [])
+    available = list_default_model_ids(
+        "text-generation",
+        include_private=bool(getattr(args, "include_private", False)),
+    )
     if not available:
         print("No text-generation models found.")
         return 0
@@ -770,10 +779,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.models:
         unknown_model_ids = sorted(set(selected_model_ids).difference(available_model_ids))
         if unknown_model_ids:
-            print(
-                "[warn] --model target(s) not found in text-generation model list: "
-                + ", ".join(unknown_model_ids)
-            )
+            print("[warn] --model target(s) not found in text-generation model list: " + ", ".join(unknown_model_ids))
 
     skipped_mxq_files: list[dict[str, str]] = []
     skipped_model_revisions: list[dict[str, Any]] = []
@@ -963,4 +969,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
