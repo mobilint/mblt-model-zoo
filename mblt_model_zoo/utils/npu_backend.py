@@ -558,23 +558,27 @@ class MobilintNPUBackend:
     def _probe_k_per_model(mxq_model: "Model") -> int:
         """Return the compiled batch axis ``K`` of ``mxq_model``, defaulting to ``1``.
 
-        Uses :meth:`~qbruntime.Model.get_model_input_shape`; any driver-side
-        failure or dynamic (``<= 0``) leading dimension falls back to ``1``
-        because the batch axis in that case is not meaningful for slot
-        sizing.
+        Reads :meth:`~qbruntime.Model.get_cache_infos` and returns the
+        ``num_batches`` field of the first per-layer cache info entry.
+        This is the authoritative K probe for LLM MXQs — the input shape
+        of a batched LLM MXQ is ``(1, -1, hidden)``, so the leading input
+        dimension cannot distinguish batched from non-batched artifacts.
+
+        For MXQ artifacts without KV cache layers (e.g. vision models),
+        :meth:`~qbruntime.Model.get_cache_infos` returns an empty list and
+        the fallback of ``1`` is correct because there is no compiled
+        batch axis to fan out along.
         """
         try:
-            shape = mxq_model.get_model_input_shape()
-        except (AttributeError, IndexError, TypeError, ValueError, QbRuntimeError) as exc:
-            logger.warning("Failed to probe k_per_model from get_model_input_shape: %s", exc)
+            infos = mxq_model.get_cache_infos()
+        except (AttributeError, QbRuntimeError) as exc:
+            logger.warning("Failed to probe k_per_model from get_cache_infos: %s", exc)
             return 1
-        if not shape:
+        if not infos:
             return 1
-        first = shape[0]
-        if first is None or len(first) == 0:
-            return 1
+        first = infos[0]
         try:
-            k = int(first[0])
+            k = int(getattr(first, "num_batches", 1) or 1)
         except (TypeError, ValueError):
             return 1
         return k if k > 0 else 1

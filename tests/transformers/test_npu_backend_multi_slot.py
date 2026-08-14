@@ -57,17 +57,25 @@ class _FakeModelConfig:
         self.mode = "global8"
 
 
+class _FakeCacheInfo:
+    """qbruntime CacheInfo stand-in exposing the fields the K probe reads."""
+
+    def __init__(self, num_batches: int) -> None:
+        self.num_batches = int(num_batches)
+
+
 class _FakeModel:
     """qbruntime.Model stand-in that always succeeds and records lifecycle events."""
 
-    def __init__(self, path: str, mc: _FakeModelConfig) -> None:
+    def __init__(self, path: str, mc: _FakeModelConfig, k: int = 1, n_layers: int = 32) -> None:
         self.path = path
         self.mc = mc
         self.launched_on: _FakeAccelerator | None = None
         self.disposed = False
+        self._cache_infos = [_FakeCacheInfo(k)] * int(n_layers)
 
-    def get_model_input_shape(self):
-        return [(1, 4, 8)]  # K=1
+    def get_cache_infos(self):
+        return self._cache_infos
 
     def launch(self, acc: _FakeAccelerator) -> None:
         self.launched_on = acc
@@ -83,6 +91,7 @@ class _StubQbRuntime:
         self.models: List[_FakeModel] = []
         self.create_should_fail_at: int | None = None
         self.launch_should_fail_at: int | None = None
+        self.k_per_model: int = 1
 
 
 @pytest.fixture
@@ -94,7 +103,7 @@ def stub_qbruntime(monkeypatch: pytest.MonkeyPatch) -> _StubQbRuntime:
         idx = len(stub.models)
         if stub.create_should_fail_at is not None and idx == stub.create_should_fail_at:
             raise QbRuntimeError(f"stub create failure at slot {idx}")
-        model = _FakeModel(path, mc)
+        model = _FakeModel(path, mc, k=stub.k_per_model)
         if stub.launch_should_fail_at is not None:
             slot_idx = idx
 
@@ -245,6 +254,50 @@ def test_backend_dispose_is_idempotent(tmp_path, stub_qbruntime) -> None:
 
     assert backend.mxq_models == []
     assert backend.accs == {}
+
+
+def test_backend_probes_k_from_cache_infos_for_batched_llm(tmp_path, stub_qbruntime) -> None:
+    """Batched-LLM MXQ (K=16) must be probed via get_cache_infos, not input shape.
+
+    Regression: the previous input-shape-based probe read ``(1, -1, hidden)``
+    for both batched and non-batched LLM MXQs and always returned K=1, so
+    ``max_batch_size=16`` was expanded into 16 slots and hit BadAlloc.
+    """
+    stub_qbruntime.k_per_model = 16
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+
+    backend.create()
+
+    assert backend.k_per_model == 16
+    assert backend.n_models == 1
+    assert len(backend.mxq_models) == 1
+
+
+def test_probe_k_per_model_falls_back_to_one_for_empty_cache_infos(tmp_path, stub_qbruntime) -> None:
+    """Vision-style MXQs without KV cache layers must default to K=1."""
+
+    class _NoCacheModel(_FakeModel):
+        def get_cache_infos(self):
+            return []
+
+    k = MobilintNPUBackend._probe_k_per_model(_NoCacheModel("stub", _FakeModelConfig()))
+    assert k == 1
+
+
+def test_probe_k_per_model_falls_back_on_driver_error(tmp_path, stub_qbruntime) -> None:
+    """A qbruntime error while probing must fall back to K=1 rather than propagate."""
+
+    class _BrokenModel(_FakeModel):
+        def get_cache_infos(self):
+            raise QbRuntimeError("driver unhappy")
+
+    k = MobilintNPUBackend._probe_k_per_model(_BrokenModel("stub", _FakeModelConfig()))
+    assert k == 1
 
 
 def test_backend_infer_slot_dispatches_to_the_selected_model(
