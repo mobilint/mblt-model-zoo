@@ -928,6 +928,15 @@ class MobilintNPUBackend:
         rewritten legacy inputs, so this method neither inspects nor
         rewrites the serialized entries.
 
+        When canonical target strings are set, ``dev_no`` is derived from
+        their device prefixes so the emitted dict round-trips through
+        ``_normalize_npu_target_kwargs`` — the config-layer device-set
+        consistency check requires ``dev_no`` and the target device set to
+        agree once both are explicit. A single device collapses to an int;
+        multiple devices emit a sorted list. When no targets are set (e.g.
+        early construction before the config layer has expanded ``dev_no``
+        sugar), the stored ``self.dev_no`` is passed through as-is.
+
         Args:
             prefix: Optional string to prepend to every key, useful when
                 merging this configuration into a larger dictionary.
@@ -938,7 +947,7 @@ class MobilintNPUBackend:
         p = prefix
         result = {
             f"{p}mxq_path": self.mxq_path,
-            f"{p}dev_no": self.dev_no,
+            f"{p}dev_no": self._dev_no_for_serialization(),
             f"{p}max_batch_size": self.max_batch_size,
             f"{p}core_mode": self.core_mode,
         }
@@ -949,6 +958,32 @@ class MobilintNPUBackend:
             result[f"{p}target_clusters"] = self._target_clusters_serialized
 
         return result
+
+    def _dev_no_for_serialization(self) -> Union[int, List[int]]:
+        """Return ``dev_no`` derived from canonical targets, else the stored value.
+
+        Parsing failures on the target strings fall back to the stored
+        ``self.dev_no`` rather than silently dropping the field.
+        """
+        if self._target_cores_serialized:
+            source = self._target_cores_serialized
+        elif self._target_clusters_serialized:
+            source = self._target_clusters_serialized
+        else:
+            return self.dev_no
+
+        devs: set[int] = set()
+        for s in source:
+            try:
+                devs.add(int(s.split(":", 1)[0]))
+            except (ValueError, AttributeError, IndexError):
+                return self.dev_no
+
+        if not devs:
+            return self.dev_no
+
+        sorted_devs = sorted(devs)
+        return sorted_devs if len(sorted_devs) > 1 else sorted_devs[0]
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], prefix: str = "") -> "MobilintNPUBackend":

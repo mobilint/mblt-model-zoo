@@ -251,3 +251,61 @@ def test_backend_roundtrip_preserves_global8_coverage() -> None:
     _normalize_npu_target_kwargs(dumped)
     second = MobilintNPUBackend.from_dict(dict(dumped))
     assert second.to_dict()["target_clusters"] == ["0:0", "0:1"]
+
+
+def test_backend_roundtrip_multi_device_target_without_explicit_dev_no() -> None:
+    """Canonical multi-device targets survive round-trip without user-supplied ``dev_no``.
+
+    Reproduces the P2 finding on PR #109: a user pins two devices via
+    ``target_cores`` alone, ``to_dict`` used to emit the backend default
+    ``dev_no=0``, and the next ``_normalize_npu_target_kwargs`` rejected
+    the pair as a device-set mismatch.
+    """
+    kwargs = {"core_mode": "single", "target_cores": ["0:0:0", "1:0:0"]}
+    _normalize_npu_target_kwargs(kwargs)
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    dumped = backend.to_dict()
+    assert dumped["target_cores"] == ["0:0:0", "1:0:0"]
+    assert dumped["dev_no"] == [0, 1]
+    _normalize_npu_target_kwargs(dumped)
+    reloaded = MobilintNPUBackend.from_dict(dict(dumped))
+    assert reloaded.to_dict()["target_cores"] == ["0:0:0", "1:0:0"]
+    assert reloaded.to_dict()["dev_no"] == [0, 1]
+
+
+def test_backend_roundtrip_single_device_dev_no_stays_scalar() -> None:
+    """A single-device explicit ``dev_no=0`` keeps its scalar shape on round-trip."""
+    kwargs = {
+        "mxq_path": "model.mxq",
+        "core_mode": "single",
+        "dev_no": 0,
+        "target_cores": ["0:0:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    dumped = backend.to_dict()
+    assert dumped["dev_no"] == 0
+    assert dumped["target_cores"] == ["0:0:0"]
+    _normalize_npu_target_kwargs(dumped)
+    reloaded = MobilintNPUBackend.from_dict(dict(dumped))
+    assert reloaded.to_dict()["dev_no"] == 0
+    assert reloaded.to_dict()["target_cores"] == ["0:0:0"]
+
+
+def test_backend_roundtrip_multi_device_dev_no_stays_list() -> None:
+    """Explicit ``dev_no=[0, 1]`` with matching multi-device target survives round-trip."""
+    kwargs = {
+        "mxq_path": "model.mxq",
+        "core_mode": "single",
+        "dev_no": [0, 1],
+        "target_cores": ["0:0:0", "1:0:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    dumped = backend.to_dict()
+    assert dumped["dev_no"] == [0, 1]
+    assert dumped["target_cores"] == ["0:0:0", "1:0:0"]
+    _normalize_npu_target_kwargs(dumped)
+    reloaded = MobilintNPUBackend.from_dict(dict(dumped))
+    assert reloaded.to_dict()["dev_no"] == [0, 1]
+    assert reloaded.to_dict()["target_cores"] == ["0:0:0", "1:0:0"]
