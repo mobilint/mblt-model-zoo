@@ -644,6 +644,77 @@ def _require_transformers_deps() -> None:
         raise SystemExit(2)
 
 
+_MOBILINT_REPO_PREFIX = "mobilint/"
+
+
+def _resolve_mobilint_config_mixins() -> tuple[type, ...] | None:
+    """Return the Mobilint config mixin classes, or ``None`` if unavailable.
+
+    The mixins live under the optional ``mblt_model_zoo.hf_transformers``
+    subpackage, which itself imports upstream ``transformers``. This helper
+    isolates the import so the CLI keeps working when the extra is missing;
+    a caller that fails to load the mixins simply treats every model as
+    non-Mobilint and skips backend-only kwarg injection.
+    """
+    try:
+        from mblt_model_zoo.hf_transformers.utils.configuration_utils import (
+            MobilintConfigMixin,
+            MobilintEagle3ConfigMixin,
+            MobilintEncoderDecoderConfigMixin,
+            MobilintVisionTextConfigMixin,
+        )
+    except ImportError:
+        return None
+    return (
+        MobilintConfigMixin,
+        MobilintEncoderDecoderConfigMixin,
+        MobilintVisionTextConfigMixin,
+        MobilintEagle3ConfigMixin,
+    )
+
+
+def _is_mobilint_model_target(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> bool:
+    """Return ``True`` when ``model`` should be loaded as a Mobilint release.
+
+    Backend-only kwargs (``max_batch_size`` / ``text_max_batch_size`` /
+    ``base_max_batch_size``) are consumed only by Mobilint config mixins, so
+    forwarding them to a stock upstream config causes ``from_pretrained`` to
+    fail before measurement starts. Two positive signals are accepted:
+
+    1. The model repo string starts with ``mobilint/`` — the shipped Mobilint
+       namespace on Hugging Face Hub. This fast path avoids a config download
+       when the intent is obvious.
+    2. Resolving the model via :meth:`AutoConfig.from_pretrained` yields a
+       config that is an instance of a Mobilint mixin. Any failure to resolve
+       (missing extras, offline, wrong path) returns ``False`` and skips
+       injection — the caller's pipeline construction will still surface the
+       real error.
+    """
+    if isinstance(model, str) and model.startswith(_MOBILINT_REPO_PREFIX):
+        return True
+    mixins = _resolve_mobilint_config_mixins()
+    if mixins is None:
+        return False
+    try:
+        from transformers import AutoConfig
+    except ImportError:
+        return False
+    try:
+        config = AutoConfig.from_pretrained(
+            model,
+            trust_remote_code=trust_remote_code,
+            revision=revision,
+        )
+    except Exception:
+        return False
+    return isinstance(config, mixins)
+
+
 def _resolve_asr_pipeline_num_beams(pipeline: Any) -> int:
     """Return the ASR pipeline beam count from the model config, falling back to greedy search."""
 
@@ -851,7 +922,16 @@ def _build_pipeline(
         )
         if dev_no is not None:
             model_kwargs["dev_no"] = dev_no
-    if max_batch_size is not None:
+    if max_batch_size is not None and _is_mobilint_model_target(
+        model,
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+    ):
+        # Only Mobilint config mixins consume these backend-only fields; stock
+        # upstream configs reject unknown kwargs before measurement starts. For
+        # non-Mobilint targets ``--batch-size`` stays a measurement-only knob
+        # (synthetic batch around ``generate``) and is applied later via
+        # ``_resolve_cli_batch_size``.
         # Propagate to the config layer so the backend launches N = ceil(B / K) slots at construction time.
         if _is_vlm_task(task):
             model_kwargs["text_max_batch_size"] = int(max_batch_size)

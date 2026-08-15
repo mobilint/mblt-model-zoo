@@ -719,3 +719,233 @@ def test_build_pipeline_eagle3_dev_no_prefix_warns_and_coalesces(monkeypatch) ->
     assert pipe.model_kwargs["base_dev_no"] == 5
     assert pipe.model_kwargs["draft_dev_no"] == 1
     assert pipe.model_kwargs["fc_dev_no"] == 1
+
+
+def test_is_mobilint_model_target_fast_path_repo_prefix(monkeypatch) -> None:
+    """The ``mobilint/`` HuggingFace namespace short-circuits config resolution."""
+
+    def _fail_autoconfig(*args, **kwargs):
+        raise AssertionError("AutoConfig should not be consulted on the mobilint/* fast path")
+
+    monkeypatch.setattr(importlib.import_module("transformers").AutoConfig, "from_pretrained", _fail_autoconfig)
+
+    assert tps_cli._is_mobilint_model_target(
+        "mobilint/Qwen3-4B-W4V8-Anything",
+        trust_remote_code=True,
+        revision=None,
+    )
+
+
+def test_is_mobilint_model_target_returns_false_when_config_load_fails(monkeypatch) -> None:
+    """Any AutoConfig error (offline, wrong path, missing extras) is a safe non-Mobilint signal."""
+
+    def _raise_from_pretrained(*args, **kwargs):
+        raise OSError("simulated network failure")
+
+    monkeypatch.setattr(importlib.import_module("transformers").AutoConfig, "from_pretrained", _raise_from_pretrained)
+
+    assert not tps_cli._is_mobilint_model_target(
+        "Qwen/Qwen2.5-1.5B-Instruct",
+        trust_remote_code=True,
+        revision=None,
+    )
+
+
+def test_is_mobilint_model_target_isinstance_check(monkeypatch) -> None:
+    """A resolved config that is a Mobilint mixin subclass triggers injection."""
+    mixins = tps_cli._resolve_mobilint_config_mixins()
+    if mixins is None:
+        pytest.skip("mblt_model_zoo.hf_transformers is not importable in this environment")
+    mobilint_mixin = mixins[0]
+
+    class _StubMobilintConfig(mobilint_mixin):
+        pass
+
+    def _fake_from_pretrained(*args, **kwargs):
+        # Skip full config __init__ so the stub does not require an NPU backend to construct.
+        return _StubMobilintConfig.__new__(_StubMobilintConfig)
+
+    monkeypatch.setattr(importlib.import_module("transformers").AutoConfig, "from_pretrained", _fake_from_pretrained)
+
+    assert tps_cli._is_mobilint_model_target(
+        "some-non-namespaced-checkpoint",
+        trust_remote_code=True,
+        revision=None,
+    )
+
+
+def _capture_pipeline_kwargs(monkeypatch) -> dict[str, object]:
+    """Replace ``transformers.pipeline`` with a stub that records its kwargs."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    captured: dict[str, object] = {}
+
+    def _fake(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        return types.SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", _fake)
+    return captured
+
+
+def test_build_pipeline_skips_max_batch_size_for_non_mobilint(monkeypatch) -> None:
+    """A non-Mobilint model target must not receive backend-only ``max_batch_size``."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="Qwen/Qwen2.5-1.5B-Instruct",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    # No Mobilint-only kwargs were requested and the target is non-Mobilint, so
+    # backend-only fields must not reach the model constructor. --batch-size
+    # still becomes the measurement batch size via the CLI's synthetic-input
+    # path (verified by dedicated tests elsewhere).
+    model_kwargs = captured.get("model_kwargs", {})
+    assert "max_batch_size" not in model_kwargs
+    assert "text_max_batch_size" not in model_kwargs
+    assert "base_max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_injects_max_batch_size_for_mobilint(monkeypatch) -> None:
+    """A Mobilint model target continues to receive ``max_batch_size``."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/Qwen3-4B-W4V8",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("max_batch_size") == 4
+
+
+def test_build_pipeline_vlm_gates_text_max_batch_size(monkeypatch) -> None:
+    """VLM path uses ``text_max_batch_size`` and must gate on the Mobilint check."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="google/gemma-3-vlm",  # placeholder non-Mobilint VLM string
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=2,
+    )
+
+    assert "text_max_batch_size" not in captured.get("model_kwargs", {})
+
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=2,
+    )
+
+    assert captured.get("model_kwargs", {}).get("text_max_batch_size") == 2
+
+
+def test_build_pipeline_eagle3_gates_base_max_batch_size(monkeypatch) -> None:
+    """EAGLE-3 path uses ``base_max_batch_size`` and must gate on the Mobilint check."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/EAGLE3-Qwen3-4B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(base_mxq_path="base.mxq"),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=8,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("base_max_batch_size") == 8
+    assert "max_batch_size" not in model_kwargs
