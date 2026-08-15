@@ -379,6 +379,35 @@ def test_output_layout_setter_pins_backend_state(tmp_path, stub_qbruntime) -> No
     assert backend.output_layout == "n_tokens"
 
 
+def test_output_layout_cache_is_invalidated_across_dispose_and_recreate(tmp_path, stub_qbruntime) -> None:
+    """dispose() + create() must clear the cached layout so the new artifact re-probes.
+
+    Regression: the cache was pinned once by the first probe and lived on the
+    backend instance. Swapping ``mxq_path`` and re-running ``create()`` left the
+    stale ``"n_items"`` reading in place, and ``MultiSlotDispatcher`` then
+    merged the new per-token artifact's outputs with the wrong layout.
+    """
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+    assert backend.output_layout == "n_items"
+    assert backend._output_layout_cached == "n_items"
+
+    backend.dispose()
+    backend.create()
+    # Simulate a swapped MXQ whose compiled shape declares the dynamic
+    # (per-token) axis. The freshly created slot must re-probe on the next
+    # read rather than return the previous artifact's cached value.
+    backend.mxq_models[0]._output_shape = (1, -1, 32000)
+
+    assert backend._output_layout_cached is None
+    assert backend.output_layout == "n_tokens"
+
+
 def test_backend_dispatcher_property_wires_multi_slot_dispatcher(tmp_path, stub_qbruntime) -> None:
     """``backend.dispatcher`` returns a live :class:`MultiSlotDispatcher`."""
     from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher

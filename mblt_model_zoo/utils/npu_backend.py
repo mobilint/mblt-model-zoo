@@ -659,6 +659,10 @@ class MobilintNPUBackend:
         self.mxq_models = []
         self.model_dev_no = []
         self.n_models = 0
+        # Output layout is a fixed property of the compiled MXQ probed once
+        # from slot 0. A dispose() + create() cycle may swap the artifact,
+        # so invalidate any prior probe before loading new slots.
+        self._output_layout_cached = None
 
         resolved_path: Optional[str] = None
 
