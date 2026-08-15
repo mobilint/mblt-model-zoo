@@ -180,15 +180,25 @@ truth when this snapshot becomes stale.
   time — use the canonical `_target_cores_serialized` / `_target_clusters_serialized` lists (or
   the public `target_cores` / `target_clusters` accessors) so multi-device backends behave
   correctly.
+- Backend target topology lives in a single frozen `NPUTargetSpec` on `MobilintNPUBackend._spec`
+  (dev_no, core_mode, cores, clusters). The four per-field setters
+  (`dev_no`/`core_mode`/`target_cores`/`target_clusters`) each atomically replace `_spec` via
+  `NPUTargetSpec._with`, which forwards to `NPUTargetSpec.from_kwargs` for full canonical
+  renormalization. HF `from_pretrained` therefore cannot observe a partial-state moment between
+  its per-field `model_kwargs` `setattr` calls, and no separate reconciliation pass is needed
+  before `create()`. When a caller overrides only targets, `dev_no` syncs to the target device
+  set atomically; when a caller overrides only `dev_no`, stale targets are cleared and
+  re-expanded from the new device sugar; when both are overridden, the device-set consistency
+  check inside `from_kwargs` catches genuine mismatches.
 - The canonical NPU target wire form is fully-qualified: `target_cores` entries are `"d:c:k"`
   strings and `target_clusters` entries are `"d:c"` strings. Legacy 2-part `c:k` cores, bare
   integer clusters, and `qbruntime.CoreId` / `Cluster` objects are silently migrated to the
-  canonical form by `_normalize_npu_target_kwargs` using `dev_no` as the fallback prefix; no
-  explicit migration step is required for stored configs. Under `single` core mode, the config
-  layer expands `target_clusters` into every core of each cluster; under `multi` / `global4` /
-  `global8`, it folds `target_cores` up to their unique `"d:c"` cluster prefixes and warns when a
-  partial cluster is rounded up. `global8` requires both clusters `0` and `1` on every device
-  covered by the target set.
+  canonical form by `NPUTargetSpec.from_kwargs` (and its `_normalize_npu_target_kwargs` config-
+  layer wrapper) using `dev_no` as the fallback prefix; no explicit migration step is required
+  for stored configs. Under `single` core mode, the config layer expands `target_clusters` into
+  every core of each cluster; under `multi` / `global4` / `global8`, it folds `target_cores` up
+  to their unique `"d:c"` cluster prefixes and warns when a partial cluster is rounded up.
+  `global8` requires both clusters `0` and `1` on every device covered by the target set.
 - `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV state along
   `(model_idx, cache_id)` with `N = len(mxq_models)` and total capacity `N * K` rows. Row `i`
   maps to `(i // K, i % K)`; `slot_of`, `model_of`, and `group_by_model` expose the routing so

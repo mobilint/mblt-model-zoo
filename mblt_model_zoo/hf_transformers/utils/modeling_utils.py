@@ -18,7 +18,6 @@ from .base_utils import PretrainedOnlyMixin
 from .configuration_utils import (
     MobilintConfigMixin,
     MobilintEncoderDecoderConfigMixin,
-    _re_normalize_backend_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,12 +88,11 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             self.npu_backend._commit_hash = commit_hash
         # HF ``from_pretrained`` applies ``model_kwargs`` (e.g. ``--dev-no 1``,
         # ``--core-mode global4``, ``--text-dev-no 0``) via setter chains after
-        # the config layer already ran ``_normalize_npu_target_kwargs`` from the
-        # JSON payload. Those setters only touch the named attribute; without
-        # a second pass here the backend keeps stale ``_target_cores_serialized``
-        # / ``_target_clusters_serialized`` lists that ignore the CLI override
-        # and slot dispatch silently pins to the JSON device.
-        _re_normalize_backend_state(self.npu_backend, prefix="")
+        # the config layer built the initial ``NPUTargetSpec`` from the JSON
+        # payload. Each per-field setter atomically replaces the backend's
+        # ``_spec`` through :meth:`NPUTargetSpec._with`, so no separate
+        # reconciliation pass is required before :meth:`create` — every
+        # intermediate state is already fully canonical.
         self.npu_backend.create()
         if not no_launch:
             self.launch()

@@ -73,13 +73,23 @@
   Scalar pins one device; a list expands to multiple. Do not read `dev_no` at dispatch time —
   read `_target_cores_serialized` / `_target_clusters_serialized` (or the public
   `target_cores` / `target_clusters` accessors).
+- Backend target topology lives in a single frozen `NPUTargetSpec` on
+  `MobilintNPUBackend._spec` (dev_no, core_mode, cores, clusters). The four per-field
+  setters (`dev_no` / `core_mode` / `target_cores` / `target_clusters`) each atomically replace
+  `_spec` via `NPUTargetSpec._with`, which forwards to `NPUTargetSpec.from_kwargs` for
+  canonical renormalization. HF `from_pretrained` cannot observe a partial-state moment between
+  its per-field `model_kwargs` setattr calls, and no reconciliation pass runs before `create()`.
+  Target-only override syncs `dev_no` to the target device set; `dev_no`-only override clears
+  stale targets and re-expands sugar; both overridden → device-set consistency check catches
+  mismatches.
 - Canonical NPU target wire form: `target_cores` items are `"d:c:k"` strings and
   `target_clusters` items are `"d:c"` strings. Legacy 2-part `c:k` cores, bare integer clusters,
   and `qbruntime.CoreId` / `Cluster` objects are silently migrated by
-  `_normalize_npu_target_kwargs` using `dev_no` as the fallback prefix. Under `single`,
-  `target_clusters` unfolds into every core of each cluster; under `multi` / `global4` /
-  `global8`, `target_cores` folds up to `"d:c"` cluster prefixes and warns on partial coverage.
-  `global8` requires both clusters on every covered device.
+  `NPUTargetSpec.from_kwargs` (and its `_normalize_npu_target_kwargs` config-layer wrapper)
+  using `dev_no` as the fallback prefix. Under `single`, `target_clusters` unfolds into every
+  core of each cluster; under `multi` / `global4` / `global8`, `target_cores` folds up to
+  `"d:c"` cluster prefixes and warns on partial coverage. `global8` requires both clusters on
+  every covered device.
 - `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV along `(model_idx, cache_id)`
   with total capacity `N*K` rows. Row `i` maps to `(i // K, i % K)`. Use `slot_of`, `model_of`,
   `group_by_model` for dispatch. `ensure_batch_size` beyond `N*K` is only allowed on the legacy

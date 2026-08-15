@@ -1,8 +1,10 @@
-"""Unit tests for NPU target-field normalization in ``configuration_utils``.
+"""Unit tests for NPU target-field normalization and atomic ``NPUTargetSpec`` replace.
 
 Covers legacy migration, ``dev_no`` sugar expansion, grain fold/unfold,
-``global8`` coverage validation, and canonical round-trip via
-``MobilintNPUBackend.to_dict`` / ``from_dict``.
+``global8`` coverage validation, canonical round-trip via
+``MobilintNPUBackend.to_dict`` / ``from_dict``, and the atomic-replace
+setter contract that eliminates HF ``from_pretrained``'s per-field
+setattr race.
 """
 
 from __future__ import annotations
@@ -12,8 +14,9 @@ import warnings
 import pytest
 
 from mblt_model_zoo.hf_transformers.utils.configuration_utils import (
+    _migrate_target_clusters,
+    _migrate_target_cores,
     _normalize_npu_target_kwargs,
-    _re_normalize_backend_state,
 )
 from mblt_model_zoo.utils.npu_backend import MobilintNPUBackend
 
@@ -368,30 +371,24 @@ def test_backend_roundtrip_multi_device_dev_no_stays_list() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Post-setter re-normalization (`_re_normalize_backend_state`)
+# Atomic-replace setter contract (``NPUTargetSpec._with``)
 #
-# HF ``from_pretrained`` applies CLI ``model_kwargs`` via ``setattr`` after
-# the config layer already normalized JSON kwargs. The setters only touch the
-# named attribute, so a bare ``--dev-no`` override leaves ``target_cores``
-# pinned to the JSON device. ``_re_normalize_backend_state`` rebuilds the
-# canonical target lists from the backend's post-override state.
+# HF ``from_pretrained`` applies CLI ``model_kwargs`` via ``setattr`` after the
+# config layer already built the initial :class:`NPUTargetSpec` from the JSON
+# payload. Each per-field setter atomically replaces the backend's
+# ``_spec`` through :meth:`NPUTargetSpec._with`, so the four target-topology
+# fields never disagree — there is no partial-state moment between setattrs
+# that a snapshot-diff reconciliation pass would have to detect and fix.
 # ---------------------------------------------------------------------------
 
 
 def _load_backend(kwargs: dict) -> MobilintNPUBackend:
-    """Normalize ``kwargs``, load a backend, and record the post-normalize snapshot.
-
-    Mirrors the ``MobilintConfigMixin._ensure_npu_backend`` production path so
-    ``_re_normalize_backend_state`` can compare later setter mutations against
-    a canonical baseline.
-    """
+    """Normalize ``kwargs`` and load a backend at a clean canonical baseline."""
     _normalize_npu_target_kwargs(kwargs)
-    backend = MobilintNPUBackend.from_dict(dict(kwargs))
-    backend.record_post_normalize_snapshot()
-    return backend
+    return MobilintNPUBackend.from_dict(dict(kwargs))
 
 
-def test_re_normalize_scalar_dev_no_override_rebuilds_targets_to_new_device() -> None:
+def test_atomic_replace_scalar_dev_no_override_rebuilds_targets_to_new_device() -> None:
     """``dev_no`` override to device 1 clears device-0 targets and re-expands under ``single``."""
     backend = _load_backend(
         {
@@ -401,10 +398,10 @@ def test_re_normalize_scalar_dev_no_override_rebuilds_targets_to_new_device() ->
             "target_cores": ["0:0:0"],
         }
     )
-    # Simulate the HF setattr path: only ``dev_no`` was overridden.
+    # HF ``setattr`` fires atomically: the setter replaces ``backend._spec``
+    # via :meth:`NPUTargetSpec._with`, which clears the stale JSON targets
+    # and re-expands the ``dev_no`` sugar for the new device.
     backend.dev_no = 1
-    with pytest.warns(UserWarning, match="rebuilding targets from dev_no"):
-        _re_normalize_backend_state(backend)
     assert backend._target_cores_serialized == [
         "1:0:0",
         "1:0:1",
@@ -416,9 +413,10 @@ def test_re_normalize_scalar_dev_no_override_rebuilds_targets_to_new_device() ->
         "1:1:3",
     ]
     assert backend._target_clusters_serialized == []
+    assert backend.dev_no == 1
 
 
-def test_re_normalize_list_dev_no_override_rebuilds_targets_across_devices() -> None:
+def test_atomic_replace_list_dev_no_override_rebuilds_targets_across_devices() -> None:
     """``dev_no=[0, 1]`` override with stale single-device targets re-expands to both devices."""
     backend = _load_backend(
         {
@@ -429,15 +427,14 @@ def test_re_normalize_list_dev_no_override_rebuilds_targets_across_devices() -> 
         }
     )
     backend.dev_no = [0, 1]
-    with pytest.warns(UserWarning, match="rebuilding targets from dev_no"):
-        _re_normalize_backend_state(backend)
     # Sugar expansion under single mode fills all 8 cores on each device.
     assert backend._target_cores_serialized == [f"{d}:{c}:{k}" for d in (0, 1) for c in (0, 1) for k in range(4)]
     assert backend._target_clusters_serialized == []
+    assert backend.dev_no == [0, 1]
 
 
-def test_re_normalize_consistent_state_is_noop_without_warning() -> None:
-    """Re-normalizing an already-consistent backend leaves it unchanged and silent."""
+def test_atomic_replace_consistent_state_is_noop() -> None:
+    """Setting a field to its current canonical value leaves the spec unchanged."""
     backend = _load_backend(
         {
             "mxq_path": "model.mxq",
@@ -448,12 +445,12 @@ def test_re_normalize_consistent_state_is_noop_without_warning() -> None:
     )
     with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always")
-        _re_normalize_backend_state(backend)
+        backend.core_mode = "single"  # no-op setter
     assert backend._target_cores_serialized == ["0:0:0", "0:0:1"]
     assert not [w for w in recorded if issubclass(w.category, UserWarning)]
 
 
-def test_re_normalize_core_mode_change_folds_cores_to_clusters() -> None:
+def test_atomic_replace_core_mode_change_folds_cores_to_clusters() -> None:
     """Switching ``core_mode`` to ``global4`` folds a full-cluster core list to a cluster string."""
     backend = _load_backend(
         {
@@ -464,35 +461,62 @@ def test_re_normalize_core_mode_change_folds_cores_to_clusters() -> None:
         }
     )
     backend.core_mode = "global4"
-    _re_normalize_backend_state(backend)
     assert backend._target_clusters_serialized == ["0:0"]
-    # ``_normalize_npu_target_kwargs`` drops the off-mode grain under global4.
+    # ``NPUTargetSpec.from_kwargs`` drops the off-mode grain under global4.
     assert backend._target_cores_serialized == []
 
 
-def test_re_normalize_default_bare_dev_no_leaves_expanded_targets_intact() -> None:
-    """Bare ``dev_no=0`` default with sugar-expanded targets stays canonical without warning."""
+def test_atomic_replace_p2_core_mode_and_cluster_override_syncs_dev_no() -> None:
+    """PR #109 P2: ``core_mode=global4`` + ``target_clusters=["1:0"]`` overrides sync dev_no atomically.
+
+    Reproduces the failing path: a JSON config with ``core_mode=single`` +
+    dev0 target_cores. The caller overrides ``core_mode`` to ``global4``
+    and ``target_clusters`` to a device-1 cluster without redoing
+    ``dev_no``. Under the old snapshot-diff reconciliation the two
+    overrides were reconciled together, unioning stale dev0 cores with
+    new dev1 clusters into ``dev_no=[0, 1]``, then dropping the stale
+    off-mode grain reduced the target device set to ``{1}`` and the
+    device-set consistency check raised. Under the atomic-replace
+    contract each setter fires independently: the ``core_mode`` override
+    folds the dev0 cores to a dev0 cluster, then the ``target_clusters``
+    override synchronously replaces both the clusters and ``dev_no`` in
+    a single atomic ``NPUTargetSpec._with`` call.
+    """
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": [f"0:{c}:{k}" for c in (0, 1) for k in range(4)],
+        }
+    )
+    # Simulate HF ``model_kwargs`` application: two independent setattrs.
+    backend.core_mode = "global4"
+    backend.target_clusters = ["1:0"]
+
+    assert backend.dev_no == 1
+    assert backend.core_mode == "global4"
+    assert backend._target_clusters_serialized == ["1:0"]
+    assert backend._target_cores_serialized == []
+
+
+def test_atomic_replace_default_bare_dev_no_leaves_expanded_targets_intact() -> None:
+    """Bare ``dev_no=0`` default with sugar-expanded targets stays canonical."""
     kwargs = {"mxq_path": "model.mxq", "core_mode": "single", "dev_no": 0}
     _normalize_npu_target_kwargs(kwargs)
     backend = MobilintNPUBackend.from_dict(dict(kwargs))
-    with warnings.catch_warnings(record=True) as recorded:
-        warnings.simplefilter("always")
-        _re_normalize_backend_state(backend)
     assert backend._target_cores_serialized == [f"0:{c}:{k}" for c in (0, 1) for k in range(4)]
-    assert not [w for w in recorded if issubclass(w.category, UserWarning)]
 
 
 # ---------------------------------------------------------------------------
-# Codex review regressions: legacy CoreId / Cluster ambiguity, target authority,
-# CLI-layer legacy defaults with list dev_no.
+# Codex review regressions: legacy CoreId / Cluster ambiguity, target
+# authority, CLI-layer legacy defaults with list dev_no.
 # ---------------------------------------------------------------------------
 
 
 def test_legacy_coreid_with_list_dev_no_raises_symmetrically() -> None:
     """``CoreId`` objects lack a device prefix; reject them with a list-valued ``dev_no``."""
     from qbruntime import Cluster, Core, CoreId
-
-    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_cores
 
     with pytest.raises(ValueError, match="Legacy CoreId"):
         _migrate_target_cores(
@@ -506,8 +530,6 @@ def test_legacy_cluster_object_with_list_dev_no_raises_symmetrically() -> None:
     """``Cluster`` objects lack a device prefix; reject them with a list-valued ``dev_no``."""
     from qbruntime import Cluster
 
-    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_clusters
-
     with pytest.raises(ValueError, match="Legacy Cluster"):
         _migrate_target_clusters(
             [Cluster.Cluster0],
@@ -519,8 +541,6 @@ def test_legacy_cluster_object_with_list_dev_no_raises_symmetrically() -> None:
 def test_legacy_coreid_with_scalar_dev_no_produces_canonical_form() -> None:
     """Scalar ``dev_no`` prefixes ``CoreId`` objects; canonical output uses integer indices."""
     from qbruntime import Cluster, Core, CoreId
-
-    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_cores
 
     result = _migrate_target_cores(
         [CoreId(Cluster.Cluster0, Core.Core3), CoreId(Cluster.Cluster1, Core.Core0)],
@@ -534,8 +554,6 @@ def test_legacy_cluster_object_with_scalar_dev_no_produces_canonical_form() -> N
     """Scalar ``dev_no`` prefixes ``Cluster`` objects; canonical output uses integer indices."""
     from qbruntime import Cluster
 
-    from mblt_model_zoo.hf_transformers.utils.configuration_utils import _migrate_target_clusters
-
     result = _migrate_target_clusters(
         [Cluster.Cluster0, Cluster.Cluster1],
         fallback_dev=1,
@@ -544,8 +562,8 @@ def test_legacy_cluster_object_with_scalar_dev_no_produces_canonical_form() -> N
     assert result == ["1:0", "1:1"]
 
 
-def test_re_normalize_target_override_syncs_dev_no_and_preserves_targets() -> None:
-    """Explicit target override without a matching ``dev_no`` treats the target as authoritative."""
+def test_atomic_replace_target_override_syncs_dev_no_and_preserves_targets() -> None:
+    """Target override without a matching ``dev_no`` treats the canonical target as authoritative."""
     backend = _load_backend(
         {
             "mxq_path": "model.mxq",
@@ -554,17 +572,16 @@ def test_re_normalize_target_override_syncs_dev_no_and_preserves_targets() -> No
             "target_cores": ["0:0:0"],
         }
     )
-    # Simulate ``--vision-target-cores 1:0:0``: target setter fires but the caller
-    # left ``dev_no`` at its default. The canonical target unambiguously specifies
-    # device 1; ``dev_no`` must sync to match instead of clobbering the target.
+    # Simulate ``--vision-target-cores 1:0:0``: target setter fires alone,
+    # the caller left ``dev_no`` at its default. The canonical target
+    # unambiguously specifies device 1; ``dev_no`` syncs to match instead
+    # of clobbering the caller's target.
     backend.target_cores = ["1:0:0"]
-    with pytest.warns(UserWarning, match="syncing dev_no"):
-        _re_normalize_backend_state(backend)
     assert backend.dev_no == 1
     assert backend._target_cores_serialized == ["1:0:0"]
 
 
-def test_re_normalize_target_override_across_multi_device_sets_dev_no_list() -> None:
+def test_atomic_replace_target_override_across_multi_device_sets_dev_no_list() -> None:
     """A canonical multi-device target override syncs ``dev_no`` to the target list."""
     backend = _load_backend(
         {
@@ -575,14 +592,12 @@ def test_re_normalize_target_override_across_multi_device_sets_dev_no_list() -> 
         }
     )
     backend.target_cores = ["0:0:0", "1:0:0"]
-    with pytest.warns(UserWarning, match="syncing dev_no"):
-        _re_normalize_backend_state(backend)
     assert backend.dev_no == [0, 1]
     assert backend._target_cores_serialized == ["0:0:0", "1:0:0"]
 
 
-def test_re_normalize_dev_no_and_target_both_overridden_consistently_passes() -> None:
-    """When ``dev_no`` and targets are both overridden and consistent, neither fires nor mutates."""
+def test_atomic_replace_dev_no_and_target_both_overridden_consistently_passes() -> None:
+    """When ``dev_no`` and targets are both overridden consistently, both take effect."""
     backend = _load_backend(
         {
             "mxq_path": "model.mxq",
@@ -593,16 +608,12 @@ def test_re_normalize_dev_no_and_target_both_overridden_consistently_passes() ->
     )
     backend.dev_no = 1
     backend.target_cores = ["1:0:0"]
-    with warnings.catch_warnings(record=True) as recorded:
-        warnings.simplefilter("always")
-        _re_normalize_backend_state(backend)
     assert backend.dev_no == 1
     assert backend._target_cores_serialized == ["1:0:0"]
-    assert not [w for w in recorded if issubclass(w.category, UserWarning)]
 
 
-def test_re_normalize_dev_no_and_target_both_overridden_inconsistently_raises() -> None:
-    """When both are overridden but disagree, the consistency check inside normalize still raises."""
+def test_atomic_replace_dev_no_and_target_both_overridden_inconsistently_raises() -> None:
+    """When both are overridden but disagree, the consistency check raises on the second setter."""
     backend = _load_backend(
         {
             "mxq_path": "model.mxq",
@@ -611,10 +622,29 @@ def test_re_normalize_dev_no_and_target_both_overridden_inconsistently_raises() 
             "target_cores": ["0:0:0"],
         }
     )
+    # The first setter clears stale targets and re-expands under the new dev_no.
     backend.dev_no = 1
-    backend.target_cores = ["2:0:0"]
+    # The second setter marks targets as caller-overridden while dev_no is
+    # still marked overridden from the previous call; the atomic replace
+    # runs the device-set consistency check and rejects the mismatch.
     with pytest.raises(ValueError, match="target device set"):
-        _re_normalize_backend_state(backend)
+        backend.target_cores = ["2:0:0"]
+
+
+def test_atomic_replace_prefix_scoped_kwargs_work_independently() -> None:
+    """``vision_`` and ``text_`` prefix keys are normalized independently."""
+    kwargs = {
+        "vision_dev_no": 0,
+        "vision_core_mode": "single",
+        "vision_target_cores": ["0:0"],  # legacy 2-part
+        "text_dev_no": 1,
+        "text_core_mode": "global4",
+        "text_target_clusters": [0],  # legacy bare int
+    }
+    _normalize_npu_target_kwargs(kwargs, prefix="vision_")
+    _normalize_npu_target_kwargs(kwargs, prefix="text_")
+    assert kwargs["vision_target_cores"] == ["0:0:0"]
+    assert kwargs["text_target_clusters"] == ["1:0"]
 
 
 def test_cli_apply_core_mode_suppresses_single_default_for_list_dev_no() -> None:

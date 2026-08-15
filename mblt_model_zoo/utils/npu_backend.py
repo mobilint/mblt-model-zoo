@@ -12,6 +12,12 @@ order, and per-device accelerators are shared. ``Model.infer`` is blocking, so
 callers that want concurrent NPU utilization thread their dispatches across
 :meth:`MobilintNPUBackend.infer_slot` calls.
 
+Target-topology fields (``dev_no`` / ``core_mode`` / ``target_cores`` /
+``target_clusters``) live inside a single immutable :class:`NPUTargetSpec` on
+``self._spec``. Every per-field setter atomically replaces ``_spec`` via
+:meth:`NPUTargetSpec._with`, so no partial-state moment can exist between HF
+``setattr`` calls in ``from_pretrained``.
+
 Backwards compatibility: for callers written against a single ``Model`` /
 ``Accelerator`` handle, :attr:`~MobilintNPUBackend.mxq_model` and
 :attr:`~MobilintNPUBackend.acc` remain accessible and refer to the first slot.
@@ -29,42 +35,13 @@ from qbruntime import Accelerator, Cluster, Core, CoreId, Model, ModelConfig, Qb
 
 from .core_mode import CoreMode, normalize_core_mode
 from .logging import log_model_details
+from .npu_target import (
+    NPUTargetSpec,
+    cluster_map,
+    core_map,
+)
 
 logger = logging.getLogger(__name__)
-
-cluster_map = {
-    0: Cluster.Cluster0,
-    1: Cluster.Cluster1,
-}
-
-core_map = {
-    0: Core.Core0,
-    1: Core.Core1,
-    2: Core.Core2,
-    3: Core.Core3,
-}
-
-# Inverse maps: ``qbruntime`` enums do not expose a numeric conversion (their
-# ``.value`` returns the enum itself), so we build inverse lookups here and
-# reuse them everywhere a ``Cluster`` / ``Core`` object must be serialized to
-# its integer index.
-_cluster_int_map: Dict["Cluster", int] = {v: k for k, v in cluster_map.items()}
-_core_int_map: Dict["Core", int] = {v: k for k, v in core_map.items()}
-
-
-def cluster_to_int(cluster: "Cluster") -> int:
-    """Return the integer index for a ``qbruntime.Cluster`` enum member."""
-    return _cluster_int_map[cluster]
-
-
-def core_to_int(core: "Core") -> int:
-    """Return the integer index for a ``qbruntime.Core`` enum member."""
-    return _core_int_map[core]
-
-# Default device index for ``dev_no`` when a caller does not pin one.
-# Kept as a single named constant so the backend signature, ``from_dict``
-# fallback, and config-layer normalizers stay in lock-step.
-_DEFAULT_DEV_NO: int = 0
 
 
 class MobilintBackendAllocError(RuntimeError):
@@ -137,7 +114,7 @@ class MobilintNPUBackend:
     def __init__(
         self,
         mxq_path: str = "",
-        dev_no: Union[int, List[int]] = _DEFAULT_DEV_NO,
+        dev_no: Optional[Union[int, List[int]]] = None,
         max_batch_size: int = 1,
         core_mode: CoreMode = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
@@ -187,9 +164,7 @@ class MobilintNPUBackend:
         self.revision = revision
         self._commit_hash = commit_hash
         self.mxq_path = mxq_path
-        self.dev_no = dev_no
         self.max_batch_size = max(1, max_batch_size)
-        self.core_mode = normalize_core_mode(core_mode)
 
         # Multi-slot backing state; populated in create()/launch().
         # ``self.acc`` and ``self.mxq_model`` remain accessible as
@@ -200,37 +175,60 @@ class MobilintNPUBackend:
         self.k_per_model: int = 1
         self.n_models: int = 0
 
-        self._target_cores_serialized: List[str] = []
-        self.target_cores = target_cores if target_cores is not None else []
+        # Collapse the four target-topology fields into a single frozen
+        # :class:`NPUTargetSpec`. Every per-field setter below rebuilds
+        # ``_spec`` via :meth:`NPUTargetSpec._with`, which forwards to
+        # :meth:`NPUTargetSpec.from_kwargs` for full canonical
+        # renormalization. This eliminates the partial-state race that
+        # per-field setattr chains used to expose.
+        #
+        # ``dev_no=None`` means "not given by the caller" — the sentinel
+        # keeps :meth:`NPUTargetSpec.from_kwargs` from running its
+        # device-set consistency check against a defaulted ``dev_no`` when
+        # the caller only supplied ``target_cores`` / ``target_clusters``.
+        spec_kwargs: Dict[str, Any] = {"core_mode": normalize_core_mode(core_mode)}
+        if dev_no is not None:
+            spec_kwargs["dev_no"] = dev_no
+        if target_cores is not None:
+            spec_kwargs["target_cores"] = list(target_cores)
+        if target_clusters is not None:
+            spec_kwargs["target_clusters"] = list(target_clusters)
+        self._spec: NPUTargetSpec = NPUTargetSpec.from_kwargs(spec_kwargs)
 
-        self._target_clusters_serialized: List[str] = []
-        self.target_clusters = target_clusters if target_clusters is not None else []
+    # ---- Target-topology accessors ------------------------------------------
+    #
+    # Every setter atomically replaces ``self._spec`` through
+    # :meth:`NPUTargetSpec._with`. HF ``from_pretrained`` fires these setters
+    # one field at a time via ``model_kwargs`` application; the atomic replace
+    # guarantees every intermediate state remains fully canonical, so no
+    # snapshot-diff reconciliation pass is required.
 
-        # Snapshot of the canonical state produced by ``_normalize_npu_target_kwargs``
-        # right after construction. ``_re_normalize_backend_state`` compares the
-        # backend's current state against this snapshot to detect *which* fields
-        # HF ``from_pretrained`` overrode via setattr — dev_no vs targets — so
-        # the divergence resolution can trust the field the caller actually
-        # changed instead of guessing. Populated by
-        # :meth:`record_post_normalize_snapshot`; ``None`` until then.
-        self._post_normalize_snapshot: Optional[Dict[str, Any]] = None
+    @property
+    def dev_no(self) -> Union[int, List[int]]:
+        """User-facing ``dev_no`` (``int`` or ``list[int]``)."""
+        return self._spec.dev_no_public()
 
-    def record_post_normalize_snapshot(self) -> None:
-        """Capture the backend's canonical state right after initial normalization.
+    @dev_no.setter
+    def dev_no(self, value: Union[int, List[int]]) -> None:
+        self._spec = self._spec._with(dev_no=value)
 
-        Called by the config layer immediately after
-        :func:`_normalize_npu_target_kwargs` and
-        :meth:`MobilintNPUBackend.from_dict` produced a canonical state from the
-        JSON payload. ``_re_normalize_backend_state`` diffs the backend's later
-        state against this snapshot to identify which fields HF setter chains
-        overrode.
-        """
-        self._post_normalize_snapshot = {
-            "dev_no": self.dev_no,
-            "core_mode": self.core_mode,
-            "cores": tuple(self._target_cores_serialized or []),
-            "clusters": tuple(self._target_clusters_serialized or []),
-        }
+    @property
+    def core_mode(self) -> CoreMode:
+        return self._spec.core_mode
+
+    @core_mode.setter
+    def core_mode(self, value: str) -> None:
+        self._spec = self._spec._with(core_mode=normalize_core_mode(value))
+
+    @property
+    def _target_cores_serialized(self) -> List[str]:
+        """Canonical ``"d:c:k"`` strings (read-only view backed by ``_spec``)."""
+        return list(self._spec.cores)
+
+    @property
+    def _target_clusters_serialized(self) -> List[str]:
+        """Canonical ``"d:c"`` strings (read-only view backed by ``_spec``)."""
+        return list(self._spec.clusters)
 
     def check_model_path(self, mxq_path: str) -> str:
         """Resolves the absolute path to an MXQ model file.
@@ -485,8 +483,8 @@ class MobilintNPUBackend:
 
     def _fallback_dev(self) -> int:
         """Return a single device index to prepend when migrating legacy target items."""
-        dev = getattr(self, "dev_no", 0)
-        if isinstance(dev, (list, tuple)):
+        dev = self._spec.dev_no_public()
+        if isinstance(dev, list):
             return int(dev[0]) if dev else 0
         return int(dev)
 
@@ -494,40 +492,21 @@ class MobilintNPUBackend:
         """Return the sorted set of device indices referenced by the canonical target lists.
 
         Falls back to :attr:`dev_no` sugar when both target lists are empty
-        (e.g. before the config layer has run through
-        ``_normalize_npu_target_kwargs``).
+        (defensive; :class:`NPUTargetSpec` normally guarantees at least one
+        populated field).
         """
-        devs: set[int] = set()
-        for s in self._target_cores_serialized or []:
-            parts = s.split(":")
-            if len(parts) == 3:
-                try:
-                    devs.add(int(parts[0]))
-                except ValueError:
-                    continue
-        for s in self._target_clusters_serialized or []:
-            if isinstance(s, str) and ":" in s:
-                try:
-                    devs.add(int(s.split(":", 1)[0]))
-                except ValueError:
-                    continue
-        if devs:
-            return sorted(devs)
-        dev = getattr(self, "dev_no", 0)
-        if isinstance(dev, (list, tuple)):
-            return sorted({int(d) for d in dev}) or [0]
-        return [int(dev)]
+        return self._spec.unique_devices()
 
     def filter_cores_for(self, dev: int) -> List["CoreId"]:
         """Return the :class:`~qbruntime.CoreId` list for cores assigned to ``dev``.
 
-        Reads :attr:`_target_cores_serialized` and yields the entries whose
+        Reads :attr:`NPUTargetSpec.cores` and yields the entries whose
         device prefix matches ``dev``. Used to build a per-slot
         :class:`~qbruntime.ModelConfig` when the backend spans multiple
         devices.
         """
         result: List[CoreId] = []
-        for s in self._target_cores_serialized or []:
+        for s in self._spec.cores:
             parts = s.split(":")
             if len(parts) != 3:
                 continue
@@ -546,13 +525,13 @@ class MobilintNPUBackend:
     def filter_clusters_for(self, dev: int) -> List["Cluster"]:
         """Return the :class:`~qbruntime.Cluster` list for clusters assigned to ``dev``.
 
-        Reads :attr:`_target_clusters_serialized` and yields the entries
-        whose device prefix matches ``dev``. Used to build a per-slot
+        Reads :attr:`NPUTargetSpec.clusters` and yields the entries whose
+        device prefix matches ``dev``. Used to build a per-slot
         :class:`~qbruntime.ModelConfig` for ``multi``/``global4``/``global8``
         modes.
         """
         result: List[Cluster] = []
-        for s in self._target_clusters_serialized or []:
+        for s in self._spec.clusters:
             if not isinstance(s, str) or ":" not in s:
                 continue
             try:
@@ -802,24 +781,25 @@ class MobilintNPUBackend:
     def target_cores(self) -> List["CoreId"]:
         """Deserialize and return the list of target :class:`~qbruntime.CoreId` objects.
 
-        Cores are stored internally as canonical ``"d:c:k"`` strings.
-        Entries whose device does not match ``self.dev_no`` are skipped so
-        the existing single-device ``create()`` path keeps its selection.
+        Cores are stored internally on ``self._spec`` as canonical
+        ``"d:c:k"`` strings. Entries whose device does not match
+        ``self.dev_no`` are skipped so the existing single-device
+        :meth:`create` path keeps its selection.
 
         When no explicit per-core list has been set, the getter falls back
         to expanding ``target_clusters`` into every core of each listed
-        cluster. This preserves the historical ``target_clusters=[0, 1]``
-        short-hand for "use all 8 cores across both clusters" in
-        ``single`` core mode without listing every core by hand.
+        cluster on the current device. This preserves the historical
+        ``target_clusters=[0, 1]`` short-hand for "use all 8 cores across
+        both clusters" in ``single`` core mode without listing every core
+        by hand.
 
         Returns:
             A list of :class:`~qbruntime.CoreId` objects representing the
             NPU cores selected on this device.
         """
         result: List["CoreId"] = []
-        serialized = getattr(self, "_target_cores_serialized", None) or []
         my_dev = self._fallback_dev()
-        for s in serialized:
+        for s in self._spec.cores:
             try:
                 parts = s.split(":")
                 if len(parts) == 3:
@@ -840,8 +820,7 @@ class MobilintNPUBackend:
 
         # Fallback: expand target_clusters into their full 4-core set on this
         # device. Only kicks in when the caller left target_cores empty.
-        cluster_serialized = getattr(self, "_target_clusters_serialized", None) or []
-        for cluster_str in cluster_serialized:
+        for cluster_str in self._spec.clusters:
             try:
                 if isinstance(cluster_str, str) and ":" in cluster_str:
                     d_val, c_val = int(cluster_str.split(":")[0]), int(cluster_str.split(":")[1])
@@ -859,56 +838,34 @@ class MobilintNPUBackend:
         return result
 
     @target_cores.setter
-    def target_cores(self, values: List[Union[str, "CoreId"]]):
-        """Serialize and store the list of target cores.
+    def target_cores(self, values: List[Union[str, "CoreId"]]) -> None:
+        """Atomically replace the target-cores component of ``self._spec``.
 
-        Accepts canonical fully-qualified ``"d:c:k"`` strings, legacy
-        ``"c:k"`` strings, and :class:`~qbruntime.CoreId` objects. Legacy
-        entries and ``CoreId`` objects are migrated to the canonical form
-        using ``self.dev_no`` as the fallback device prefix.
-
-        Args:
-            values: A list of core identifiers.
-
-        Raises:
-            ValueError: If a string value has an unrecognized shape.
-            TypeError: If a value is neither :class:`~qbruntime.CoreId`
-                nor a string.
+        Values pass through :meth:`NPUTargetSpec._with`, which forwards to
+        :meth:`NPUTargetSpec.from_kwargs`. That path handles legacy
+        migration (``CoreId`` / ``"c:k"``), grain fold/unfold, and the
+        device-set consistency check in one atomic operation. Callers
+        never observe the partial state where ``self._spec.cores`` has
+        changed but ``self._spec.dev_no`` has not.
         """
-        fallback_dev = self._fallback_dev()
-        serialized = []
-        for v in values:
-            if isinstance(v, CoreId):
-                serialized.append(f"{fallback_dev}:{cluster_to_int(v.cluster)}:{core_to_int(v.core)}")
-            elif isinstance(v, str):
-                n_colons = v.count(":")
-                if n_colons == 2:
-                    serialized.append(v)
-                elif n_colons == 1:
-                    serialized.append(f"{fallback_dev}:{v}")
-                else:
-                    raise ValueError(f"Invalid format: {v}")
-            else:
-                raise TypeError(f"Unsupported type: {type(v)}")
-
-        self._target_cores_serialized = serialized
+        self._spec = self._spec._with(target_cores=list(values))
 
     @property
     def target_clusters(self) -> List["Cluster"]:
         """Deserialize and return the list of target :class:`~qbruntime.Cluster` objects.
 
-        Clusters are stored internally as canonical ``"d:c"`` strings.
-        Entries whose device does not match ``self.dev_no`` are skipped so
-        the existing single-device ``create()`` path keeps its selection.
+        Clusters are stored internally on ``self._spec`` as canonical
+        ``"d:c"`` strings. Entries whose device does not match
+        ``self.dev_no`` are skipped so the existing single-device
+        :meth:`create` path keeps its selection.
 
         Returns:
             A list of :class:`~qbruntime.Cluster` objects representing the
             NPU clusters selected on this device.
         """
-        result = []
-        serialized = getattr(self, "_target_clusters_serialized", None) or []
+        result: List["Cluster"] = []
         my_dev = self._fallback_dev()
-        for s in serialized:
+        for s in self._spec.clusters:
             try:
                 if isinstance(s, str) and ":" in s:
                     d_val, c_val = int(s.split(":")[0]), int(s.split(":")[1])
@@ -924,61 +881,34 @@ class MobilintNPUBackend:
         return result
 
     @target_clusters.setter
-    def target_clusters(self, values: List[Union[int, str, "Cluster"]]):
-        """Serialize and store the list of target clusters.
+    def target_clusters(self, values: List[Union[int, str, "Cluster"]]) -> None:
+        """Atomically replace the target-clusters component of ``self._spec``.
 
-        Accepts canonical fully-qualified ``"d:c"`` strings, legacy bare
-        ``"c"`` strings, integer cluster indices, and
-        :class:`~qbruntime.Cluster` objects. Legacy entries are migrated
-        to the canonical form using ``self.dev_no`` as the fallback
-        device prefix.
-
-        Args:
-            values: A list of cluster identifiers.
-
-        Raises:
-            ValueError: If a string value has an unrecognized shape.
-            TypeError: If a value is not one of the accepted types.
+        Values pass through :meth:`NPUTargetSpec._with`, which forwards to
+        :meth:`NPUTargetSpec.from_kwargs`. That path handles legacy
+        migration (``Cluster`` / ``int`` / bare ``"c"``), grain
+        fold/unfold, and the device-set consistency check in one atomic
+        operation.
         """
-        fallback_dev = self._fallback_dev()
-        serialized = []
-        for v in values:
-            if isinstance(v, Cluster):
-                serialized.append(f"{fallback_dev}:{cluster_to_int(v)}")
-            elif isinstance(v, bool):
-                raise TypeError(f"Unsupported type: {type(v)}")
-            elif isinstance(v, int):
-                serialized.append(f"{fallback_dev}:{v}")
-            elif isinstance(v, str):
-                n_colons = v.count(":")
-                if n_colons == 1:
-                    serialized.append(v)
-                elif n_colons == 0 and v.isdigit():
-                    serialized.append(f"{fallback_dev}:{v}")
-                else:
-                    raise ValueError(f"Invalid format: {v}")
-            else:
-                raise TypeError(f"Unsupported type: {type(v)}")
-
-        self._target_clusters_serialized = serialized
+        self._spec = self._spec._with(target_clusters=list(values))
 
     def to_dict(self, prefix="") -> Dict[str, Any]:
         """Serializes the backend configuration to a flat dictionary.
 
         The canonical fully-qualified ``target_cores`` or ``target_clusters``
         list is passed through unchanged. Config-layer normalization
-        (``_normalize_npu_target_kwargs``) is trusted to have already
+        (:meth:`NPUTargetSpec.from_kwargs`) is trusted to have already
         rewritten legacy inputs, so this method neither inspects nor
         rewrites the serialized entries.
 
         When canonical target strings are set, ``dev_no`` is derived from
         their device prefixes so the emitted dict round-trips through
-        ``_normalize_npu_target_kwargs`` — the config-layer device-set
-        consistency check requires ``dev_no`` and the target device set to
-        agree once both are explicit. A single device collapses to an int;
-        multiple devices emit a sorted list. When no targets are set (e.g.
-        early construction before the config layer has expanded ``dev_no``
-        sugar), the stored ``self.dev_no`` is passed through as-is.
+        :meth:`NPUTargetSpec.from_kwargs` — the device-set consistency
+        check requires ``dev_no`` and the target device set to agree once
+        both are explicit. A single device collapses to an int; multiple
+        devices emit a sorted list. When no targets are set (e.g. early
+        construction before the config layer has expanded ``dev_no``
+        sugar), the stored ``dev_no`` is passed through as-is.
 
         Args:
             prefix: Optional string to prepend to every key, useful when
@@ -988,51 +918,25 @@ class MobilintNPUBackend:
             A flat dictionary containing the serialized backend parameters.
         """
         p = prefix
-        result = {
+        result: Dict[str, Any] = {
             f"{p}mxq_path": self.mxq_path,
-            f"{p}dev_no": self._dev_no_for_serialization(),
+            f"{p}dev_no": self._spec.dev_no_for_serialization(),
             f"{p}max_batch_size": self.max_batch_size,
             f"{p}core_mode": self.core_mode,
         }
 
         if self.core_mode == "single":
-            result[f"{p}target_cores"] = self._target_cores_serialized
+            result[f"{p}target_cores"] = list(self._spec.cores)
         else:
-            result[f"{p}target_clusters"] = self._target_clusters_serialized
+            result[f"{p}target_clusters"] = list(self._spec.clusters)
 
         return result
-
-    def _dev_no_for_serialization(self) -> Union[int, List[int]]:
-        """Return ``dev_no`` derived from canonical targets, else the stored value.
-
-        Parsing failures on the target strings fall back to the stored
-        ``self.dev_no`` rather than silently dropping the field.
-        """
-        if self._target_cores_serialized:
-            source = self._target_cores_serialized
-        elif self._target_clusters_serialized:
-            source = self._target_clusters_serialized
-        else:
-            return self.dev_no
-
-        devs: set[int] = set()
-        for s in source:
-            try:
-                devs.add(int(s.split(":", 1)[0]))
-            except (ValueError, AttributeError, IndexError):
-                return self.dev_no
-
-        if not devs:
-            return self.dev_no
-
-        sorted_devs = sorted(devs)
-        return sorted_devs if len(sorted_devs) > 1 else sorted_devs[0]
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], prefix: str = "") -> "MobilintNPUBackend":
         """Constructs a :class:`MobilintNPUBackend` from a configuration dictionary.
 
-        Trusts the config layer (``_normalize_npu_target_kwargs``) to have
+        Trusts the config layer (:meth:`NPUTargetSpec.from_kwargs`) to have
         already rewritten ``target_cores`` / ``target_clusters`` entries
         into the canonical fully-qualified form. Keys are consumed from
         ``data`` and the instance is created with the extracted values.
@@ -1061,7 +965,11 @@ class MobilintNPUBackend:
         return cls(
             name_or_path=data.pop("name_or_path", ""),
             mxq_path=data.pop(f"{p}mxq_path", ""),
-            dev_no=data.pop(f"{p}dev_no", _DEFAULT_DEV_NO),
+            # ``None`` sentinel: distinguish "caller did not provide
+            # dev_no" from "caller explicitly requested dev_no=0" so
+            # :meth:`NPUTargetSpec.from_kwargs` skips its device-set
+            # consistency check when the input dict lacks the key.
+            dev_no=data.pop(f"{p}dev_no", None),
             max_batch_size=data.pop(f"{p}max_batch_size", 1),
             core_mode=data.pop(f"{p}core_mode", "single"),
             target_cores=data.pop(f"{p}target_cores", None),

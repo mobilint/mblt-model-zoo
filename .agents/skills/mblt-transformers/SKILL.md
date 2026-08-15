@@ -27,13 +27,22 @@ description: >-
   Scalar pins one device, a list expands to multiple devices. Read the canonical target lists
   (`_target_cores_serialized` / `_target_clusters_serialized`, or the public accessors) at
   dispatch time so multi-device backends behave correctly.
+- Backend target topology is stored as a single frozen `NPUTargetSpec` on
+  `MobilintNPUBackend._spec` (`dev_no`, `core_mode`, `cores`, `clusters`). The four per-field
+  setters each atomically replace `_spec` via `NPUTargetSpec._with`, which forwards to
+  `NPUTargetSpec.from_kwargs` for full canonical renormalization. HF `from_pretrained` cannot
+  observe a partial-state moment between its per-field `model_kwargs` `setattr` calls, and no
+  reconciliation pass runs before `create()`. Target-only override syncs `dev_no` to the target
+  device set; `dev_no`-only override clears stale targets and re-expands sugar; both overridden
+  → the device-set consistency check inside `from_kwargs` catches genuine mismatches.
 - Canonical NPU target wire form is fully-qualified: `target_cores` entries are `"d:c:k"`
   strings and `target_clusters` entries are `"d:c"` strings. Legacy 2-part `c:k` cores, bare
   integer clusters, and `qbruntime.CoreId` / `Cluster` objects are silently migrated to the
-  canonical form by `_normalize_npu_target_kwargs` using `dev_no` as the fallback prefix.
-  `single` mode unfolds `target_clusters` into every cluster core; `multi` / `global4` /
-  `global8` fold `target_cores` up to their `"d:c"` cluster prefixes and warn when a partial
-  cluster is rounded up. `global8` requires both clusters on every covered device.
+  canonical form by `NPUTargetSpec.from_kwargs` (and its `_normalize_npu_target_kwargs` config-
+  layer wrapper) using `dev_no` as the fallback prefix. `single` mode unfolds `target_clusters`
+  into every cluster core; `multi` / `global4` / `global8` fold `target_cores` up to their
+  `"d:c"` cluster prefixes and warn when a partial cluster is rounded up. `global8` requires
+  both clusters on every covered device.
 - `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV state along
   `(model_idx, cache_id)` with capacity `N * K` rows. Row `i` maps to `(i // K, i % K)`; use
   `slot_of`, `model_of`, and `group_by_model` for dispatch routing. `ensure_batch_size` beyond
