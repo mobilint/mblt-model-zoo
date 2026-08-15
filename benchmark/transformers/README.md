@@ -543,7 +543,9 @@ context — is logged as `SKIP model=... reason=cuda_oom|npu_alloc ...` and reco
 `combined.csv`/`combined_measure.csv` with empty numeric fields and a populated `skipped_reason`
 column. A single-target OOM does not fail the whole run. No per-target JSON is written for a
 skipped target, so a rerun with `--skip-existing` naturally retries it (typically at a smaller
-`--batch-size`).
+`--batch-size`). Each skip is also persisted to a `skipped_records.json` sidecar in the output
+directory so a later `--rebuild-charts` pass reconstructs the same failed-target rows even when
+the original process crashed mid-run.
 
 ```bash
 # Retry the GPU target at a smaller batch after the NPU row was cached.

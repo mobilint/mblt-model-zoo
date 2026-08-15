@@ -138,6 +138,48 @@ def _resolve_npu_alloc_error_type() -> type[BaseException]:
 
 _NPU_ALLOC_ERROR_TYPE: type[BaseException] = _resolve_npu_alloc_error_type()
 
+_SKIPPED_SIDECAR_FILENAME = "skipped_records.json"
+
+
+def _skipped_sidecar_path(output_dir: str | Path) -> Path:
+    """Return the skipped-records sidecar path for ``output_dir``."""
+    return Path(output_dir) / _SKIPPED_SIDECAR_FILENAME
+
+
+def _read_skipped_sidecar(output_dir: str | Path) -> list[dict[str, Any]]:
+    """Return skipped records persisted at ``output_dir``.
+
+    A missing, unreadable, or malformed sidecar returns an empty list so callers
+    stay backward compatible with older runs that predate the sidecar.
+    """
+    path = _skipped_sidecar_path(output_dir)
+    if not path.is_file():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _write_skipped_sidecar(output_dir: str | Path, records: Sequence[dict[str, Any]]) -> None:
+    """Atomically persist ``records`` to the skipped-records sidecar at ``output_dir``.
+
+    The sidecar mirrors the in-memory ``skipped_records`` list so a subsequent
+    ``--rebuild-charts`` pass reconstructs the same failed-target rows even when
+    the current process crashes mid-run.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = _skipped_sidecar_path(output_dir)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(list(records), f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
 
 def _handle_cuda_oom(
     exc: BaseException,
@@ -148,6 +190,7 @@ def _handle_cuda_oom(
     pipeline: Any,
     skipped_records: list[dict[str, Any]],
     phase: str,
+    output_dir: str | Path,
 ) -> None:
     """Log a structured CUDA OOM skip record and clear GPU state."""
     reason = "cuda_oom"
@@ -164,6 +207,7 @@ def _handle_cuda_oom(
             "detail": _format_exception(exc),
         }
     )
+    _write_skipped_sidecar(output_dir, skipped_records)
 
 
 def _handle_npu_alloc_error(
@@ -175,6 +219,7 @@ def _handle_npu_alloc_error(
     debug_errors: bool,
     skipped_records: list[dict[str, Any]],
     phase: str,
+    output_dir: str | Path,
 ) -> None:
     """Log a structured Mobilint NPU allocation skip record."""
     reason = "npu_alloc"
@@ -204,6 +249,7 @@ def _handle_npu_alloc_error(
             **{f"npu_{k}": v for k, v in context.items() if v is not None},
         }
     )
+    _write_skipped_sidecar(output_dir, skipped_records)
 
 
 @dataclass(frozen=True)
@@ -931,12 +977,20 @@ def _rebuild_combined_outputs(
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
-    skipped_records = list(skipped_records) if skipped_records else []
+    if skipped_records is None:
+        skipped_records = _read_skipped_sidecar(output_dir)
+    else:
+        skipped_records = list(skipped_records)
+        _write_skipped_sidecar(output_dir, skipped_records)
     for path in sorted(output_dir.glob("*.json")):
+        if path.name == _SKIPPED_SIDECAR_FILENAME:
+            continue
         try:
             with path.open("r", encoding="utf-8") as f:
                 payload = json.load(f)
         except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
             continue
         if payload.get("benchmark_type") == "measure" or path.name == _HOST_PC_INFO_FILENAME:
             continue
@@ -1548,6 +1602,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     debug_errors=args.debug_errors,
                     skipped_records=skipped_records,
                     phase="load",
+                    output_dir=output_dir,
                 )
                 continue
             except Exception as e:
@@ -1560,6 +1615,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         pipeline=None,
                         skipped_records=skipped_records,
                         phase="load",
+                        output_dir=output_dir,
                     )
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
@@ -1628,6 +1684,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 debug_errors=args.debug_errors,
                 skipped_records=skipped_records,
                 phase="measure",
+                output_dir=output_dir,
             )
             _release_pipeline(pipeline, target_args.device)
             continue
@@ -1641,6 +1698,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     pipeline=pipeline,
                     skipped_records=skipped_records,
                     phase="measure",
+                    output_dir=output_dir,
                 )
                 continue
             _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
@@ -2032,7 +2090,11 @@ def _rebuild_measure_outputs(
             payload = json.load(f)
         if payload.get("benchmark_type") == "measure":
             payloads.append(payload)
-    skipped_records = list(skipped_records) if skipped_records else []
+    if skipped_records is None:
+        skipped_records = _read_skipped_sidecar(output_dir)
+    else:
+        skipped_records = list(skipped_records)
+        _write_skipped_sidecar(output_dir, skipped_records)
     if not payloads and not skipped_records:
         print("No measure JSON results found. Nothing to aggregate.")
         _write_text_generation_summary(output_dir, measure=True)
@@ -2207,6 +2269,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     debug_errors=args.debug_errors,
                     skipped_records=skipped_records,
                     phase="load",
+                    output_dir=output_dir,
                 )
                 continue
             except Exception as e:
@@ -2219,6 +2282,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                         pipeline=None,
                         skipped_records=skipped_records,
                         phase="load",
+                        output_dir=output_dir,
                     )
                     continue
                 raise
@@ -2362,6 +2426,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 debug_errors=args.debug_errors,
                 skipped_records=skipped_records,
                 phase="measure",
+                output_dir=output_dir,
             )
         except Exception as e:
             if _is_cuda_oom_error(e):
@@ -2373,6 +2438,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     pipeline=None,
                     skipped_records=skipped_records,
                     phase="measure",
+                    output_dir=output_dir,
                 )
             else:
                 print(f"Skipping {label} (measure failed): {e}")
