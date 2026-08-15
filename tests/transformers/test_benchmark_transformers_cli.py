@@ -1327,6 +1327,106 @@ def test_text_rebuild_explicit_records_persist_sidecar(tmp_path) -> None:
     assert text_bench._read_skipped_sidecar(tmp_path, "sweep") == []
 
 
+def test_text_drop_stale_skips_removes_only_successful_labels() -> None:
+    """Verify the reconcile helper drops skip rows whose label succeeded this run."""
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-a", "phase": "load", "skipped_reason": "cuda_oom"},
+        {"model": "model-b", "phase": "measure", "skipped_reason": "npu_alloc"},
+        {"model": "model-c", "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+    text_bench._drop_stale_skips_for_successful_targets(skipped_records, {"model-b"})
+
+    assert [record["model"] for record in skipped_records] == ["model-a", "model-c"]
+
+
+def test_text_drop_stale_skips_no_successful_labels_is_noop() -> None:
+    """Verify an empty successful-label set leaves preloaded skip rows untouched."""
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-a", "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+    text_bench._drop_stale_skips_for_successful_targets(skipped_records, set())
+
+    assert skipped_records == [{"model": "model-a", "phase": "load", "skipped_reason": "cuda_oom"}]
+
+
+def test_text_preload_and_reconcile_measure_preserves_stable_skips(tmp_path) -> None:
+    """Simulate the normal-run preload + reconcile sequence for measure mode.
+
+    ``model-preserved`` failed in a prior run and does not run again this pass — the
+    reconciled sidecar must keep its skip row so a later ``--rebuild-charts`` still
+    surfaces it. ``model-recovered`` also failed previously but succeeds this pass —
+    its stale skip row must be dropped.
+    """
+    prior_records = [
+        {"model": "model-preserved", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
+        {"model": "model-recovered", "batch_size": 4, "phase": "load", "skipped_reason": "npu_alloc"},
+    ]
+    text_bench._write_skipped_sidecar(tmp_path, prior_records, "measure")
+
+    # Preload preexisting sidecar (mirrors _run_measure entry point).
+    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert skipped_records == prior_records
+
+    # Simulate a run where only "model-recovered" produced a fresh per-target JSON.
+    successful_labels = {"model-recovered"}
+    text_bench._drop_stale_skips_for_successful_targets(skipped_records, successful_labels)
+
+    # Rebuild persists the reconciled list back to the mode-specific sidecar.
+    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert [record["model"] for record in persisted] == ["model-preserved"]
+
+
+def test_text_preload_and_reconcile_measure_no_new_failures_preserves_all(tmp_path) -> None:
+    """A subset re-run producing no new failures must not overwrite the prior sidecar."""
+    prior_records = [
+        {"model": "model-a", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
+        {"model": "model-b", "batch_size": 4, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+    text_bench._write_skipped_sidecar(tmp_path, prior_records, "measure")
+
+    # Preload preexisting sidecar, run with no new targets (no successes, no failures).
+    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    text_bench._drop_stale_skips_for_successful_targets(skipped_records, set())
+
+    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert persisted == prior_records
+
+
+def test_text_preload_and_reconcile_sweep_preserves_stable_skips(tmp_path) -> None:
+    """Verify sweep mode's preload + reconcile sequence mirrors measure mode."""
+    prior_records = [
+        {"model": "sweep-preserved", "batch_size": 16, "phase": "load", "skipped_reason": "cuda_oom"},
+        {"model": "sweep-recovered", "batch_size": 8, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+    text_bench._write_skipped_sidecar(tmp_path, prior_records, "sweep")
+
+    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "sweep")
+    text_bench._drop_stale_skips_for_successful_targets(skipped_records, {"sweep-recovered"})
+
+    text_bench._rebuild_combined_outputs(tmp_path, skipped_records=skipped_records)
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "sweep")
+    assert [record["model"] for record in persisted] == ["sweep-preserved"]
+
+
+def test_text_preload_missing_sidecar_is_empty_backward_compat(tmp_path) -> None:
+    """Verify the preload path on a fresh output dir yields an empty list and does not crash."""
+    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert skipped_records == []
+
+    # No preloaded rows, no new failures, no successes — reconcile is a no-op.
+    text_bench._drop_stale_skips_for_successful_targets(skipped_records, set())
+    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
+
+    assert text_bench._read_skipped_sidecar(tmp_path, "measure") == []
+
+
 def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
     """Verify old text sweep JSON without latency arrays still produces rows."""
     payload = {

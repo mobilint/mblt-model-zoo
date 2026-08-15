@@ -548,7 +548,10 @@ skipped target, so a rerun with `--skip-existing` naturally retries it (typicall
 runs. Splitting by mode keeps `measure` and `sweep` from overwriting each other's skips when
 they share an output directory, so a later `--rebuild-charts` pass reconstructs only the
 failed-target rows for that mode even when the original process crashed mid-run. Legacy
-`skipped_records.json` files from earlier runs are ignored on read.
+`skipped_records.json` files from earlier runs are ignored on read. A new normal run preloads
+the current mode's sidecar so a subset re-run does not drop failed-target rows recorded by a
+prior run; if a preloaded target now succeeds during the current run, its stale skip row is
+dropped before the final rebuild persists the reconciled sidecar and combined outputs.
 
 ```bash
 # Retry the GPU target at a smaller batch after the NPU row was cached.

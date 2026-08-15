@@ -220,6 +220,25 @@ def _write_skipped_sidecar(output_dir: str | Path, records: Sequence[dict[str, A
     os.replace(tmp, path)
 
 
+def _drop_stale_skips_for_successful_targets(
+    skipped_records: list[dict[str, Any]],
+    successful_labels: Iterable[str],
+) -> None:
+    """Drop skip rows for targets that now have a successful per-target JSON.
+
+    A model label present in ``successful_labels`` produced a fresh per-target
+    result during this run, so any preloaded skip row for that label from a
+    prior run's sidecar is stale and must be removed before the final rebuild
+    persists the reconciled combined list. The list is mutated in place so all
+    references to ``skipped_records`` (mid-run handlers and the final rebuild)
+    observe the same reconciled contents.
+    """
+    labels = {label for label in successful_labels if label}
+    if not labels:
+        return
+    skipped_records[:] = [record for record in skipped_records if record.get("model") not in labels]
+
+
 def _handle_cuda_oom(
     exc: BaseException,
     *,
@@ -1641,7 +1660,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 )
             )
 
-    skipped_records: list[dict[str, Any]] = []
+    skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "sweep")
+    successful_labels: set[str] = set()
     for (
         model_id,
         revision_candidates,
@@ -2068,10 +2088,12 @@ def _run_sweep(args: argparse.Namespace) -> int:
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+        successful_labels.add(label)
         measurer.plot_and_save(result, save_path=png_path)
 
         _release_pipeline(pipeline, target_args.device)
 
+    _drop_stale_skips_for_successful_targets(skipped_records, successful_labels)
     _rebuild_combined_outputs(output_dir, skipped_records=skipped_records)
 
     return 0
@@ -2381,7 +2403,8 @@ def _run_measure(args: argparse.Namespace) -> int:
             "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
         )
     _collect_host_pc_info(output_dir)
-    skipped_records: list[dict[str, Any]] = []
+    skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "measure")
+    successful_labels: set[str] = set()
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
@@ -2597,6 +2620,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             }
             with json_path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
+            successful_labels.add(label)
             print(f"Saved: {json_path.name}")
         except _NPU_ALLOC_ERROR_TYPE as e:
             _handle_npu_alloc_error(
@@ -2639,6 +2663,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, target_args.device)
+    _drop_stale_skips_for_successful_targets(skipped_records, successful_labels)
     _rebuild_measure_outputs(output_dir, skipped_records=skipped_records)
     return 0
 
