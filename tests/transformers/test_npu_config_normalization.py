@@ -966,3 +966,189 @@ def test_with_target_only_override_migrates_bare_int_cluster_using_inherited_dev
     updated = spec._with(target_clusters=[1])
     assert updated.dev_no == 3
     assert updated.clusters == ("3:1",)
+
+
+# ---------------------------------------------------------------------------
+# PR #109 P2 review: public ``target_cores`` / ``target_clusters`` accessors
+# must return a complete view for a multi-device backend. Previously they
+# silently filtered out every device except ``_fallback_dev()``, which was
+# only intended as a legacy-migration fallback.
+# ---------------------------------------------------------------------------
+
+
+def test_target_cores_returns_union_across_devices_on_multi_device_backend() -> None:
+    """Aggregate ``target_cores`` includes entries from every device the backend covers."""
+    from qbruntime import Cluster, Core, CoreId
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": [0, 1],
+            "target_cores": ["0:0:0", "0:0:1", "1:0:0", "1:0:1"],
+        }
+    )
+    assert backend.target_cores == [
+        CoreId(Cluster.Cluster0, Core.Core0),
+        CoreId(Cluster.Cluster0, Core.Core1),
+        CoreId(Cluster.Cluster0, Core.Core0),
+        CoreId(Cluster.Cluster0, Core.Core1),
+    ]
+
+
+def test_target_clusters_returns_union_across_devices_on_multi_device_backend() -> None:
+    """Aggregate ``target_clusters`` includes entries from every device the backend covers."""
+    from qbruntime import Cluster
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "global4",
+            "dev_no": [0, 1],
+            "target_clusters": ["0:0", "0:1", "1:0", "1:1"],
+        }
+    )
+    assert backend.target_clusters == [
+        Cluster.Cluster0,
+        Cluster.Cluster1,
+        Cluster.Cluster0,
+        Cluster.Cluster1,
+    ]
+
+
+def test_target_cores_preserves_single_device_return_shape() -> None:
+    """Single-device backends see the same aggregate ``target_cores`` list as before."""
+    from qbruntime import Cluster, Core, CoreId
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1"],
+        }
+    )
+    assert backend.target_cores == [
+        CoreId(Cluster.Cluster0, Core.Core0),
+        CoreId(Cluster.Cluster0, Core.Core1),
+    ]
+
+
+def test_target_clusters_preserves_single_device_return_shape() -> None:
+    """Single-device backends see the same aggregate ``target_clusters`` list as before."""
+    from qbruntime import Cluster
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "global4",
+            "dev_no": 0,
+            "target_clusters": ["0:0"],
+        }
+    )
+    assert backend.target_clusters == [Cluster.Cluster0]
+
+
+def test_target_cores_by_device_groups_entries_by_device() -> None:
+    """``target_cores_by_device`` maps every covered device to its CoreId list."""
+    from qbruntime import Cluster, Core, CoreId
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": [0, 1],
+            "target_cores": ["0:0:0", "0:0:1", "1:0:0", "1:0:1"],
+        }
+    )
+    assert backend.target_cores_by_device == {
+        0: [CoreId(Cluster.Cluster0, Core.Core0), CoreId(Cluster.Cluster0, Core.Core1)],
+        1: [CoreId(Cluster.Cluster0, Core.Core0), CoreId(Cluster.Cluster0, Core.Core1)],
+    }
+
+
+def test_target_clusters_by_device_groups_entries_by_device() -> None:
+    """``target_clusters_by_device`` maps every covered device to its Cluster list."""
+    from qbruntime import Cluster
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "global4",
+            "dev_no": [0, 1],
+            "target_clusters": ["0:0", "0:1", "1:0", "1:1"],
+        }
+    )
+    assert backend.target_clusters_by_device == {
+        0: [Cluster.Cluster0, Cluster.Cluster1],
+        1: [Cluster.Cluster0, Cluster.Cluster1],
+    }
+
+
+def test_target_cores_fallback_expands_clusters_on_every_covered_device() -> None:
+    """When ``target_cores`` is empty, the fallback expands ``target_clusters`` across every device."""
+    from qbruntime import Cluster, Core, CoreId
+
+    # Under ``global4`` mode ``_spec.cores`` stays empty and ``_spec.clusters``
+    # carries the canonical strings, so ``target_cores`` exercises the
+    # cluster-expansion fallback naturally.
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "global4",
+            "dev_no": [0, 1],
+            "target_clusters": ["0:0", "1:0"],
+        }
+    )
+    assert backend._target_cores_serialized == []
+    expected_cores = [Core.Core0, Core.Core1, Core.Core2, Core.Core3]
+    assert backend.target_cores == [CoreId(Cluster.Cluster0, c) for c in expected_cores] * 2
+
+
+def test_log_model_details_prints_per_device_breakdown_on_multi_device_backend(
+    capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """``log_model_details`` prints an aggregate line and a per-device breakdown for multi-device backends."""
+    from mblt_model_zoo.utils.logging import log_model_details
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": [0, 1],
+            "target_cores": ["0:0:0", "1:0:0"],
+        }
+    )
+    fake_mxq = tmp_path / "model.mxq"
+    fake_mxq.write_bytes(b"\x00")
+    monkeypatch.setenv("MBLT_MODEL_ZOO_VERBOSE", "1")
+
+    log_model_details(str(fake_mxq), backend)
+    out = capsys.readouterr().out
+    assert "Target Cores:" in out
+    assert "Device 0 Cores:" in out
+    assert "Device 1 Cores:" in out
+
+
+def test_log_model_details_omits_per_device_breakdown_on_single_device_backend(
+    capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Single-device backends keep the pre-fix one-line ``Target Cores:`` format."""
+    from mblt_model_zoo.utils.logging import log_model_details
+
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    fake_mxq = tmp_path / "model.mxq"
+    fake_mxq.write_bytes(b"\x00")
+    monkeypatch.setenv("MBLT_MODEL_ZOO_VERBOSE", "1")
+
+    log_model_details(str(fake_mxq), backend)
+    out = capsys.readouterr().out
+    assert "Target Cores:" in out
+    assert "Device 0 Cores:" not in out

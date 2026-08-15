@@ -531,6 +531,56 @@ class MobilintNPUBackend:
         """
         return self._spec.unique_devices()
 
+    def _iter_core_entries(self):
+        """Yield ``(dev, cluster_idx, core_enum, cluster_enum)`` for every valid ``self._spec.cores`` entry.
+
+        Parses canonical ``"d:c:k"`` strings in their internal order.
+        Tolerates a stale legacy 2-part ``"c:k"`` entry that slipped past
+        normalization by assigning it to :meth:`_fallback_dev`. Malformed
+        entries are logged and skipped. Shared by the aggregate
+        :attr:`target_cores` view and the per-device
+        :attr:`target_cores_by_device` view.
+        """
+        for s in self._spec.cores:
+            try:
+                parts = s.split(":")
+                if len(parts) == 3:
+                    d_val, c_val, r_val = int(parts[0]), int(parts[1]), int(parts[2])
+                elif len(parts) == 2:
+                    d_val, c_val, r_val = self._fallback_dev(), int(parts[0]), int(parts[1])
+                else:
+                    raise ValueError(f"invalid entry: {s}")
+                cluster_enum = cluster_map[c_val]
+                core_enum = core_map[r_val]
+            except Exception as e:
+                logger.warning("Target cores not serialized: %s", s)
+                logger.warning("Error: %s", e)
+                continue
+            yield d_val, c_val, core_enum, cluster_enum
+
+    def _iter_cluster_entries(self):
+        """Yield ``(dev, cluster_enum)`` for every valid ``self._spec.clusters`` entry.
+
+        Parses canonical ``"d:c"`` strings in their internal order.
+        Tolerates a stale legacy bare-int entry by assigning it to
+        :meth:`_fallback_dev`. Malformed entries are logged and skipped.
+        Shared by the aggregate :attr:`target_clusters` view, the
+        per-device :attr:`target_clusters_by_device` view, and the
+        :attr:`target_cores` fallback expansion.
+        """
+        for s in self._spec.clusters:
+            try:
+                if isinstance(s, str) and ":" in s:
+                    d_val, c_val = int(s.split(":")[0]), int(s.split(":")[1])
+                else:
+                    d_val, c_val = self._fallback_dev(), int(s)
+                cluster_enum = cluster_map[c_val]
+            except Exception as e:
+                logger.warning("Target clusters not serialized: %s", s)
+                logger.warning("Error: %s", e)
+                continue
+            yield d_val, cluster_enum
+
     def filter_cores_for(self, dev: int) -> List["CoreId"]:
         """Return the :class:`~qbruntime.CoreId` list for cores assigned to ``dev``.
 
@@ -957,60 +1007,37 @@ class MobilintNPUBackend:
 
     @property
     def target_cores(self) -> List["CoreId"]:
-        """Deserialize and return the list of target :class:`~qbruntime.CoreId` objects.
+        """Deserialize and return the target :class:`~qbruntime.CoreId` objects across every device.
 
         Cores are stored internally on ``self._spec`` as canonical
-        ``"d:c:k"`` strings. Entries whose device does not match
-        ``self.dev_no`` are skipped so the existing single-device
-        :meth:`create` path keeps its selection.
+        ``"d:c:k"`` strings. The aggregate view includes entries from
+        every device covered by the backend and preserves the internal
+        ordering of ``self._spec.cores``. The device prefix is discarded
+        in the return type; callers that need per-device provenance
+        should read :attr:`target_cores_by_device` or the canonical
+        :attr:`_target_cores_serialized` list.
 
         When no explicit per-core list has been set, the getter falls back
         to expanding ``target_clusters`` into every core of each listed
-        cluster on the current device. This preserves the historical
-        ``target_clusters=[0, 1]`` short-hand for "use all 8 cores across
-        both clusters" in ``single`` core mode without listing every core
-        by hand.
+        cluster. This preserves the historical ``target_clusters=[0, 1]``
+        short-hand for "use all 8 cores across both clusters" in
+        ``single`` core mode without listing every core by hand, and
+        extends it across every device covered by the backend.
 
         Returns:
             A list of :class:`~qbruntime.CoreId` objects representing the
-            NPU cores selected on this device.
+            NPU cores selected on every device this backend covers.
         """
         result: List["CoreId"] = []
-        my_dev = self._fallback_dev()
-        for s in self._spec.cores:
-            try:
-                parts = s.split(":")
-                if len(parts) == 3:
-                    d_val, c_val, r_val = int(parts[0]), int(parts[1]), int(parts[2])
-                elif len(parts) == 2:
-                    # Tolerate a stale legacy entry that slipped past normalization.
-                    d_val, c_val, r_val = my_dev, int(parts[0]), int(parts[1])
-                else:
-                    raise ValueError(f"invalid entry: {s}")
-                if d_val != my_dev:
-                    continue
-                result.append(CoreId(cluster_map[c_val], core_map[r_val]))
-            except Exception as e:
-                logger.warning("Target cores not serialized: %s", s)
-                logger.warning("Error: %s", e)
+        for _dev, _cluster_idx, core_enum, cluster_enum in self._iter_core_entries():
+            result.append(CoreId(cluster_enum, core_enum))
         if result:
             return result
 
-        # Fallback: expand target_clusters into their full 4-core set on this
-        # device. Only kicks in when the caller left target_cores empty.
-        for cluster_str in self._spec.clusters:
-            try:
-                if isinstance(cluster_str, str) and ":" in cluster_str:
-                    d_val, c_val = int(cluster_str.split(":")[0]), int(cluster_str.split(":")[1])
-                else:
-                    d_val, c_val = my_dev, int(cluster_str)
-                if d_val != my_dev:
-                    continue
-                cluster_enum = cluster_map[c_val]
-            except Exception as e:
-                logger.warning("Target cluster not serialized (fallback path): %s", cluster_str)
-                logger.warning("Error: %s", e)
-                continue
+        # Fallback: expand target_clusters into their full 4-core set on
+        # every covered device. Only kicks in when the caller left
+        # target_cores empty.
+        for _dev, cluster_enum in self._iter_cluster_entries():
             for core_enum in (Core.Core0, Core.Core1, Core.Core2, Core.Core3):
                 result.append(CoreId(cluster_enum, core_enum))
         return result
@@ -1030,32 +1057,66 @@ class MobilintNPUBackend:
 
     @property
     def target_clusters(self) -> List["Cluster"]:
-        """Deserialize and return the list of target :class:`~qbruntime.Cluster` objects.
+        """Deserialize and return the target :class:`~qbruntime.Cluster` objects across every device.
 
         Clusters are stored internally on ``self._spec`` as canonical
-        ``"d:c"`` strings. Entries whose device does not match
-        ``self.dev_no`` are skipped so the existing single-device
-        :meth:`create` path keeps its selection.
+        ``"d:c"`` strings. The aggregate view includes entries from
+        every device covered by the backend and preserves the internal
+        ordering of ``self._spec.clusters``. The device prefix is
+        discarded in the return type; callers that need per-device
+        provenance should read :attr:`target_clusters_by_device` or the
+        canonical :attr:`_target_clusters_serialized` list.
 
         Returns:
-            A list of :class:`~qbruntime.Cluster` objects representing the
-            NPU clusters selected on this device.
+            A list of :class:`~qbruntime.Cluster` objects representing
+            the NPU clusters selected on every device this backend covers.
         """
-        result: List["Cluster"] = []
-        my_dev = self._fallback_dev()
-        for s in self._spec.clusters:
-            try:
-                if isinstance(s, str) and ":" in s:
-                    d_val, c_val = int(s.split(":")[0]), int(s.split(":")[1])
-                else:
-                    # Tolerate a stale legacy entry (bare int) that slipped past normalization.
-                    d_val, c_val = my_dev, int(s)
-                if d_val != my_dev:
-                    continue
-                result.append(cluster_map[c_val])
-            except Exception as e:
-                logger.warning("Target clusters not serialized: %s", s)
-                logger.warning("Error: %s", e)
+        return [cluster_enum for _dev, cluster_enum in self._iter_cluster_entries()]
+
+    @property
+    def target_cores_by_device(self) -> Dict[int, List["CoreId"]]:
+        """Return the target cores grouped by device index.
+
+        Preserves per-device provenance the aggregate :attr:`target_cores`
+        view drops. When ``self._spec.cores`` is empty, the getter mirrors
+        the aggregate fallback and expands ``target_clusters`` into their
+        4-core set on every covered device. Device indices in the returned
+        mapping preserve the order they first appear in the canonical
+        target lists; per-device value ordering matches the internal
+        order of ``self._spec.cores``.
+
+        Returns:
+            A ``dict`` mapping each covered device index to its list of
+            :class:`~qbruntime.CoreId` objects.
+        """
+        result: Dict[int, List["CoreId"]] = {}
+        for dev, _cluster_idx, core_enum, cluster_enum in self._iter_core_entries():
+            result.setdefault(dev, []).append(CoreId(cluster_enum, core_enum))
+        if result:
+            return result
+
+        for dev, cluster_enum in self._iter_cluster_entries():
+            bucket = result.setdefault(dev, [])
+            for core_enum in (Core.Core0, Core.Core1, Core.Core2, Core.Core3):
+                bucket.append(CoreId(cluster_enum, core_enum))
+        return result
+
+    @property
+    def target_clusters_by_device(self) -> Dict[int, List["Cluster"]]:
+        """Return the target clusters grouped by device index.
+
+        Preserves per-device provenance the aggregate :attr:`target_clusters`
+        view drops. Device indices in the returned mapping preserve the
+        order they first appear in ``self._spec.clusters``; per-device
+        value ordering matches the internal order of the same list.
+
+        Returns:
+            A ``dict`` mapping each covered device index to its list of
+            :class:`~qbruntime.Cluster` objects.
+        """
+        result: Dict[int, List["Cluster"]] = {}
+        for dev, cluster_enum in self._iter_cluster_entries():
+            result.setdefault(dev, []).append(cluster_enum)
         return result
 
     @target_clusters.setter

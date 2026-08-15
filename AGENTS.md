@@ -179,7 +179,10 @@ truth when this snapshot becomes stale.
   scalar pins one device; a list expands to multiple devices. Do not read `dev_no` at dispatch
   time — use the canonical `_target_cores_serialized` / `_target_clusters_serialized` lists (or
   the public `target_cores` / `target_clusters` accessors) so multi-device backends behave
-  correctly.
+  correctly. The aggregate `target_cores` / `target_clusters` accessors return the union across
+  every covered device but drop the device prefix from the return type; callers that need
+  per-device provenance should read the sibling `target_cores_by_device` /
+  `target_clusters_by_device` mappings or the canonical serialized lists.
 - Backend target topology lives in a single frozen `NPUTargetSpec` on `MobilintNPUBackend._spec`
   (dev_no, core_mode, cores, clusters). The four per-field setters
   (`dev_no`/`core_mode`/`target_cores`/`target_clusters`) each atomically replace `_spec` via

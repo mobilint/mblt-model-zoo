@@ -40,8 +40,16 @@ def log_model_details(model_path: str, npu_backend: Optional["MobilintNPUBackend
         print(f"Core Mode: {npu_backend.core_mode}")
         if npu_backend.core_mode == "single":
             print(f"Target Cores: {npu_backend.target_cores}")
+            by_device = npu_backend.target_cores_by_device
+            if len(by_device) > 1:
+                for dev in sorted(by_device):
+                    print(f"\tDevice {dev} Cores: {by_device[dev]}")
         else:
             print(f"Target Clusters: {npu_backend.target_clusters}")
+            by_device = npu_backend.target_clusters_by_device
+            if len(by_device) > 1:
+                for dev in sorted(by_device):
+                    print(f"\tDevice {dev} Clusters: {by_device[dev]}")
         n_models = getattr(npu_backend, "n_models", 0) or 0
         if n_models > 0:
             k_per_model = getattr(npu_backend, "k_per_model", 1) or 1

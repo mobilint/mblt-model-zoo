@@ -72,7 +72,9 @@
 - `dev_no` is syntactic sugar for the device-prefix component of the canonical target strings.
   Scalar pins one device; a list expands to multiple. Do not read `dev_no` at dispatch time —
   read `_target_cores_serialized` / `_target_clusters_serialized` (or the public
-  `target_cores` / `target_clusters` accessors).
+  `target_cores` / `target_clusters` accessors). The aggregate `target_cores` / `target_clusters`
+  return the union across every covered device with device prefix dropped; use
+  `target_cores_by_device` / `target_clusters_by_device` for per-device provenance.
 - Backend target topology lives in a single frozen `NPUTargetSpec` on
   `MobilintNPUBackend._spec` (dev_no, core_mode, cores, clusters). The four per-field
   setters (`dev_no` / `core_mode` / `target_cores` / `target_clusters`) each atomically replace
