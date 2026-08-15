@@ -697,18 +697,103 @@ def _probe_config_max_batch_size(
     return 1
 
 
+def _probe_mxq_artifact_k(mxq_path: str) -> int | None:
+    """Return the compiled batch axis ``K`` of a local MXQ artifact, or ``None`` on failure.
+
+    Uses the authoritative K probe (:meth:`qbruntime.Model.get_cache_infos`
+    ``num_batches`` field, matching :meth:`MobilintNPUBackend._probe_k_per_model`).
+    ``qbruntime.Model(path, ModelConfig())`` parses the MXQ file header and
+    exposes cache metadata *before* ``launch``, so this probe does not upload
+    weights to device memory. Non-local paths (Hub references) are skipped —
+    the config-based probe is the correct fallback for those.
+
+    Returns:
+        The compiled ``num_batches`` when probing succeeds, or ``None`` when
+        the artifact is not a resolvable local file, ``qbruntime`` is not
+        importable, or parsing fails. Callers should treat ``None`` as
+        "unknown" and fall back to the config-based probe.
+    """
+    if not mxq_path:
+        return None
+    try:
+        if not os.path.isfile(mxq_path):
+            return None
+    except (OSError, ValueError):
+        return None
+    try:
+        from qbruntime import Model, ModelConfig, QbRuntimeError
+    except Exception:
+        return None
+    mxq_model = None
+    try:
+        try:
+            mxq_model = Model(mxq_path, ModelConfig())
+        except (QbRuntimeError, OSError, ValueError):
+            return None
+        try:
+            infos = mxq_model.get_cache_infos()
+        except (AttributeError, QbRuntimeError):
+            return None
+        if not infos:
+            return 1
+        try:
+            k = int(getattr(infos[0], "num_batches", 1) or 1)
+        except (TypeError, ValueError):
+            return None
+        return k if k > 0 else 1
+    finally:
+        if mxq_model is not None:
+            try:
+                mxq_model.dispose()
+            except Exception:  # noqa: BLE001 — release path must not raise.
+                pass
+
+
+def _select_llm_mxq_override(args: argparse.Namespace) -> str | None:
+    """Return the LLM-role MXQ path override that governs batched execution.
+
+    The batched-MXQ core-mode constraint follows the *LLM* MXQ's compiled
+    batch axis. When the user overrides the shipped artifact, we probe the
+    override rather than the config's ``max_batch_size`` declaration.
+
+    Precedence mirrors ``_build_pipeline`` role resolution:
+
+    * VLM tasks: ``--text-mxq-path`` (the text LLM in the release).
+    * EAGLE-3 prefixed: ``--base-mxq-path`` (the base LLM; the draft is a
+      one-block helper and does not drive the guard).
+    * Otherwise: the plain ``--mxq-path`` override.
+    """
+    if _is_vlm_task(getattr(args, "task", None)):
+        text_path = getattr(args, "text_mxq_path", None)
+        if text_path:
+            return text_path
+    base_path = getattr(args, "base_mxq_path", None)
+    if base_path:
+        return base_path
+    return getattr(args, "mxq_path", None)
+
+
 def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     """Reject ``--core-mode global4/global8/multi`` on a batched MXQ.
 
-    Batched LLM execution (config ``max_batch_size > 1``) only supports
-    ``--core-mode single`` at runtime; see
-    ``mblt_model_zoo/hf_transformers/README.md`` and the matching enforcement
-    in ``benchmark/transformers/benchmark_text_generation_models.py`` and
-    ``benchmark_image_text_to_text_models.py``. This runs before pipeline
+    Batched LLM execution (compiled MXQ batch axis ``K > 1``) only supports
+    ``--core-mode single`` at runtime; see ``mblt_model_zoo/hf_transformers/README.md``
+    and the matching enforcement in ``benchmark/transformers/benchmark_text_generation_models.py``
+    and ``benchmark_image_text_to_text_models.py``. This runs before pipeline
     construction so users see the same friendly ``SystemExit`` the benchmark
     scripts raise, rather than a low-level backend error mid-launch.
 
-    Non-batch MXQ (``config.max_batch_size == 1``) with ``--batch-size B > 1``
+    When the caller overrides the shipped LLM artifact (``--mxq-path`` for
+    text generation, ``--base-mxq-path`` for EAGLE-3, ``--text-mxq-path``
+    for VLM) with a locally resolvable file, the guard probes that artifact's
+    compiled ``K`` via :func:`_probe_mxq_artifact_k`. This avoids two
+    misclassifications the config-only probe used to make: a Batch-N release
+    overridden with a ``K == 1`` MXQ is no longer rejected for ``global4``,
+    and a batch-1 release overridden with a ``K > 1`` MXQ is now caught here
+    instead of reaching an unsupported runtime configuration. Non-local
+    overrides and probe failures fall through to the config-declared value.
+
+    Non-batch MXQ (effective batch axis ``== 1``) with ``--batch-size B > 1``
     is a separate sw-batch feature and stays unrestricted — sw-batch across
     ``N`` slots is orthogonal to the batched-MXQ single-only rule.
     """
@@ -718,18 +803,28 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     model = getattr(args, "model", None)
     if not model:
         return
-    max_batch_size = _probe_config_max_batch_size(
-        model,
-        trust_remote_code=getattr(args, "trust_remote_code", True),
-        revision=getattr(args, "revision", None),
-        task=args.task,
-    )
+    override_path = _select_llm_mxq_override(args)
+    max_batch_size: int | None = None
+    size_source = "config"
+    if override_path:
+        probed = _probe_mxq_artifact_k(override_path)
+        if probed is not None:
+            max_batch_size = probed
+            size_source = "artifact"
+    if max_batch_size is None:
+        max_batch_size = _probe_config_max_batch_size(
+            model,
+            trust_remote_code=getattr(args, "trust_remote_code", True),
+            revision=getattr(args, "revision", None),
+            task=args.task,
+        )
     if max_batch_size <= 1:
         return
     if core_mode is not None and core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
+        size_label = "artifact K" if size_source == "artifact" else "config max_batch_size"
         raise SystemExit(
             f"tps: batched MXQ only supports --core-mode single "
-            f"(model={args.model!r}, config max_batch_size={max_batch_size}, "
+            f"(model={args.model!r}, {size_label}={max_batch_size}, "
             f"--core-mode={core_mode!r})"
         )
     # Match the benchmark-script convention: pin core_mode to ``single`` for
