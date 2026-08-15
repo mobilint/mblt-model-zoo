@@ -1831,6 +1831,29 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         past_key_values: Optional[MobilintCache],
         cache_position: torch.Tensor,
     ):
+        # Cross-attention conditioned decoders (BLIP text head, and any future
+        # encoder-decoder backend that inherits this default) always dispatch
+        # a single ``mxq_model.infer`` on slot 0. Growing the backend to
+        # ``N>1`` slots via ``max_batch_size>K`` (e.g. CLI ``--batch-size B``
+        # on a K=1 text MXQ) would therefore leave slots ``1..N-1`` idle
+        # while slot 0 receives a batch-shaped input it cannot serve. Fail
+        # here with actionable guidance rather than a cryptic qbruntime
+        # shape error — mirroring the ``MobilintBeamCache`` ``N==1`` invariant
+        # that already covers Whisper / Qwen3-ASR beam decode.
+        n_slots = len(self.npu_backend.mxq_models)
+        if n_slots > 1:
+            raise NotImplementedError(
+                "Encoder-decoder decoder_forward does not support multi-slot "
+                f"sw-batch dispatch (backend launched N={n_slots} slots). "
+                "Cross-attention decoders in this repo (BLIP text head, and "
+                "similar) run one blocking mxq_model.infer per call; multi-slot "
+                "routing and beam-cache reorder across slots are not implemented. "
+                "Either rerun with the aggregate batch capped at K (e.g. drop "
+                "--batch-size on TPS, or set max_batch_size<=K on the text "
+                "backend) or compile a batched (K>1) text MXQ so slot-0 "
+                "hardware batching serves the request."
+            )
+
         hidden_states_numpy = hidden_states.type(torch.float32).cpu().numpy()
         encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
 

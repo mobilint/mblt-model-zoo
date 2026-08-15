@@ -87,6 +87,10 @@
   for the historical `N=1, K=K` case.
 - `MobilintBeamCache` enforces `N==1` — beam search bookkeeping tracks one active qbruntime
   cache. Multi-Model dispatch is a `MobilintCache`-only feature.
+- Shared `MobilintModelMixin.decoder_forward` (BLIP text head) is `N==1` only — one blocking
+  `mxq_model.infer` on slot 0 with no cross-slot routing / beam-cache reorder. `N>1` (e.g.
+  `text_max_batch_size>K` on a `K==1` text MXQ) hard-fails with `NotImplementedError`; drop
+  `--batch-size` or compile a `K>1` text MXQ.
 - On HBM `BadAlloc`, `MobilintNPUBackend.create` / `.launch` disposes every previously loaded
   slot and re-raises as `MobilintBackendAllocError` with `phase`, `slot`, `dev`,
   `succeeded_so_far`, `n_total`, `max_batch_size`, `k_per_model` context. Callers should lower

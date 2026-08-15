@@ -200,6 +200,13 @@ truth when this snapshot becomes stale.
 - `MobilintBeamCache` (Whisper and other encoder-decoder beam searches) enforces `N == 1` because
   the beam bookkeeping tracks one active qbruntime cache; constructing it with more than one
   Model raises `NotImplementedError`. Use `MobilintCache` for multi-Model dispatch.
+- The shared `MobilintModelMixin.decoder_forward` (BLIP text head and any future encoder-decoder
+  backend that inherits it) is `N == 1` only. It issues one blocking `mxq_model.infer` on slot 0
+  and has no cross-slot routing or beam-cache reorder, so growing the backend to `N > 1` via
+  `text_max_batch_size > K` on a `K == 1` text MXQ is rejected with a clear
+  `NotImplementedError`. Users needing higher batched throughput should either drop the CLI
+  `--batch-size` request or compile a batched (`K > 1`) text MXQ so slot-0 hardware batching
+  services the load.
 - On HBM `BadAlloc` during `create` or `launch`, `MobilintNPUBackend` disposes every previously
   loaded slot and re-raises the underlying `qbruntime.QbRuntimeError` as
   `MobilintBackendAllocError` with `phase`, `slot`, `dev`, `succeeded_so_far`, `n_total`,
