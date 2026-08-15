@@ -1032,11 +1032,18 @@ def test_vlm_measure_rebuild_outputs(tmp_path) -> None:
 
 def test_text_skipped_sidecar_missing_returns_empty(tmp_path) -> None:
     """Verify sidecar reader treats missing files as an empty list."""
-    assert text_bench._read_skipped_sidecar(tmp_path) == []
+    assert text_bench._read_skipped_sidecar(tmp_path, "measure") == []
+    assert text_bench._read_skipped_sidecar(tmp_path, "sweep") == []
+
+
+def test_text_skipped_sidecar_filename_rejects_unknown_mode() -> None:
+    """Verify the sidecar filename helper rejects modes other than measure/sweep."""
+    with pytest.raises(ValueError):
+        text_bench._skipped_sidecar_filename("bogus")
 
 
 def test_text_skipped_sidecar_roundtrip(tmp_path) -> None:
-    """Verify sidecar writer/reader roundtrips skip records."""
+    """Verify sidecar writer/reader roundtrips skip records per mode."""
     records = [
         {
             "model": "model-a",
@@ -1054,9 +1061,37 @@ def test_text_skipped_sidecar_roundtrip(tmp_path) -> None:
             "npu_max_batch_size": 16,
         },
     ]
-    text_bench._write_skipped_sidecar(tmp_path, records)
-    assert (tmp_path / "skipped_records.json").is_file()
-    assert text_bench._read_skipped_sidecar(tmp_path) == records
+    text_bench._write_skipped_sidecar(tmp_path, records, "measure")
+    assert (tmp_path / "skipped_records_measure.json").is_file()
+    assert text_bench._read_skipped_sidecar(tmp_path, "measure") == records
+
+
+def test_text_skipped_sidecar_modes_are_isolated(tmp_path) -> None:
+    """Verify measure and sweep sidecars persist to independent files."""
+    measure_records = [
+        {
+            "model": "measure-a",
+            "batch_size": 4,
+            "phase": "load",
+            "skipped_reason": "cuda_oom",
+        }
+    ]
+    sweep_records = [
+        {
+            "model": "sweep-a",
+            "batch_size": 8,
+            "phase": "measure",
+            "skipped_reason": "npu_alloc",
+        }
+    ]
+
+    text_bench._write_skipped_sidecar(tmp_path, measure_records, "measure")
+    text_bench._write_skipped_sidecar(tmp_path, sweep_records, "sweep")
+
+    assert (tmp_path / "skipped_records_measure.json").is_file()
+    assert (tmp_path / "skipped_records_sweep.json").is_file()
+    assert text_bench._read_skipped_sidecar(tmp_path, "measure") == measure_records
+    assert text_bench._read_skipped_sidecar(tmp_path, "sweep") == sweep_records
 
 
 def test_text_measure_rebuild_loads_skipped_sidecar(tmp_path) -> None:
@@ -1088,6 +1123,7 @@ def test_text_measure_rebuild_loads_skipped_sidecar(tmp_path) -> None:
                 "skipped_reason": "cuda_oom",
             }
         ],
+        "measure",
     )
 
     text_bench._rebuild_measure_outputs(tmp_path)
@@ -1098,6 +1134,44 @@ def test_text_measure_rebuild_loads_skipped_sidecar(tmp_path) -> None:
     skipped = [row for row in rows if row.get("skipped_reason") == "cuda_oom"]
     assert len(skipped) == 1
     assert skipped[0]["model"] == "model-b"
+
+
+def test_text_measure_rebuild_only_reads_measure_sidecar(tmp_path) -> None:
+    """Verify measure rebuild ignores the sweep sidecar."""
+    payload = {
+        "model": "model-a",
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "prefill": 128,
+        "decode": 32,
+        "repeat": 1,
+        "summary": {
+            "prefill_tps": {"mean": 10.0},
+            "decode_tps": {"mean": 20.0},
+            "ttft_ms": {"mean": 30.0},
+            "decode_duration_ms": {"mean": 40.0},
+            "total_time_ms": {"mean": 70.0},
+        },
+        "device": None,
+    }
+    (tmp_path / "model-a_measure.json").write_text(json.dumps(payload), encoding="utf-8")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [
+            {
+                "model": "sweep-only",
+                "batch_size": 8,
+                "phase": "measure",
+                "skipped_reason": "npu_alloc",
+            }
+        ],
+        "sweep",
+    )
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+
+    rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
+    assert not [row for row in rows if row.get("model") == "sweep-only"]
 
 
 def test_text_measure_rebuild_missing_sidecar_is_backward_compat(tmp_path) -> None:
@@ -1145,6 +1219,7 @@ def test_text_sweep_rebuild_loads_skipped_sidecar(tmp_path) -> None:
                 "skipped_reason": "npu_alloc",
             }
         ],
+        "sweep",
     )
 
     text_bench._rebuild_combined_outputs(tmp_path)
@@ -1155,6 +1230,35 @@ def test_text_sweep_rebuild_loads_skipped_sidecar(tmp_path) -> None:
     skipped = [row for row in rows if row.get("skipped_reason") == "npu_alloc"]
     assert len(skipped) == 1
     assert skipped[0]["model"] == "sweep-b"
+
+
+def test_text_sweep_rebuild_only_reads_sweep_sidecar(tmp_path) -> None:
+    """Verify sweep rebuild ignores the measure sidecar."""
+    payload = {
+        "model": "sweep-a",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [8], "tps_values": [10.0], "time_values": [0.8]},
+            "decode_sweep": {"x_values": [4], "tps_values": [20.0], "time_values": [0.2]},
+        },
+    }
+    (tmp_path / "sweep-a.json").write_text(json.dumps(payload), encoding="utf-8")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [
+            {
+                "model": "measure-only",
+                "batch_size": 32,
+                "phase": "load",
+                "skipped_reason": "cuda_oom",
+            }
+        ],
+        "measure",
+    )
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    rows = list(csv.DictReader((tmp_path / "combined.csv").open("r", encoding="utf-8")))
+    assert not [row for row in rows if row.get("model") == "measure-only"]
 
 
 def test_text_sweep_rebuild_ignores_sidecar_glob(tmp_path) -> None:
@@ -1169,6 +1273,7 @@ def test_text_sweep_rebuild_ignores_sidecar_glob(tmp_path) -> None:
                 "skipped_reason": "npu_alloc",
             }
         ],
+        "sweep",
     )
 
     text_bench._rebuild_combined_outputs(tmp_path)
@@ -1180,7 +1285,7 @@ def test_text_sweep_rebuild_ignores_sidecar_glob(tmp_path) -> None:
 
 
 def test_text_rebuild_explicit_records_persist_sidecar(tmp_path) -> None:
-    """Verify passing an explicit skipped_records list writes the sidecar for later rebuilds."""
+    """Verify passing an explicit skipped_records list writes the mode-specific sidecar."""
     records = [
         {
             "model": "run-a",
@@ -1192,7 +1297,8 @@ def test_text_rebuild_explicit_records_persist_sidecar(tmp_path) -> None:
 
     text_bench._rebuild_measure_outputs(tmp_path, skipped_records=records)
 
-    assert text_bench._read_skipped_sidecar(tmp_path) == records
+    assert text_bench._read_skipped_sidecar(tmp_path, "measure") == records
+    assert text_bench._read_skipped_sidecar(tmp_path, "sweep") == []
 
 
 def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
