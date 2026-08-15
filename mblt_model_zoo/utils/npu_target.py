@@ -384,6 +384,17 @@ class NPUTargetSpec:
         if clusters:
             kwargs[clusters_key] = clusters
 
+        # When the caller supplied canonical targets but no explicit ``dev_no``,
+        # derive ``dev_no`` from the target device prefixes so the in-memory
+        # spec is self-consistent. Without this, a later :meth:`_with` call
+        # (e.g. an isolated ``core_mode`` override) would round-trip the stale
+        # default ``dev_no=0`` back through :meth:`from_kwargs`, flip
+        # ``dev_no_given=True``, and fail the device-set consistency check on
+        # an otherwise valid config.
+        if not dev_no_given and (cores or clusters):
+            derived_devs = sorted(_devices_from_targets(cores, clusters))
+            dev_no = derived_devs if len(derived_devs) > 1 else derived_devs[0]
+
         return cls(
             dev_no=_freeze_dev_no(dev_no),
             core_mode=core_mode,

@@ -723,3 +723,76 @@ def test_cli_apply_subconfig_threads_dev_no_to_each_prefix() -> None:
     # vision (scalar dev_no) keeps the default; text (list dev_no) suppresses it.
     assert model_kwargs.get("vision_target_cores") == ["0:0"]
     assert "text_target_cores" not in model_kwargs
+
+
+# ---------------------------------------------------------------------------
+# PR #109 P2 (second surface): NPUTargetSpec.from_kwargs must derive dev_no
+# from canonical targets when the caller does not pin one, so the in-memory
+# spec is self-consistent for a subsequent :meth:`_with` override.
+# ---------------------------------------------------------------------------
+
+
+def test_from_kwargs_derives_scalar_dev_no_from_target_cores() -> None:
+    """Canonical single-device ``target_cores`` without ``dev_no`` pins ``spec.dev_no`` to that device."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"target_cores": ["1:0:0"]})
+    assert spec.dev_no == 1
+    assert spec.cores == ("1:0:0",)
+
+
+def test_from_kwargs_derived_dev_no_survives_subsequent_core_mode_with() -> None:
+    """PR #109 P2 reproducer: `_with(core_mode="global4")` after canonical-target load must not raise."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"target_cores": ["1:0:0"]})
+    # Under the old behavior, ``spec.dev_no`` was ``0`` even though targets
+    # named device 1; the ``_with`` call then passed ``dev_no=0`` back through
+    # ``from_kwargs`` with ``dev_no_given=True`` and the device-set consistency
+    # check raised. The derivation makes the in-memory spec self-consistent.
+    updated = spec._with(core_mode="global4")
+    assert updated.dev_no == 1
+    assert updated.clusters == ("1:0",)
+    assert updated.cores == ()
+
+
+def test_from_kwargs_derives_scalar_dev_no_from_target_clusters() -> None:
+    """Canonical single-device ``target_clusters`` without ``dev_no`` pins ``spec.dev_no`` to that device."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"core_mode": "global4", "target_clusters": ["2:0", "2:1"]})
+    assert spec.dev_no == 2
+
+
+def test_from_kwargs_derives_sorted_tuple_dev_no_from_multi_device_targets() -> None:
+    """Canonical multi-device ``target_cores`` without ``dev_no`` derives a sorted tuple."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"target_cores": ["1:0:0", "2:0:0"], "core_mode": "single"})
+    assert spec.dev_no == (1, 2)
+
+
+def test_from_kwargs_explicit_dev_no_still_authoritative_and_raises_on_mismatch() -> None:
+    """An explicit ``dev_no`` still enforces the device-set consistency check."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    with pytest.raises(ValueError, match="does not match"):
+        NPUTargetSpec.from_kwargs({"target_cores": ["1:0:0"], "dev_no": 0})
+
+
+def test_from_kwargs_legacy_two_part_cores_still_respect_explicit_dev_no() -> None:
+    """Explicit ``dev_no`` is preserved when legacy 2-part cores are migrated."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"target_cores": ["0:0"], "dev_no": 5})
+    assert spec.dev_no == 5
+    assert spec.cores == ("5:0:0",)
+
+
+def test_from_kwargs_prefix_scoped_targets_derive_dev_no() -> None:
+    """Prefixed canonical targets without a matching prefixed ``dev_no`` derive ``spec.dev_no``."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"vision_target_cores": ["3:0:0"]}, prefix="vision_")
+    assert spec.dev_no == 3
+    assert spec.cores == ("3:0:0",)
