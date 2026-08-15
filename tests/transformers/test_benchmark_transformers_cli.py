@@ -1435,6 +1435,146 @@ def test_text_target_filtering_original_models_mixed_admits_only_batch_and_upstr
         assert target.max_batch_size == 64
 
 
+def _stub_text_target_hub_probes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    max_batch_size_map: dict[str, int] | None = None,
+    available_model_ids: list[str] | None = None,
+) -> None:
+    """Stub Hub-facing helpers used by _collect_text_run_targets to keep the test hermetic."""
+    placeholder_ids = list(available_model_ids) if available_model_ids else ["mobilint/placeholder"]
+    monkeypatch.setattr(
+        text_bench,
+        "list_default_model_ids",
+        lambda task, *, include_private=False: list(placeholder_ids),
+    )
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_is_gguf_model_id", lambda model_id: False)
+    cfg_map = dict(max_batch_size_map or {})
+    monkeypatch.setattr(
+        text_bench,
+        "_resolve_config_max_batch_size",
+        lambda model_id, revision, *, task: cfg_map.get(model_id, 1),
+    )
+
+
+def test_collect_text_run_targets_original_models_preserves_mobilint(monkeypatch, tmp_path) -> None:
+    """Verify --original-models + a caller-listed Mobilint id keeps BOTH Mobilint and its parent."""
+    monkeypatch.setattr(
+        text_bench,
+        "_resolve_original_model_ids",
+        lambda model_ids: ["meta-llama/Llama-3.1-8B-Instruct"],
+    )
+    _stub_text_target_hub_probes(
+        monkeypatch,
+        max_batch_size_map={
+            "mobilint/Llama-3.1-8B-Instruct-Batch16": 16,
+            "meta-llama/Llama-3.1-8B-Instruct": 1,
+        },
+    )
+
+    args = text_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--original-models",
+            "--model",
+            "mobilint/Llama-3.1-8B-Instruct-Batch16",
+            "--batch-size",
+            "64",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    _, disable_npu_specific_args, run_targets = text_bench._collect_text_run_targets(args)
+
+    model_ids = [entry[0] for entry in run_targets]
+    assert set(model_ids) == {
+        "mobilint/Llama-3.1-8B-Instruct-Batch16",
+        "meta-llama/Llama-3.1-8B-Instruct",
+    }
+    assert disable_npu_specific_args is True
+
+
+def test_collect_text_run_targets_original_models_non_mobilint_only_still_drops(monkeypatch, tmp_path) -> None:
+    """Verify --original-models with only a non-Mobilint --model keeps the historical parents-only behavior."""
+    monkeypatch.setattr(
+        text_bench,
+        "_resolve_original_model_ids",
+        lambda model_ids: ["meta-llama/Llama-3.1-8B-Instruct"],
+    )
+    _stub_text_target_hub_probes(
+        monkeypatch,
+        max_batch_size_map={"meta-llama/Llama-3.1-8B-Instruct": 1},
+    )
+
+    args = text_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--original-models",
+            "--model",
+            "meta-llama/Llama-3.1-8B-Instruct",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    _, _, run_targets = text_bench._collect_text_run_targets(args)
+
+    model_ids = [entry[0] for entry in run_targets]
+    assert model_ids == ["meta-llama/Llama-3.1-8B-Instruct"]
+    assert not any(mid.startswith("mobilint/") for mid in model_ids)
+
+
+def test_collect_text_run_targets_mxq_dir_still_ignores_original_models(monkeypatch, tmp_path) -> None:
+    """Verify --mxq-dir short-circuits --original-models: no Hub resolve, no merge, just local MXQs."""
+    mxq_dir = tmp_path / "mxqs"
+    mxq_dir.mkdir()
+    (mxq_dir / "mobilint__local-model-W8.mxq").write_bytes(b"")
+
+    resolve_calls: list[list[str]] = []
+
+    def _fail_resolve(model_ids):
+        resolve_calls.append(list(model_ids))
+        raise AssertionError("_resolve_original_model_ids must not run under --mxq-dir")
+
+    monkeypatch.setattr(text_bench, "_resolve_original_model_ids", _fail_resolve)
+    _stub_text_target_hub_probes(monkeypatch, max_batch_size_map={"mobilint/local-model": 1})
+    monkeypatch.setattr(
+        text_bench,
+        "list_default_model_ids",
+        lambda task, *, include_private=False: ["mobilint/local-model"],
+    )
+    monkeypatch.setattr(
+        text_bench,
+        "_iter_targets_from_mxq_dir",
+        lambda *, mxq_dir, available_model_ids: [
+            ("mobilint/local-model", ["W8"], "mobilint/local-model", "mobilint_local-model", str(mxq_dir / "m.mxq")),
+        ],
+    )
+
+    args = text_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--original-models",
+            "--mxq-dir",
+            str(mxq_dir),
+            "--model",
+            "mobilint/local-model",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    _, disable_npu_specific_args, run_targets = text_bench._collect_text_run_targets(args)
+
+    assert resolve_calls == []
+    assert [entry[0] for entry in run_targets] == ["mobilint/local-model"]
+    assert disable_npu_specific_args is False
+
+
 def test_build_pipeline_forwards_dev_no_only_for_mobilint(monkeypatch) -> None:
     """Verify --dev-no is injected on Mobilint targets and dropped for original ones."""
     captured: dict[str, Any] = {}

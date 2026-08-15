@@ -583,6 +583,38 @@ def _resolve_original_model_ids(model_ids: Iterable[str]) -> list[str]:
     return _resolve_original_model_ids_shared(model_ids)
 
 
+def _caller_mobilint_model_ids(models: Sequence[str] | None) -> list[str]:
+    """Return caller-listed Mobilint ids in input order.
+
+    A caller-listed Mobilint id is a value passed via ``--model`` whose repo id
+    begins with ``mobilint/``. Used to detect the one-pass Mobilint-vs-GPU
+    intent that ``--original-models`` combined with an explicit Mobilint
+    ``--model`` request expresses.
+    """
+    if not models:
+        return []
+    return [str(item) for item in models if str(item).strip().startswith("mobilint/")]
+
+
+def _merge_resolved_parents_with_caller_mobilint(
+    resolved_parents: Sequence[str],
+    caller_mobilint_ids: Sequence[str],
+) -> list[str]:
+    """Return caller-listed Mobilint ids followed by resolved upstream parents.
+
+    Caller-listed Mobilint ids are placed first so their Mobilint MXQ rows lead
+    the run list. Resolved upstream parents follow, and duplicates are dropped
+    while preserving first occurrence.
+    """
+    merged: list[str] = []
+    seen: set[str] = set()
+    for candidate in list(caller_mobilint_ids) + list(resolved_parents):
+        if candidate not in seen:
+            merged.append(candidate)
+            seen.add(candidate)
+    return merged
+
+
 def _load_result(path: str) -> BenchmarkResult:
     with open(path, "r", encoding="utf-8") as f:
         payload = json.load(f)
@@ -1459,14 +1491,23 @@ def _run_sweep(args: argparse.Namespace) -> int:
         model_ids = [str(item) for item in args.models] if args.models else (available_model_ids or [])
         if args.original_models:
             original_count = len(model_ids)
-            model_ids = _resolve_original_model_ids(model_ids)
-            print(
-                f"Using parent/original model ids: {len(model_ids)} unique models "
-                f"(from {original_count} listed models)."
-            )
+            caller_mobilint_ids = _caller_mobilint_model_ids(args.models)
+            resolved_parents = _resolve_original_model_ids(model_ids)
+            model_ids = _merge_resolved_parents_with_caller_mobilint(resolved_parents, caller_mobilint_ids)
+            if caller_mobilint_ids:
+                print(
+                    f"Using merged Mobilint + parent/original model ids: {len(model_ids)} unique ids "
+                    f"(from {original_count} listed models; keeping {len(caller_mobilint_ids)} caller-listed "
+                    f"Mobilint id(s) for one-pass Mobilint-vs-GPU)."
+                )
+            else:
+                print(
+                    f"Using parent/original model ids: {len(model_ids)} unique models "
+                    f"(from {original_count} listed models)."
+                )
             if args.all or args.revision:
                 print(
-                    "Note: --all/--revision are applied to resolved original model ids "
+                    "Note: --all/--revision are applied to resolved parent/original model ids "
                     "(requested revisions may not exist)."
                 )
         targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
@@ -2166,7 +2207,9 @@ def _collect_text_run_targets(
     else:
         model_ids = [str(item) for item in args.models] if args.models else available_model_ids
         if args.original_models:
-            model_ids = _resolve_original_model_ids(model_ids)
+            caller_mobilint_ids = _caller_mobilint_model_ids(args.models)
+            resolved_parents = _resolve_original_model_ids(model_ids)
+            model_ids = _merge_resolved_parents_with_caller_mobilint(resolved_parents, caller_mobilint_ids)
         targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
         if args.mxq_path:
             targets = [
