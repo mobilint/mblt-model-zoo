@@ -932,16 +932,20 @@ def _build_pipeline(
             eagle3_options.fc_dev_no,
         )
     )
-    # MobilintEagle3ConfigMixin only exposes base_/draft_/fc_-prefixed dev_no setters, so a bare
-    # `--dev-no` on an EAGLE-3 release would otherwise be silently dropped. Detect the release and
-    # broadcast the global into the prefixed trio (per-prefix explicit values still win via the
-    # coalesce below). Skip detection for VLM tasks and when no prefixed sugar needs to be emitted.
-    eagle3_broadcast_dev_no = (
-        not _is_vlm_task(task)
-        and not eagle3_prefix_requested
-        and dev_no is not None
-        and _detect_eagle3_model(model, trust_remote_code=trust_remote_code, revision=revision)
+    # MobilintEagle3ConfigMixin only exposes base_/draft_/fc_-prefixed dev_no and max_batch_size
+    # setters, so a bare `--dev-no` or `--batch-size` on an EAGLE-3 release would otherwise be
+    # silently dropped. Detect the release once and broadcast either global into the prefixed
+    # trio (per-prefix explicit values still win via the coalesce below). Skip detection for VLM
+    # tasks, when a prefixed sugar option was already requested, and when neither global needs to
+    # be broadcast.
+    _eagle3_broadcast_needed = (
+        not _is_vlm_task(task) and not eagle3_prefix_requested and (dev_no is not None or max_batch_size is not None)
     )
+    _is_eagle3_release = _eagle3_broadcast_needed and _detect_eagle3_model(
+        model, trust_remote_code=trust_remote_code, revision=revision
+    )
+    eagle3_broadcast_dev_no = _is_eagle3_release and dev_no is not None
+    eagle3_broadcast_batch = _is_eagle3_release and max_batch_size is not None
     subconfig_options = subconfig_options or SubconfigPipelineOptions()
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
@@ -1064,10 +1068,13 @@ def _build_pipeline(
         # non-Mobilint targets ``--batch-size`` stays a measurement-only knob
         # (synthetic batch around ``generate``) and is applied later via
         # ``_resolve_cli_batch_size``.
-        # Propagate to the config layer so the backend launches N = ceil(B / K) slots at construction time.
+        # Propagate to the config layer so the backend launches N = ceil(B / K) slots at construction
+        # time. EAGLE-3 releases only accept base_/draft_/fc_-prefixed max_batch_size; broadcast the
+        # bare `--batch-size` onto `base_max_batch_size` to match the prefixed-sugar path when the
+        # release is detected as EAGLE-3.
         if _is_vlm_task(task):
             model_kwargs["text_max_batch_size"] = int(max_batch_size)
-        elif eagle3_prefix_requested:
+        elif eagle3_prefix_requested or eagle3_broadcast_batch:
             model_kwargs["base_max_batch_size"] = int(max_batch_size)
         else:
             model_kwargs["max_batch_size"] = int(max_batch_size)

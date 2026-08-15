@@ -1065,6 +1065,127 @@ def test_build_pipeline_non_eagle3_keeps_unprefixed_dev_no(monkeypatch) -> None:
     assert pipe.model_kwargs == {"dev_no": 1}
 
 
+def test_build_pipeline_eagle3_broadcasts_bare_max_batch_size(monkeypatch) -> None:
+    """A global --batch-size on an EAGLE-3 release must forward as ``base_max_batch_size``.
+
+    ``MobilintEagle3ConfigMixin`` only exposes prefixed max_batch_size setters, so an
+    unprefixed ``max_batch_size`` model kwarg would otherwise be silently dropped and the
+    base backend would launch at its configured capacity instead of the requested batch.
+    """
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/eagle3",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("base_max_batch_size") == 4
+    assert "max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_non_eagle3_keeps_unprefixed_max_batch_size(monkeypatch) -> None:
+    """A bare ``--batch-size`` on a non-EAGLE-3 Mobilint release keeps the unprefixed kwarg."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/Qwen3-4B-W4V8",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("max_batch_size") == 4
+    assert "base_max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_eagle3_prefixed_option_skips_eagle3_detection(monkeypatch) -> None:
+    """Explicit prefixed sugar already targets the EAGLE-3 branch — skip the AutoConfig probe."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda *args, **kwargs: pytest.fail(
+            "_detect_eagle3_model should not run when prefixed EAGLE-3 options are set"
+        ),
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/EAGLE3-Qwen3-4B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(base_mxq_path="base.mxq"),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("base_max_batch_size") == 4
+    assert "max_batch_size" not in model_kwargs
+
+
 def test_is_eagle3_config_detects_model_type_marker() -> None:
     """`_is_eagle3_config` recognizes the ``eagle3`` marker in ``model_type`` and ``architectures``."""
 
