@@ -738,8 +738,17 @@ class BenchmarkResult:
 
     @staticmethod
     def write_combined_csv(
-        path: str, rows: Iterable[dict[str, Union[float, int, str, None]]]
+        path: str,
+        rows: Iterable[dict[str, Union[float, int, str, None]]],
+        *,
+        skipped_records: Optional[Iterable[dict[str, Union[float, int, str, None]]]] = None,
     ) -> None:
+        """Write combined benchmark rows and optionally skipped-target markers.
+
+        Skipped records surface CUDA OOM or Mobilint NPU allocation failures with empty
+        numeric fields and a populated ``skipped_reason`` column so downstream comparison
+        tools do not silently drop the target.
+        """
         import csv
 
         with open(path, "w", encoding="utf-8", newline="") as f:
@@ -755,11 +764,29 @@ class BenchmarkResult:
                     "avg_npu_token_latency_ms",
                     "avg_npu_token_latency_pct",
                     "decode_prefill_mode",
+                    "skipped_reason",
                 ],
+                extrasaction="ignore",
             )
             writer.writeheader()
             for row in rows:
                 writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+            if skipped_records:
+                for record in skipped_records:
+                    writer.writerow(
+                        {
+                            "model": record.get("model", "") or "",
+                            "phase": "",
+                            "tokens": "",
+                            "tps": "",
+                            "time_ms": "",
+                            "avg_total_token_latency_ms": "",
+                            "avg_npu_token_latency_ms": "",
+                            "avg_npu_token_latency_pct": "",
+                            "decode_prefill_mode": "",
+                            "skipped_reason": record.get("skipped_reason", "") or "",
+                        }
+                    )
 
     @staticmethod
     def write_combined_markdown(

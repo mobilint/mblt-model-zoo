@@ -3,6 +3,7 @@ import json
 import sys
 from argparse import Namespace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1143,3 +1144,264 @@ def test_vlm_benchmark_include_private_flag_defaults_false_and_forwards(
     vlm_bench._collect_vlm_run_targets(private_args)
 
     assert observed == [False, True]
+
+
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_text_benchmark_parses_dev_no_and_batch_size(command: str) -> None:
+    """Verify --dev-no and --batch-size parse on both text-generation subcommands."""
+    args = text_bench._build_arg_parser().parse_args([command, "--dev-no", "0,1,2,3", "--batch-size", "64"])
+
+    assert args.dev_no == [0, 1, 2, 3]
+    assert args.batch_size == 64
+
+    scalar = text_bench._build_arg_parser().parse_args([command, "--dev-no", "1"])
+    assert scalar.dev_no == 1
+
+
+def test_text_target_filtering_admits_original_under_batch_size_override(monkeypatch) -> None:
+    """Verify --original-models with cfg max_batch_size=1 is admitted under --batch --batch-size N>1."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("upstream/original", [None], "original", "original", None),
+    ]
+
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: 1)
+
+    admitted = text_bench._filter_text_targets_by_batch_mode(raw_targets, batch_mode="batch", override_batch_size=32)
+
+    assert len(admitted) == 1
+    assert admitted[0].model_id == "upstream/original"
+    assert admitted[0].batch_mode == "batch"
+    assert admitted[0].max_batch_size == 32
+
+
+def test_build_pipeline_forwards_dev_no_only_for_mobilint(monkeypatch) -> None:
+    """Verify --dev-no is injected on Mobilint targets and dropped for original ones."""
+    captured: dict[str, Any] = {}
+
+    def _fake_pipeline(**kwargs):
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(text_bench, "hf_pipeline", _fake_pipeline)
+
+    text_bench._build_pipeline(
+        "mobilint/mock-batch",
+        device="cpu",
+        core_mode="single",
+        default_single_target_cores=None,
+        dev_no=[0, 1],
+        max_batch_size=32,
+    )
+    mobilint_model_kwargs = captured["kwargs"].get("model_kwargs", {})
+    assert mobilint_model_kwargs.get("dev_no") == [0, 1]
+    assert mobilint_model_kwargs.get("max_batch_size") == 32
+
+    captured.clear()
+    text_bench._build_pipeline(
+        "upstream/original",
+        device="cuda:0",
+        core_mode=None,
+        dev_no=[0, 1],
+        max_batch_size=32,
+    )
+    original_model_kwargs = captured["kwargs"].get("model_kwargs", {})
+    assert "dev_no" not in original_model_kwargs
+    assert "max_batch_size" not in original_model_kwargs
+
+
+def test_text_measure_continues_on_cuda_oom(monkeypatch, tmp_path) -> None:
+    """Verify a CUDA OOM at pipeline construction is logged as a skipped row and the loop continues."""
+    args = text_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--original-models",
+            "--batch-size",
+            "64",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    monkeypatch.setattr(
+        text_bench,
+        "_collect_text_run_targets",
+        lambda args: (
+            str(tmp_path),
+            True,
+            [
+                ("upstream/model-a", [None], "upstream/model-a", "upstream_model-a", None, None, 64, "batch"),
+                ("upstream/model-b", [None], "upstream/model-b", "upstream_model-b", None, None, 64, "batch"),
+            ],
+        ),
+    )
+    monkeypatch.setattr(text_bench, "_collect_host_pc_info", lambda results_dir: None)
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_should_precheck_cuda", lambda args: False)
+
+    class _FakeMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure(self, **kwargs):
+            return text_bench.BenchmarkResult(
+                prefill_sweep=text_bench.SweepData(x_values=[128], tps_values=[10.0], time_values=[0.1]),
+                decode_sweep=text_bench.SweepData(x_values=[32], tps_values=[20.0], time_values=[0.2]),
+            )
+
+    calls: list[str] = []
+
+    def _fake_build_pipeline(model_id, **kwargs):
+        calls.append(model_id)
+        if model_id == "upstream/model-a":
+            raise RuntimeError("CUDA out of memory. Tried to allocate 10 GiB.")
+        return object()
+
+    monkeypatch.setattr(text_bench, "_build_pipeline", _fake_build_pipeline)
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure(self, **kwargs):
+            class _Row:
+                prefill_latency = 0.1
+                decode_duration = 0.1
+                total_time = 0.2
+                prefill_tps = 10.0
+                decode_tps = 20.0
+                prefill_npu_latency_pct = None
+                decode_npu_latency_pct = None
+                ttft_ms = None
+
+            return _Row()
+
+    class _RowDict(dict):
+        pass
+
+    def _fake_asdict(run):
+        return {
+            "prefill_latency": 0.1,
+            "decode_duration": 0.1,
+            "total_time": 0.2,
+            "prefill_tps": 10.0,
+            "decode_tps": 20.0,
+            "prefill_npu_latency_pct": None,
+            "decode_npu_latency_pct": None,
+        }
+
+    monkeypatch.setattr(text_bench, "TPSMeasurer", _FakeTPSMeasurer)
+    monkeypatch.setattr(text_bench, "asdict", _fake_asdict)
+    monkeypatch.setattr(text_bench, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(text_bench, "start_qbruntime_trace", lambda path: None)
+    monkeypatch.setattr(text_bench, "stop_qbruntime_trace", lambda handle: None)
+    monkeypatch.setattr(text_bench, "_release_pipeline", lambda pipeline, device: None)
+    monkeypatch.setattr(text_bench, "_clear_cuda_memory", lambda device: None)
+    monkeypatch.setattr(text_bench, "_is_cuda_device", lambda device: False)
+
+    assert text_bench._run_measure(args) == 0
+    assert calls == ["upstream/model-a", "upstream/model-b"]
+
+    csv_rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open(encoding="utf-8")))
+    skipped_rows = [row for row in csv_rows if row.get("skipped_reason") == "cuda_oom"]
+    assert len(skipped_rows) == 1
+    assert skipped_rows[0]["model"] == "upstream/model-a"
+
+
+def test_text_measure_continues_on_npu_alloc_error(monkeypatch, tmp_path) -> None:
+    """Verify Mobilint NPU allocation failures are logged as skipped rows and the loop continues."""
+    from mblt_model_zoo.utils.npu_backend import MobilintBackendAllocError
+
+    args = text_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--batch-size",
+            "64",
+            "--dev-no",
+            "0,1",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    monkeypatch.setattr(
+        text_bench,
+        "_collect_text_run_targets",
+        lambda args: (
+            str(tmp_path),
+            False,
+            [
+                ("mobilint/model-a", [None], "mobilint/model-a", "mobilint_model-a", None, "single", 64, "batch"),
+                ("mobilint/model-b", [None], "mobilint/model-b", "mobilint_model-b", None, "single", 64, "batch"),
+            ],
+        ),
+    )
+    monkeypatch.setattr(text_bench, "_collect_host_pc_info", lambda results_dir: None)
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_should_precheck_cuda", lambda args: False)
+    monkeypatch.setattr(text_bench, "_release_pipeline", lambda pipeline, device: None)
+    monkeypatch.setattr(text_bench, "_clear_cuda_memory", lambda device: None)
+    monkeypatch.setattr(text_bench, "_is_cuda_device", lambda device: False)
+
+    calls: list[str] = []
+
+    def _fake_build_pipeline(model_id, **kwargs):
+        calls.append(model_id)
+        if model_id == "mobilint/model-a":
+            raise MobilintBackendAllocError(
+                phase="create",
+                slot=3,
+                dev=1,
+                succeeded_so_far=3,
+                n_total=4,
+                max_batch_size=64,
+                k_per_model=16,
+                original=RuntimeError("BadAlloc"),
+            )
+        return object()
+
+    monkeypatch.setattr(text_bench, "_build_pipeline", _fake_build_pipeline)
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure(self, **kwargs):
+            class _Row:
+                prefill_latency = 0.1
+                decode_duration = 0.1
+                total_time = 0.2
+                prefill_tps = 10.0
+                decode_tps = 20.0
+                prefill_npu_latency_pct = None
+                decode_npu_latency_pct = None
+
+            return _Row()
+
+    def _fake_asdict(run):
+        return {
+            "prefill_latency": 0.1,
+            "decode_duration": 0.1,
+            "total_time": 0.2,
+            "prefill_tps": 10.0,
+            "decode_tps": 20.0,
+            "prefill_npu_latency_pct": None,
+            "decode_npu_latency_pct": None,
+        }
+
+    monkeypatch.setattr(text_bench, "TPSMeasurer", _FakeTPSMeasurer)
+    monkeypatch.setattr(text_bench, "asdict", _fake_asdict)
+    monkeypatch.setattr(text_bench, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(text_bench, "start_qbruntime_trace", lambda path: None)
+    monkeypatch.setattr(text_bench, "stop_qbruntime_trace", lambda handle: None)
+
+    assert text_bench._run_measure(args) == 0
+    assert calls == ["mobilint/model-a", "mobilint/model-b"]
+
+    csv_rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open(encoding="utf-8")))
+    skipped_rows = [row for row in csv_rows if row.get("skipped_reason") == "npu_alloc"]
+    assert len(skipped_rows) == 1
+    assert skipped_rows[0]["model"] == "mobilint/model-a"

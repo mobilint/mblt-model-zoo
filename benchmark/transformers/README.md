@@ -518,6 +518,43 @@ python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --skip-existing
 ```
 
+### Compare Batch Mobilint and Original HF in One Pass
+
+`--dev-no` and `--batch-size` are shared between `measure` and `sweep`. Combine them with
+`--batch` to run a batch NPU target and its upstream GPU counterpart from one CLI. On non-Mobilint
+targets `--dev-no` is a silent no-op; on Mobilint targets it becomes the canonical NPU target
+device set. `--batch-size` overrides `config.max_batch_size` for the effective input batch dim
+and, on Mobilint targets, forwards the same value as the backend `max_batch_size` kwarg. On
+upstream Hugging Face targets with `config.max_batch_size == 1`, passing `--batch --batch-size N>1`
+admits the target under `--batch` so a mixed sweep works with the same filter.
+
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py measure \
+  --batch --original-models \
+  --model mobilint/Llama-3.1-8B-Instruct-Batch16 \
+  --batch-size 64 --dev-no 0,1,2,3 \
+  --prefill 1024 --decode 32
+```
+
+If a target OOMs at pipeline construction (or during measurement), the run continues to the next
+target and the combined output records the skip. Either CUDA OOM (upstream GPU targets) or a
+Mobilint NPU allocation failure — `MobilintBackendAllocError` with `phase`, `slot`, and `dev`
+context — is logged as `SKIP model=... reason=cuda_oom|npu_alloc ...` and recorded in
+`combined.csv`/`combined_measure.csv` with empty numeric fields and a populated `skipped_reason`
+column. A single-target OOM does not fail the whole run. No per-target JSON is written for a
+skipped target, so a rerun with `--skip-existing` naturally retries it (typically at a smaller
+`--batch-size`).
+
+```bash
+# Retry the GPU target at a smaller batch after the NPU row was cached.
+python benchmark/transformers/benchmark_text_generation_models.py measure \
+  --batch --original-models \
+  --model mobilint/Llama-3.1-8B-Instruct-Batch16 \
+  --batch-size 32 \
+  --prefill 1024 --decode 32 \
+  --skip-existing
+```
+
 ### Benchmark Image-Text-to-Text Models
 
 `benchmark_image_text_to_text_models.py` requires a `measure` or `sweep` subcommand. `measure` runs

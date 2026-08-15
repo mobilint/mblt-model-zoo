@@ -83,6 +83,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_time_series as _extract_device_time_series_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    is_mobilint_target as _is_mobilint_target_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     iter_core_modes as _iter_core_modes_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -114,6 +117,93 @@ _BATCH_MODE_NON_BATCH = "non_batch"
 _BATCH_SWEEP_LENGTH_SCALE = 4
 _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
+
+
+class _UnreachableAllocError(BaseException):
+    """Sentinel exception that is never raised, used when the NPU extra is absent."""
+
+
+def _resolve_npu_alloc_error_type() -> type[BaseException]:
+    """Return :class:`MobilintBackendAllocError` when the extra is installed.
+
+    Falls back to :class:`_UnreachableAllocError` so ``except _NPU_ALLOC_ERROR_TYPE``
+    is a no-op when ``mblt_model_zoo.utils.npu_backend`` cannot be imported.
+    """
+    try:
+        from mblt_model_zoo.utils.npu_backend import MobilintBackendAllocError
+    except Exception:
+        return _UnreachableAllocError
+    return MobilintBackendAllocError
+
+
+_NPU_ALLOC_ERROR_TYPE: type[BaseException] = _resolve_npu_alloc_error_type()
+
+
+def _handle_cuda_oom(
+    exc: BaseException,
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    pipeline: Any,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+) -> None:
+    """Log a structured CUDA OOM skip record and clear GPU state."""
+    reason = "cuda_oom"
+    print(f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase}: {exc}")
+    _release_pipeline(pipeline, device)
+    _clear_cuda_memory(device)
+    skipped_records.append(
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": _format_exception(exc),
+        }
+    )
+
+
+def _handle_npu_alloc_error(
+    exc: BaseException,
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    debug_errors: bool,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+) -> None:
+    """Log a structured Mobilint NPU allocation skip record."""
+    reason = "npu_alloc"
+    context = {
+        "phase": getattr(exc, "phase", None),
+        "slot": getattr(exc, "slot", None),
+        "dev": getattr(exc, "dev", None),
+        "succeeded_so_far": getattr(exc, "succeeded_so_far", None),
+        "n_total": getattr(exc, "n_total", None),
+        "max_batch_size": getattr(exc, "max_batch_size", None),
+        "k_per_model": getattr(exc, "k_per_model", None),
+    }
+    context_str = " ".join(f"{k}={v}" for k, v in context.items() if v is not None)
+    print(
+        f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase} {context_str}: {exc}"
+    )
+    if debug_errors:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+    skipped_records.append(
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": _format_exception(exc),
+            **{f"npu_{k}": v for k, v in context.items() if v is not None},
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -256,20 +346,34 @@ def _filter_text_targets_by_batch_mode(
     *,
     batch_mode: str | None = None,
     task: str = "text-generation",
+    override_batch_size: int | None = None,
 ) -> list[TextBenchmarkTarget]:
-    """Filter unsupported targets and annotate each supported target with batch metadata."""
+    """Filter unsupported targets and annotate each supported target with batch metadata.
+
+    When ``override_batch_size`` is provided and greater than one, upstream/original
+    targets that report ``config.max_batch_size == 1`` are still admitted under the
+    ``batch`` filter so a mixed Mobilint-vs-GPU sweep can share one CLI. The
+    override becomes the effective input batch dim for both Mobilint and non-
+    Mobilint targets, and it is later gated to Mobilint targets when it is
+    forwarded as a backend ``max_batch_size`` kwarg.
+    """
     filtered: list[TextBenchmarkTarget] = []
+    forced_batch = override_batch_size is not None and int(override_batch_size) > 1 and batch_mode == _BATCH_MODE_BATCH
     for model_id, revision_candidates, label, base, mxq_path in targets:
         revision = _target_filter_revision(model_id, revision_candidates, mxq_path)
         if _is_gguf_model_id(model_id) or _has_gguf_artifact(model_id, revision):
             print(f"Skip {label}: GGUF/Llama.cpp model is not supported by Transformers benchmark.")
             continue
-        max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
-        if max_batch_size is None:
-            max_batch_size = 1
-        if max_batch_size is None:
-            continue
-        resolved_batch_mode = _batch_mode_from_max_batch_size(max_batch_size)
+        cfg_max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
+        if cfg_max_batch_size is None:
+            cfg_max_batch_size = 1
+        if override_batch_size is not None and int(override_batch_size) >= 1:
+            effective_max_batch_size = int(override_batch_size)
+        else:
+            effective_max_batch_size = cfg_max_batch_size
+        resolved_batch_mode = _batch_mode_from_max_batch_size(effective_max_batch_size)
+        if forced_batch and cfg_max_batch_size == 1:
+            resolved_batch_mode = _BATCH_MODE_BATCH
         if batch_mode is not None and resolved_batch_mode != batch_mode:
             continue
         filtered.append(
@@ -279,7 +383,7 @@ def _filter_text_targets_by_batch_mode(
                 label=label,
                 base=base,
                 mxq_path=mxq_path,
-                max_batch_size=max_batch_size,
+                max_batch_size=effective_max_batch_size,
                 batch_mode=resolved_batch_mode,
             )
         )
@@ -321,6 +425,8 @@ def _build_pipeline(
     core_mode: str | None = None,
     mxq_path: str | None = None,
     default_single_target_cores: Sequence[str] | None = ("0:0",),
+    dev_no: int | list[int] | None = None,
+    max_batch_size: int | None = None,
 ):
     kwargs = {
         "task": "text-generation",
@@ -335,14 +441,21 @@ def _build_pipeline(
         kwargs["tokenizer"] = tokenizer
     if device_map:
         kwargs["device_map"] = device_map
+    is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path)
     model_kwargs: dict[str, Any] = {}
+    effective_dev_no = dev_no if is_mobilint else None
     model_kwargs = _apply_core_mode_model_kwargs_common(
         model_kwargs,
         core_mode,
         default_single_target_cores=default_single_target_cores,
+        dev_no=effective_dev_no,
     )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
+    if is_mobilint and effective_dev_no is not None:
+        model_kwargs["dev_no"] = effective_dev_no
+    if is_mobilint and max_batch_size is not None and int(max_batch_size) > 1:
+        model_kwargs["max_batch_size"] = int(max_batch_size)
     if model_kwargs:
         kwargs["model_kwargs"] = model_kwargs
     if dtype:
@@ -750,8 +863,32 @@ def _write_single_combined_markdown(
     path: str,
     tps_rows: Sequence[dict[str, Any]],
     device_rows: Sequence[dict[str, float | str | None]],
+    *,
+    skipped_records: Sequence[dict[str, Any]] | None = None,
 ) -> None:
     _write_token_combined_markdown(path, tps_rows, device_rows)
+    if skipped_records:
+        _append_skipped_markdown_section(path, skipped_records)
+
+
+def _append_skipped_markdown_section(path: str, skipped_records: Sequence[dict[str, Any]]) -> None:
+    """Append a "Skipped Targets" section to a combined benchmark Markdown table."""
+    header = "| model | device | batch_size | phase | skipped_reason | detail |"
+    separator = "| --- | --- | ---: | --- | --- | --- |"
+    lines = ["\n\n## Skipped Targets\n\n", header + "\n", separator + "\n"]
+    for record in skipped_records:
+        lines.append(
+            "| {model} | {device} | {batch_size} | {phase} | {reason} | {detail} |\n".format(
+                model=_escape_markdown_cell(str(record.get("model", ""))),
+                device=_escape_markdown_cell(str(record.get("device", ""))),
+                batch_size=record.get("batch_size", ""),
+                phase=_escape_markdown_cell(str(record.get("phase", ""))),
+                reason=_escape_markdown_cell(str(record.get("skipped_reason", ""))),
+                detail=_escape_markdown_cell(str(record.get("detail", ""))),
+            )
+        )
+    with open(path, "a", encoding="utf-8") as f:
+        f.writelines(lines)
 
 
 def _write_text_generation_summary(output_dir: str | Path, *, measure: bool = False) -> None:
@@ -776,11 +913,16 @@ def _write_text_generation_summary(output_dir: str | Path, *, measure: bool = Fa
     )
 
 
-def _rebuild_combined_outputs(output_dir: str | Path) -> None:
+def _rebuild_combined_outputs(
+    output_dir: str | Path,
+    *,
+    skipped_records: Sequence[dict[str, Any]] | None = None,
+) -> None:
     output_dir = Path(output_dir)
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
+    skipped_records = list(skipped_records) if skipped_records else []
     for path in sorted(output_dir.glob("*.json")):
         try:
             with path.open("r", encoding="utf-8") as f:
@@ -822,18 +964,19 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
                 }
             )
 
-    if not combined_results:
+    if not combined_results and not skipped_records:
         print("No existing JSON results matched the current target set. Nothing to aggregate.")
         _write_text_generation_summary(output_dir)
         return
 
     combined_csv = os.path.join(output_dir, "combined.csv")
     combined_md = os.path.join(output_dir, "combined.md")
-    BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
+    BenchmarkResult.write_combined_csv(combined_csv, combined_rows, skipped_records=skipped_records)
     _write_single_combined_markdown(
         combined_md,
         tps_rows=combined_rows,
         device_rows=combined_device_rows,
+        skipped_records=skipped_records,
     )
 
     folder_metrics = collect_folder_metrics(output_dir)
@@ -924,6 +1067,18 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         action="store_const",
         const=_BATCH_MODE_NON_BATCH,
         help="benchmark only non-batch model targets (default)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=_parse_positive_int_optional,
+        default=None,
+        help=(
+            "Optional effective batch dim override. When set, overrides the config "
+            "max_batch_size for both the input batch dim and, on Mobilint targets, "
+            "the max_batch_size model kwarg. On original/upstream targets with "
+            "config max_batch_size=1, passing --batch --batch-size N>1 admits the "
+            "target under batch mode."
+        ),
     )
     parser.add_argument("--model", dest="models", nargs="+", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
@@ -1256,7 +1411,11 @@ def _run_sweep(args: argparse.Namespace) -> int:
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
+    filtered_targets = _filter_text_targets_by_batch_mode(
+        targets,
+        batch_mode=args.batch_mode,
+        override_batch_size=getattr(args, "batch_size", None),
+    )
     run_targets: list[
         tuple[str, list[str | None], str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
     ] = []
@@ -1287,6 +1446,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 )
             )
 
+    skipped_records: list[dict[str, Any]] = []
     for (
         model_id,
         revision_candidates,
@@ -1328,7 +1488,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
             f"batch_mode={batch_mode} batch_size={batch_size} core_mode={core_mode or 'default'} "
             f"revision={revision or 'main'} "
             f"device={target_args.device} device_backend={target_args.device_backend} "
-            f"npu_prefill_chunk_size={args.npu_prefill_chunk_size if args.npu_prefill_chunk_size is not None else 'auto'}"
+            "npu_prefill_chunk_size="
+            f"{args.npu_prefill_chunk_size if args.npu_prefill_chunk_size is not None else 'auto'}"
         )
         print(
             "Sweep config: "
@@ -1365,11 +1526,31 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     core_mode=core_mode,
                     mxq_path=mxq_path,
                     default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+                    dev_no=getattr(args, "dev_no", None),
+                    max_batch_size=batch_size,
                 )
+            except _NPU_ALLOC_ERROR_TYPE as e:
+                _handle_npu_alloc_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                )
+                continue
             except Exception as e:
                 if _is_cuda_oom_error(e):
-                    print(f"Skipping (CUDA OOM while loading model): {e}")
-                    _clear_cuda_memory(target_args.device)
+                    _handle_cuda_oom(
+                        e,
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        pipeline=None,
+                        skipped_records=skipped_records,
+                        phase="load",
+                    )
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
                     _print_exception(
@@ -1428,10 +1609,29 @@ def _run_sweep(args: argparse.Namespace) -> int:
             finally:
                 stop_qbruntime_trace(trace_handle)
             result = _aggregate_benchmark_results(run_results)
+        except _NPU_ALLOC_ERROR_TYPE as e:
+            _handle_npu_alloc_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+            )
+            _release_pipeline(pipeline, target_args.device)
+            continue
         except Exception as e:
             if _is_cuda_oom_error(e):
-                print(f"Skipping (CUDA OOM during benchmark): {e}")
-                _release_pipeline(pipeline, target_args.device)
+                _handle_cuda_oom(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    pipeline=pipeline,
+                    skipped_records=skipped_records,
+                    phase="measure",
+                )
                 continue
             _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
             _release_pipeline(pipeline, target_args.device)
@@ -1642,7 +1842,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
         _release_pipeline(pipeline, target_args.device)
 
-    _rebuild_combined_outputs(output_dir)
+    _rebuild_combined_outputs(output_dir, skipped_records=skipped_records)
 
     return 0
 
@@ -1809,7 +2009,11 @@ def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> No
         plt.close(fig)
 
 
-def _rebuild_measure_outputs(output_dir: str | Path) -> None:
+def _rebuild_measure_outputs(
+    output_dir: str | Path,
+    *,
+    skipped_records: Sequence[dict[str, Any]] | None = None,
+) -> None:
     """Rebuild combined text-generation measure CSV, Markdown, and charts."""
     output_dir = Path(output_dir)
     payloads: list[dict[str, Any]] = []
@@ -1818,18 +2022,45 @@ def _rebuild_measure_outputs(output_dir: str | Path) -> None:
             payload = json.load(f)
         if payload.get("benchmark_type") == "measure":
             payloads.append(payload)
-    if not payloads:
+    skipped_records = list(skipped_records) if skipped_records else []
+    if not payloads and not skipped_records:
         print("No measure JSON results found. Nothing to aggregate.")
         _write_text_generation_summary(output_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
+    if rows:
+        fieldnames = list(rows[0].keys())
+    else:
+        fieldnames = [
+            "model",
+            "batch_mode",
+            "batch_size",
+            "prefill_tokens",
+            "decode_tokens",
+            "repeat",
+            "prefill_tps_mean",
+            "decode_tps_mean",
+        ]
+    if "skipped_reason" not in fieldnames:
+        fieldnames.append("skipped_reason")
     import csv
 
     with (output_dir / "combined_measure.csv").open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow({**row, "skipped_reason": ""})
+        for record in skipped_records:
+            writer.writerow(
+                {
+                    "model": record.get("model", ""),
+                    "batch_size": record.get("batch_size", ""),
+                    "skipped_reason": record.get("skipped_reason", ""),
+                }
+            )
     _write_measure_markdown(output_dir / "combined_measure.md", rows)
+    if skipped_records:
+        _append_skipped_markdown_section(str(output_dir / "combined_measure.md"), skipped_records)
     _plot_measure_charts(output_dir, rows)
     _write_text_generation_summary(output_dir, measure=True)
 
@@ -1869,7 +2100,11 @@ def _collect_text_run_targets(
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
+    filtered_targets = _filter_text_targets_by_batch_mode(
+        targets,
+        batch_mode=args.batch_mode,
+        override_batch_size=getattr(args, "batch_size", None),
+    )
     run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]] = []
     for target in filtered_targets:
         for core_mode in _iter_core_modes_for_target(
@@ -1907,6 +2142,7 @@ def _run_measure(args: argparse.Namespace) -> int:
             "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
         )
     _collect_host_pc_info(output_dir)
+    skipped_records: list[dict[str, Any]] = []
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
@@ -1936,18 +2172,45 @@ def _run_measure(args: argparse.Namespace) -> int:
                     continue
         pipeline = None
         try:
-            pipeline = _build_pipeline(
-                model_id,
-                tokenizer=args.tokenizer,
-                revision=revision,
-                device=target_args.device,
-                device_map=args.device_map,
-                dtype=args.dtype,
-                trust_remote_code=args.trust_remote_code,
-                core_mode=core_mode,
-                mxq_path=mxq_path,
-                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
-            )
+            try:
+                pipeline = _build_pipeline(
+                    model_id,
+                    tokenizer=args.tokenizer,
+                    revision=revision,
+                    device=target_args.device,
+                    device_map=args.device_map,
+                    dtype=args.dtype,
+                    trust_remote_code=args.trust_remote_code,
+                    core_mode=core_mode,
+                    mxq_path=mxq_path,
+                    default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+                    dev_no=getattr(args, "dev_no", None),
+                    max_batch_size=batch_size,
+                )
+            except _NPU_ALLOC_ERROR_TYPE as e:
+                _handle_npu_alloc_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                )
+                continue
+            except Exception as e:
+                if _is_cuda_oom_error(e):
+                    _handle_cuda_oom(
+                        e,
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        pipeline=None,
+                        skipped_records=skipped_records,
+                        phase="load",
+                    )
+                    continue
+                raise
             measurer = TPSMeasurer(pipeline)
             resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
@@ -2079,11 +2342,32 @@ def _run_measure(args: argparse.Namespace) -> int:
             with json_path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             print(f"Saved: {json_path.name}")
+        except _NPU_ALLOC_ERROR_TYPE as e:
+            _handle_npu_alloc_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+            )
         except Exception as e:
-            print(f"Skipping {label} (measure failed): {e}")
+            if _is_cuda_oom_error(e):
+                _handle_cuda_oom(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    pipeline=None,
+                    skipped_records=skipped_records,
+                    phase="measure",
+                )
+            else:
+                print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, target_args.device)
-    _rebuild_measure_outputs(output_dir)
+    _rebuild_measure_outputs(output_dir, skipped_records=skipped_records)
     return 0
 
 

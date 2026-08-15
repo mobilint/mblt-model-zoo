@@ -95,6 +95,34 @@ def parse_int_list_optional(spec: str | None) -> list[int] | None:
     return parse_non_negative_int_list_optional(spec, name="device-gpu-id")
 
 
+def parse_dev_no(spec: str | None) -> int | list[int] | None:
+    """Parse ``--dev-no`` as a scalar int or a comma-separated list of ints.
+
+    A single value (``--dev-no 0``) returns ``int``; a list (``--dev-no 0,1``)
+    returns ``list[int]``. Non-negative integers are required so the value can
+    stand in for the device-prefix component of a canonical NPU target.
+    Mirrors :func:`mblt_model_zoo.cli.tps._parse_dev_no` so benchmark scripts
+    share the same wire form as the ``tps`` CLI.
+    """
+    if spec is None:
+        return None
+    text = str(spec).strip()
+    if not text:
+        return None
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if not parts:
+        return None
+    try:
+        values = [int(p) for p in parts]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--dev-no values must be integers") from exc
+    if any(v < 0 for v in values):
+        raise argparse.ArgumentTypeError("--dev-no values must be >= 0")
+    if len(values) == 1:
+        return values[0]
+    return values
+
+
 def parse_npu_rail_metrics(spec: str | None) -> NpuRailMetrics:
     """Parse NPU rail metrics for mblt-tracker NPU device tracking.
 
@@ -415,6 +443,18 @@ def add_pipeline_device_args(
         "--no-trust-remote-code",
         dest="trust_remote_code",
         action="store_false",
+    )
+    parser.add_argument(
+        "--dev-no",
+        type=parse_dev_no,
+        default=None,
+        help=(
+            "Device-prefix sugar for canonical NPU targets on Mobilint targets. "
+            'Scalar (e.g., "--dev-no 1") pins one device; comma-separated (e.g., '
+            '"--dev-no 0,1,2,3") expands the target set across those devices. '
+            "Silent no-op on non-Mobilint targets so a mixed NPU vs. GPU sweep "
+            "can pass the same argument."
+        ),
     )
 
 
