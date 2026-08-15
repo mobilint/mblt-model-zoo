@@ -661,6 +661,82 @@ def _resolve_cli_batch_size(args: argparse.Namespace, pipeline: Any) -> int:
     return _resolve_model_max_batch_size(pipeline, task=args.task)
 
 
+_BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES = frozenset({"multi", "global4", "global8"})
+
+
+def _probe_config_max_batch_size(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+    task: str,
+) -> int:
+    """Return the config-declared aggregate max batch size, or ``1`` when unavailable.
+
+    Loads ``AutoConfig.from_pretrained(model)`` and reuses
+    :func:`_candidate_max_batch_sizes` so the probe honors task-specific VLM
+    sub-configs. Any resolution failure (missing extras, offline, wrong path)
+    returns ``1`` — the guard then treats the target as a non-batch MXQ and
+    the pipeline-construction path surfaces the real error later.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return 1
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return 1
+    for candidate in _candidate_max_batch_sizes(config, task=task):
+        size = _normalize_max_batch_size(candidate)
+        if size is not None:
+            return size
+    return 1
+
+
+def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
+    """Reject ``--core-mode global4/global8/multi`` on a batched MXQ.
+
+    Batched LLM execution (config ``max_batch_size > 1``) only supports
+    ``--core-mode single`` at runtime; see
+    ``mblt_model_zoo/hf_transformers/README.md`` and the matching enforcement
+    in ``benchmark/transformers/benchmark_text_generation_models.py`` and
+    ``benchmark_image_text_to_text_models.py``. This runs before pipeline
+    construction so users see the same friendly ``SystemExit`` the benchmark
+    scripts raise, rather than a low-level backend error mid-launch.
+
+    Non-batch MXQ (``config.max_batch_size == 1``) with ``--batch-size B > 1``
+    is a separate sw-batch feature and stays unrestricted — sw-batch across
+    ``N`` slots is orthogonal to the batched-MXQ single-only rule.
+    """
+    core_mode = getattr(args, "core_mode", None)
+    if core_mode == "single":
+        return
+    model = getattr(args, "model", None)
+    if not model:
+        return
+    max_batch_size = _probe_config_max_batch_size(
+        model,
+        trust_remote_code=getattr(args, "trust_remote_code", True),
+        revision=getattr(args, "revision", None),
+        task=args.task,
+    )
+    if max_batch_size <= 1:
+        return
+    if core_mode is not None and core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
+        raise SystemExit(
+            f"tps: batched MXQ only supports --core-mode single "
+            f"(model={args.model!r}, config max_batch_size={max_batch_size}, "
+            f"--core-mode={core_mode!r})"
+        )
+    # Match the benchmark-script convention: pin core_mode to ``single`` for
+    # batched MXQ when the user did not pass ``--core-mode`` explicitly.
+    args.core_mode = "single"
+
+
 def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:
     """Return default single-mode target cores for the pipeline construction phase.
 
@@ -1867,6 +1943,7 @@ def _units_for_section(
 def _cmd_measure(args: argparse.Namespace) -> int:
     """Dispatch a single TPS measurement to the text or VLM measurement path."""
     _normalize_task_defaults(args)
+    _enforce_batched_mxq_core_mode_constraint(args)
     if _is_vlm_task(args.task):
         return _run_vlm_measure(args)
     return _run_text_measure(args)
@@ -2771,6 +2848,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
 def _cmd_sweep(args: argparse.Namespace) -> int:
     """Dispatch a TPS sweep to the text or VLM measurement path."""
     _normalize_task_defaults(args)
+    _enforce_batched_mxq_core_mode_constraint(args)
     if _is_vlm_task(args.task):
         return _run_vlm_sweep(args)
     return _run_text_sweep(args)
