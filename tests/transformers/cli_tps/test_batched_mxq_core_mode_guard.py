@@ -340,3 +340,135 @@ def test_probe_mxq_artifact_k_returns_none_for_non_local_path(tmp_path):
     missing = tmp_path / "does_not_exist.mxq"
     assert tps_cli._probe_mxq_artifact_k(str(missing)) is None
     assert tps_cli._probe_mxq_artifact_k("") is None
+
+
+# ---------------------------------------------------------------------------
+# Role-specific core-mode override: --text-core-mode (VLM) and
+# --base-core-mode (EAGLE-3) should be caught here even when the shared
+# --core-mode is unset, because :func:`_apply_vlm_core_mode_model_kwargs`
+# and the EAGLE-3 prefix apply-path later let the role-specific value win.
+# ---------------------------------------------------------------------------
+
+
+class _StubEagle3Config(_StubConfig):
+    """Stub config that ``_is_eagle3_config`` classifies as an EAGLE-3 release."""
+
+    model_type = "eagle3-qwen3"
+
+
+def test_measure_vlm_rejects_text_core_mode_when_bare_core_mode_unset(monkeypatch):
+    """A batched text MXQ under --text-core-mode global4 with no --core-mode must be rejected."""
+    _stub_autoconfig(monkeypatch, _StubConfig(text_config=_StubConfig(max_batch_size=4)))
+
+    args = _parse_tps_measure(
+        "--task",
+        "image-text-to-text",
+        "--text-core-mode",
+        "global4",
+        "--batch-size",
+        "4",
+    )
+    assert args.core_mode is None
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    message = str(excinfo.value)
+    assert "batched MXQ only supports --core-mode single" in message
+    assert "--text-core-mode='global4'" in message
+    assert "config max_batch_size=4" in message
+
+
+def test_measure_eagle3_rejects_base_core_mode_when_bare_core_mode_unset(monkeypatch):
+    """A batched base MXQ under --base-core-mode global4 with no --core-mode must be rejected."""
+    _stub_autoconfig(monkeypatch, _StubEagle3Config(max_batch_size=16))
+
+    args = _parse_tps_measure("--base-core-mode", "global4", "--batch-size", "16")
+    assert args.core_mode is None
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    message = str(excinfo.value)
+    assert "batched MXQ only supports --core-mode single" in message
+    assert "--base-core-mode='global4'" in message
+    assert "config max_batch_size=16" in message
+
+
+def test_measure_vlm_allows_text_core_mode_on_non_batch_text_mxq(monkeypatch):
+    """VLM text MXQ with K==1 keeps its --text-core-mode global4 (regression: no accidental rejection)."""
+    _stub_autoconfig(monkeypatch, _StubConfig(text_config=_StubConfig(max_batch_size=1)))
+
+    args = _parse_tps_measure(
+        "--task",
+        "image-text-to-text",
+        "--text-core-mode",
+        "global4",
+    )
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    assert args.text_core_mode == "global4"
+
+
+def test_measure_vlm_pins_text_core_mode_single_when_batched_and_unspecified(monkeypatch):
+    """Auto-single pin lands on --text-core-mode for VLM so the apply-path stays consistent."""
+    _stub_autoconfig(monkeypatch, _StubConfig(text_config=_StubConfig(max_batch_size=4)))
+
+    args = _parse_tps_measure("--task", "image-text-to-text", "--batch-size", "4")
+    assert args.core_mode is None
+    assert args.text_core_mode is None
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    # The shared flag is what the resolver defaults to when the role-specific one is not set.
+    assert args.core_mode == "single"
+
+
+def test_measure_eagle3_pins_base_core_mode_single_when_batched_and_role_specific_unset(monkeypatch):
+    """Auto-single pin lands on --base-core-mode when EAGLE-3 caller passes only that flag override."""
+    _stub_autoconfig(monkeypatch, _StubEagle3Config(max_batch_size=16))
+
+    args = _parse_tps_measure("--batch-size", "16")
+    assert args.base_core_mode is None
+    assert args.core_mode is None
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    # No role-specific override set, so the resolver picked plain --core-mode.
+    assert args.core_mode == "single"
+
+
+def test_measure_eagle3_prefers_base_core_mode_over_shared_core_mode(monkeypatch):
+    """When both --core-mode and --base-core-mode are set, the guard reports the role-specific flag."""
+    _stub_autoconfig(monkeypatch, _StubEagle3Config(max_batch_size=16))
+
+    args = _parse_tps_measure(
+        "--core-mode",
+        "single",
+        "--base-core-mode",
+        "global4",
+        "--batch-size",
+        "16",
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    message = str(excinfo.value)
+    assert "--base-core-mode='global4'" in message
+
+
+def test_measure_plain_llm_core_mode_flag_label_unchanged(monkeypatch):
+    """Non-VLM, non-EAGLE-3 rejection message still names --core-mode (regression)."""
+    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
+
+    args = _parse_tps_measure("--core-mode", "global4", "--batch-size", "16")
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    message = str(excinfo.value)
+    assert "--core-mode='global4'" in message
+    assert "--text-core-mode" not in message
+    assert "--base-core-mode" not in message

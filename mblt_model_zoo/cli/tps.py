@@ -773,6 +773,36 @@ def _select_llm_mxq_override(args: argparse.Namespace) -> str | None:
     return getattr(args, "mxq_path", None)
 
 
+def _resolve_effective_llm_core_mode(
+    args: argparse.Namespace,
+    *,
+    is_eagle3: bool,
+) -> tuple[str | None, str, str]:
+    """Return the effective LLM-role core mode plus the CLI flag and args attribute it came from.
+
+    Role-specific overrides take precedence over the shared ``--core-mode``
+    for the LLM MXQ that governs batched execution:
+
+    * VLM tasks: ``--text-core-mode`` (falls back to ``--core-mode``).
+    * EAGLE-3 releases: ``--base-core-mode`` (falls back to ``--core-mode``).
+    * Otherwise (plain LLM): ``--core-mode``.
+
+    Returns a tuple of ``(effective_core_mode, flag_label, args_attr)`` so
+    the caller can raise a rejection message that names the flag the user
+    actually passed and pin the same attribute when auto-defaulting to
+    ``single``.
+    """
+    if _is_vlm_task(getattr(args, "task", None)):
+        text_mode = getattr(args, "text_core_mode", None)
+        if text_mode is not None:
+            return text_mode, "--text-core-mode", "text_core_mode"
+    elif is_eagle3:
+        base_mode = getattr(args, "base_core_mode", None)
+        if base_mode is not None:
+            return base_mode, "--base-core-mode", "base_core_mode"
+    return getattr(args, "core_mode", None), "--core-mode", "core_mode"
+
+
 def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     """Reject ``--core-mode global4/global8/multi`` on a batched MXQ.
 
@@ -782,6 +812,13 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     and ``benchmark_image_text_to_text_models.py``. This runs before pipeline
     construction so users see the same friendly ``SystemExit`` the benchmark
     scripts raise, rather than a low-level backend error mid-launch.
+
+    The effective core mode for the LLM MXQ is resolved via
+    :func:`_resolve_effective_llm_core_mode` so role-specific overrides
+    (``--text-core-mode`` for VLM, ``--base-core-mode`` for EAGLE-3) that
+    later win in :func:`_apply_vlm_core_mode_model_kwargs` / the EAGLE-3
+    prefix apply-path are also caught here rather than reaching pipeline
+    construction under a non-single mode.
 
     When the caller overrides the shipped LLM artifact (``--mxq-path`` for
     text generation, ``--base-mxq-path`` for EAGLE-3, ``--text-mxq-path``
@@ -797,11 +834,16 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     is a separate sw-batch feature and stays unrestricted — sw-batch across
     ``N`` slots is orthogonal to the batched-MXQ single-only rule.
     """
-    core_mode = getattr(args, "core_mode", None)
-    if core_mode == "single":
-        return
     model = getattr(args, "model", None)
     if not model:
+        return
+    trust_remote_code = getattr(args, "trust_remote_code", True)
+    revision = getattr(args, "revision", None)
+    is_eagle3 = False
+    if not _is_vlm_task(getattr(args, "task", None)):
+        is_eagle3 = _detect_eagle3_model(model, trust_remote_code=trust_remote_code, revision=revision)
+    effective_core_mode, flag_label, args_attr = _resolve_effective_llm_core_mode(args, is_eagle3=is_eagle3)
+    if effective_core_mode == "single":
         return
     override_path = _select_llm_mxq_override(args)
     max_batch_size: int | None = None
@@ -814,22 +856,25 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     if max_batch_size is None:
         max_batch_size = _probe_config_max_batch_size(
             model,
-            trust_remote_code=getattr(args, "trust_remote_code", True),
-            revision=getattr(args, "revision", None),
+            trust_remote_code=trust_remote_code,
+            revision=revision,
             task=args.task,
         )
     if max_batch_size <= 1:
         return
-    if core_mode is not None and core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
+    if effective_core_mode is not None and effective_core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
         size_label = "artifact K" if size_source == "artifact" else "config max_batch_size"
         raise SystemExit(
             f"tps: batched MXQ only supports --core-mode single "
             f"(model={args.model!r}, {size_label}={max_batch_size}, "
-            f"--core-mode={core_mode!r})"
+            f"{flag_label}={effective_core_mode!r})"
         )
-    # Match the benchmark-script convention: pin core_mode to ``single`` for
-    # batched MXQ when the user did not pass ``--core-mode`` explicitly.
-    args.core_mode = "single"
+    # Match the benchmark-script convention: pin the resolved role-specific
+    # flag to ``single`` for batched MXQ when the user did not pass it
+    # explicitly. Pinning the role-specific attribute (not just ``core_mode``)
+    # keeps :func:`_apply_vlm_core_mode_model_kwargs` and the EAGLE-3 prefix
+    # apply-path from later escalating the LLM MXQ back to a non-single mode.
+    setattr(args, args_attr, "single")
 
 
 def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:
