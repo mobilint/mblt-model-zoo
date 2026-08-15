@@ -1010,33 +1010,41 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             chunk_start: int = 0,
         ) -> tuple[np.ndarray, tuple[int, ...]]:
             n_backend_slots = len(mxq_models)
-            # Multi-slot dispatch requires a MobilintCache so ``slot_of`` can
-            # route each flat row to its owning Model. Absent a cache we
-            # retain the pre-refactor single-slot semantics — the row index
-            # is passed straight through as ``BatchParam.cache_id`` on slot 0
-            # (which is what the compat property did).
-            can_multi_dispatch = (
-                n_backend_slots > 1
-                and past_key_values is not None
-                and hasattr(past_key_values, "slot_of")
-            )
+            # Multi-slot dispatch routes each flat row to its owning Model
+            # via ``(row // K, row % K)``. When ``past_key_values`` is
+            # present its ``slot_of`` is the source of truth (it carries the
+            # cache's own N and K); otherwise (use_cache=False on a
+            # decoder-only forward with labels, for example) we derive the
+            # same mapping from the backend's compiled ``k_per_model``. A
+            # single-slot backend keeps the flat cache_id passthrough on
+            # slot 0.
+            if n_backend_slots > 1:
+                if past_key_values is not None and hasattr(past_key_values, "slot_of"):
+                    def _slot_of(row: int) -> tuple[int, int]:
+                        return past_key_values.slot_of(int(row))
+                else:
+                    k_per_model = max(
+                        1, int(getattr(self.npu_backend, "k_per_model", 1) or 1)
+                    )
 
-            if not can_multi_dispatch:
-                groups: list[tuple[int, list[int], list[int]]] = [
-                    (0, list(range(len(cache_ids_l))), list(cache_ids_l))
-                ]
-            else:
+                    def _slot_of(row: int) -> tuple[int, int]:
+                        return divmod(int(row), k_per_model)
+
                 buckets: dict[int, list[tuple[int, int]]] = {}
                 for k, flat_row in enumerate(cache_ids_l):
-                    model_idx, local_cache_id = past_key_values.slot_of(int(flat_row))
+                    model_idx, local_cache_id = _slot_of(flat_row)
                     buckets.setdefault(model_idx, []).append((k, local_cache_id))
-                groups = [
+                groups: list[tuple[int, list[int], list[int]]] = [
                     (
                         m,
                         [entry[0] for entry in buckets[m]],
                         [entry[1] for entry in buckets[m]],
                     )
                     for m in sorted(buckets.keys())
+                ]
+            else:
+                groups = [
+                    (0, list(range(len(cache_ids_l))), list(cache_ids_l))
                 ]
 
             def _classify_phase() -> Literal["prefill", "decode"]:

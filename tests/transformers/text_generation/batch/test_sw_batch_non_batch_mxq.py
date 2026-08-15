@@ -37,20 +37,24 @@ from tests.transformers._fake_mxq import StaticLastOnlyMxq
 class _MultiSlotFakeBackend:
     """FakeBackend variant that exposes multiple ``qbruntime.Model`` stubs."""
 
-    def __init__(self, mxq_models: List[StaticLastOnlyMxq]) -> None:
+    def __init__(self, mxq_models: List[StaticLastOnlyMxq], k_per_model: int = 1) -> None:
         self.mxq_models = list(mxq_models)
         # ``mxq_model`` compat shim mirrors the multi-slot backend's slot 0.
         self.mxq_model = self.mxq_models[0]
+        # Compiled batch axis probed off slot 0 in the real backend; the
+        # cacheless dispatch path in ``_run_batch_infer`` reads this to derive
+        # ``(row // K, row % K)`` routing when ``past_key_values`` is absent.
+        self.k_per_model = int(k_per_model)
 
 
-def _make_multi_slot_model(mxq_models: List[StaticLastOnlyMxq]) -> MobilintModelMixin:
+def _make_multi_slot_model(mxq_models: List[StaticLastOnlyMxq], k_per_model: int = 1) -> MobilintModelMixin:
     """Construct a bare mixin bound to a multi-Model fake backend."""
     model = MobilintModelMixin.__new__(MobilintModelMixin)
-    model.npu_backend = _MultiSlotFakeBackend(mxq_models)
+    model.npu_backend = _MultiSlotFakeBackend(mxq_models, k_per_model=k_per_model)
     model.config = type(
         "Config",
         (),
-        {"npu_prefill_chunk_size": None, "max_batch_size": len(mxq_models)},
+        {"npu_prefill_chunk_size": None, "max_batch_size": len(mxq_models) * k_per_model},
     )()
     model.npu_time = None
     return model
@@ -87,6 +91,37 @@ def test_multi_model_dispatch_routes_each_row_to_its_owning_model() -> None:
     assert m0.calls[0]["batch"] == [(0, 3, 0)]
     assert m1.calls[0]["batch"] == [(0, 3, 0)]
     # Output preserves caller row order.
+    assert logits.shape == (2, 1, 5)
+
+
+def test_multi_model_dispatch_routes_each_row_to_its_owning_model_without_cache() -> None:
+    """N=2, K=1, ``use_cache=False``: rows must still fan out via ``k_per_model`` when no cache is supplied.
+
+    Regression for the codex P1 in modeling_utils.py: an eval-style forward
+    (batch>1 with labels, so HF omits ``past_key_values``) used to fall out
+    of the multi-slot branch entirely and send every row to slot 0 with the
+    flat batch row as ``cache_id`` — which both overflows the per-slot
+    capacity (``cache_id >= K``) and leaves the other ``N-1`` Models idle.
+    """
+    m0 = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+    m1 = StaticLastOnlyMxq(vocab_size=5, max_width=4)
+    model = _make_multi_slot_model([m0, m1], k_per_model=1)
+
+    inputs_embeds = torch.randn(2, 3, 4, dtype=torch.float32)
+    attention_mask = torch.ones(2, 3, dtype=torch.long)
+
+    logits = model.llm_forward(
+        inputs_embeds=inputs_embeds,
+        past_key_values=None,
+        cache_position=torch.arange(inputs_embeds.shape[1]),
+        attention_mask=attention_mask,
+    )
+
+    # Row 0 -> (m0, local 0), row 1 -> (m1, local 0) via divmod(row, K=1).
+    assert len(m0.calls) == 1 and "batch" in m0.calls[0]
+    assert len(m1.calls) == 1 and "batch" in m1.calls[0]
+    assert m0.calls[0]["batch"] == [(0, 3, 0)]
+    assert m1.calls[0]["batch"] == [(0, 3, 0)]
     assert logits.shape == (2, 1, 5)
 
 
