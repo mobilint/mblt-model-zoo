@@ -17,6 +17,7 @@ from ..utils.cache_utils import (
     MobilintCache,
     MobilintEagle3Cache,
     build_mobilint_cache_from_model,
+    cache_matches_backend_topology,
 )
 from ..utils.modeling_utils import MobilintModelMixin
 
@@ -434,9 +435,15 @@ class MobilintGenerationMixin(ABC, GenerationMixin):
         # The legacy single-Model path still honors ``config.max_batch_size``
         # as a hardware-batch growth request.
         configured_batch_size = max(1, int(getattr(self.config, "max_batch_size", 1)))
-        if not isinstance(getattr(self, "_cache", None), MobilintCache):
+        existing_cache = getattr(self, "_cache", None)
+        if not isinstance(existing_cache, MobilintCache):
             self._cache = build_mobilint_cache_from_model(self, configured_batch_size)
-        elif getattr(self._cache, "batch_size", 1) < configured_batch_size:
+        elif getattr(existing_cache, "batch_size", 1) < configured_batch_size:
+            self._cache = build_mobilint_cache_from_model(self, configured_batch_size)
+        elif not cache_matches_backend_topology(existing_cache, self):
+            # Backend was disposed and re-created with a different (mxq_models,
+            # k_per_model) topology; the cached slot_of / model_of routing is
+            # stale even when the aggregate row capacity happens to match.
             self._cache = build_mobilint_cache_from_model(self, configured_batch_size)
         else:
             self._cache.reset()

@@ -429,6 +429,44 @@ def build_mobilint_cache_from_model(
     return cache
 
 
+def cache_matches_backend_topology(cache: Any, model: Any) -> bool:
+    """Return True when ``cache`` was built for ``model``'s current backend topology.
+
+    Cache reuse across a dispose+recreate cycle must invalidate on any change to
+    ``(mxq_models, k_per_model)`` because :meth:`MobilintCache.slot_of` and
+    :meth:`MobilintCache.model_of` bake that routing in at construction time. Two
+    backends with the same aggregate row capacity (e.g. ``N=2, K=2`` vs
+    ``N=4, K=1``) hand out incompatible ``(model_idx, cache_id)`` pairs, so a
+    reuse guard that only checks ``batch_size`` would silently misroute rows.
+
+    Legacy single-Model fallback (no discoverable multi-slot backend): the cache
+    was built via ``cache_cls(mxq_model, batch_size=B)`` and may have grown via
+    :meth:`MobilintCache.ensure_batch_size`, so only the Model handle identity
+    is compared and ``k_per_model`` growth is left to the caller's capacity check.
+    """
+    if not isinstance(cache, MobilintCache):
+        return False
+
+    backend = resolve_multi_slot_backend(model)
+    if backend is not None:
+        backend_mxq_models = list(getattr(backend, "mxq_models", []) or [])
+        backend_k_per_model = int(getattr(backend, "k_per_model", 1) or 1)
+        if cache.k_per_model != backend_k_per_model:
+            return False
+    else:
+        fallback_mxq_model = resolve_cache_mxq_model(model)
+        if fallback_mxq_model is None:
+            return False
+        backend_mxq_models = [fallback_mxq_model]
+
+    if len(cache.mxq_models) != len(backend_mxq_models):
+        return False
+    for cached_model, backend_model in zip(cache.mxq_models, backend_mxq_models):
+        if cached_model is not backend_model:
+            return False
+    return True
+
+
 class MobilintBeamCache(MobilintCache):
     """Mobilint beam cache tracked by token histories instead of KV snapshots.
 

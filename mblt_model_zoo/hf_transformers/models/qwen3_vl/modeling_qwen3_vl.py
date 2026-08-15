@@ -19,7 +19,11 @@ from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintDeepStackCache, build_mobilint_cache_from_model
+from ...utils.cache_utils import (
+    MobilintDeepStackCache,
+    build_mobilint_cache_from_model,
+    cache_matches_backend_topology,
+)
 from ...utils.generation_utils import (
     MobilintGenerationMixin,
     build_loss_kwargs_dynamic,
@@ -777,12 +781,16 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         """
         del cache_implementation, batch_size, max_cache_len, args
         configured_batch_size = max(1, int(getattr(self.config, "max_batch_size", 1)))
+        existing_cache = getattr(self, "_cache", None)
         needs_new_cache = (
-            not hasattr(self, "_cache")
-            or not isinstance(self._cache, MobilintDeepStackCache)
-            or getattr(self._cache, "batch_size", 1) < configured_batch_size
-            or self._cache.num_deepstack_layers != self.num_deepstack_layers
-            or self._cache.hidden_size != int(self.config.hidden_size)
+            not isinstance(existing_cache, MobilintDeepStackCache)
+            or getattr(existing_cache, "batch_size", 1) < configured_batch_size
+            or existing_cache.num_deepstack_layers != self.num_deepstack_layers
+            or existing_cache.hidden_size != int(self.config.hidden_size)
+            # A dispose+relaunch of the text backend can swap the (mxq_models,
+            # k_per_model) topology while preserving the aggregate row capacity;
+            # the cached slot routing must be rebuilt from the current slots.
+            or not cache_matches_backend_topology(existing_cache, self)
         )
         if needs_new_cache:
             self._cache = build_mobilint_cache_from_model(
