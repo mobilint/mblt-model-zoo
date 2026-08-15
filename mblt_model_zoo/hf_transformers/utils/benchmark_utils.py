@@ -1937,9 +1937,12 @@ class VLMTPSMeasurer:
             _apply_eagle3_gen_kwargs(gen_kwargs, gen_model)
             device_sync = _make_device_sync_callable(inputs_embeds.device)
             phase_callbacks = _GenerationPhaseCallbacks(sync_before_timestamp=device_sync)
+            # HF ``generate`` seeds bookkeeping ``input_ids`` at shape ``(batch, 0)`` when only
+            # ``inputs_embeds`` is passed, so the first-generated-token marker must compare
+            # against zero rather than the embedding-prompt length.
             _with_first_token_stopping_criteria(
                 gen_kwargs,
-                prompt_length=seq_len,
+                prompt_length=0,
                 phase_callbacks=phase_callbacks,
             )
             if device_sync is not None:
@@ -1957,7 +1960,10 @@ class VLMTPSMeasurer:
                 phase_callbacks.close_on_error()
                 raise
             if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2:
-                generated_per_row = max(int(outputs.shape[1]) - seq_len, 0)
+                # HF ``generate`` returns only the generated token IDs when it was invoked
+                # with ``inputs_embeds`` (no ``input_ids``), so ``outputs.shape[1]`` already
+                # equals the per-row generated-token count — do not subtract ``seq_len``.
+                generated_per_row = max(int(outputs.shape[1]), 0)
             else:
                 generated_per_row = num_decode + 1
             decode_count = max(generated_per_row - 1, 0)

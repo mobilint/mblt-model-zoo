@@ -262,7 +262,14 @@ class _DummyVLMModel:
 
 
 class _DummyBatchedVLMModel:
-    """Minimal batched VLM generation model returning prompt plus generated tokens."""
+    """Minimal batched VLM generation model returning generated tokens only.
+
+    Real HF ``generate`` invoked with only ``inputs_embeds`` (no ``input_ids``) returns
+    a tensor of shape ``(batch, num_new_tokens)`` — the prompt is not included because
+    bookkeeping ``input_ids`` are seeded at length zero. The stopping-criteria hook is
+    called with ``input_ids`` that grow from length one, so the double invokes it once
+    to exercise the first-generated-token phase marker.
+    """
 
     def __init__(self, language_model: _DummyVLMLanguageModel, generated_tokens: int) -> None:
         self.device = torch.device("cpu")
@@ -272,10 +279,14 @@ class _DummyBatchedVLMModel:
         self.generated_tokens = generated_tokens
 
     def generate(self, **kwargs) -> torch.Tensor:
-        """Return token ids whose length includes the prompt prefix."""
+        """Return generated-only token ids, mirroring HF ``inputs_embeds``-only generate."""
         inputs_embeds = kwargs["inputs_embeds"]
-        batch_size, seq_len = int(inputs_embeds.shape[0]), int(inputs_embeds.shape[1])
-        return torch.zeros((batch_size, seq_len + self.generated_tokens), dtype=torch.long)
+        batch_size = int(inputs_embeds.shape[0])
+        generated = int(self.generated_tokens)
+        stopping_criteria = kwargs.get("stopping_criteria")
+        if stopping_criteria is not None and generated > 0:
+            stopping_criteria(torch.zeros((batch_size, 1), dtype=torch.long), None)
+        return torch.zeros((batch_size, generated), dtype=torch.long)
 
 
 class _DummyVLMTPSMeasurer(VLMTPSMeasurer):
@@ -1262,7 +1273,11 @@ def test_vlm_fake_prefill_decode_counts_each_decode_token():
     assert result.avg_npu_decode_token_latency == pytest.approx(0.25)
 
 
-def test_vlm_batched_llm_decode_count_subtracts_prompt_length():
+def test_vlm_batched_llm_decode_count_matches_generated_token_count():
+    """HF ``generate`` with only ``inputs_embeds`` returns ``(batch, num_new_tokens)``, so
+    ``_measure_llm_once`` must count ``outputs.shape[1]`` directly rather than subtracting
+    the embedding-prompt length.
+    """
     language_model = _DummyVLMLanguageModel()
     num_decode = 4
     measurer = _DummyBatchedVLMTPSMeasurer(language_model, generated_tokens=num_decode + 1)
@@ -1273,6 +1288,53 @@ def test_vlm_batched_llm_decode_count_subtracts_prompt_length():
     assert result.num_prefill == 8
     assert result.num_decode == num_decode
     assert result.decode_tps > 0.0
+
+
+def test_vlm_batched_llm_derives_phase_boundary_without_npu_timing():
+    """VLM batched ``_measure_llm_once`` on a non-NPU-timed backend must split prefill and
+    decode at the first-generated-token callback rather than attributing the full wall
+    clock to both phases. The stopping criteria sees ``input_ids`` seeded at zero when
+    ``inputs_embeds`` is passed without ``input_ids``, so ``prompt_length=0`` is required
+    for the marker to fire.
+    """
+    import time
+
+    class _PhasedBatchedVLMModel(_DummyBatchedVLMModel):
+        """VLM model double whose generate mimics a real prefill/decode phase gap."""
+
+        def generate(self, **kwargs) -> torch.Tensor:
+            inputs_embeds = kwargs["inputs_embeds"]
+            batch_size = int(inputs_embeds.shape[0])
+            generated = int(self.generated_tokens)
+            # Simulate the prefill phase compute window.
+            time.sleep(0.02)
+            stopping_criteria = kwargs.get("stopping_criteria")
+            if stopping_criteria is not None and generated > 0:
+                # After the first generated token, HF bookkeeping input_ids have length 1.
+                stopping_criteria(torch.zeros((batch_size, 1), dtype=torch.long), None)
+            # Simulate the decode phase compute window.
+            time.sleep(0.04)
+            return torch.zeros((batch_size, generated), dtype=torch.long)
+
+    language_model = _DummyVLMLanguageModel()
+    num_decode = 4
+    measurer = _DummyBatchedVLMTPSMeasurer(language_model, generated_tokens=num_decode + 1)
+    measurer.model = _PhasedBatchedVLMModel(language_model, generated_tokens=num_decode + 1)
+    inputs_embeds = torch.zeros((2, 8, 4), dtype=torch.float32)
+
+    result = measurer._measure_llm_once(inputs_embeds, num_decode=num_decode)
+
+    assert result.num_prefill == 8
+    assert result.num_decode == num_decode
+    assert result.prefill_latency > 0.0
+    assert result.decode_duration > 0.0
+    # Phases must not both equal the full wall clock (the bug this test guards against).
+    assert result.prefill_latency < result.total_time
+    assert result.decode_duration < result.total_time
+    # Prefill + decode should closely account for the total wall clock.
+    assert result.prefill_latency + result.decode_duration == pytest.approx(result.total_time, abs=5e-3)
+    # The simulated decode window is longer than the prefill window.
+    assert result.decode_duration > result.prefill_latency
 
 
 def test_vlm_measure_vision_reports_per_image_latency_for_batch():
@@ -1353,10 +1415,7 @@ def test_batched_generate_derives_phase_boundary_without_npu_timing():
     assert result.prefill_latency < result.total_time
     assert result.decode_duration < result.total_time
     # Prefill + decode should closely account for the total wall clock.
-    assert (
-        result.prefill_latency + result.decode_duration
-        == pytest.approx(result.total_time, abs=5e-3)
-    )
+    assert result.prefill_latency + result.decode_duration == pytest.approx(result.total_time, abs=5e-3)
     # The simulated decode window is longer than the prefill window.
     assert result.decode_duration > result.prefill_latency
 
