@@ -136,7 +136,27 @@ def _resolve_npu_alloc_error_type() -> type[BaseException]:
     return MobilintBackendAllocError
 
 
+def _resolve_npu_runtime_error_type() -> type[BaseException]:
+    """Return :class:`qbruntime.QbRuntimeError` when ``qbruntime`` is importable.
+
+    Falls back to :class:`_UnreachableAllocError` so
+    ``except _NPU_RUNTIME_ERROR_TYPE`` is a no-op on hosts without the
+    NPU runtime installed. Used to catch non-alloc ``QbRuntimeError``
+    failures (invalid MXQ, bad target config, corrupted artifact, ...)
+    surfaced by :meth:`MobilintNPUBackend.create` / ``.launch`` after the
+    BadAlloc split — those errors would otherwise fall into the generic
+    ``except Exception`` handler and never be persisted to the skipped
+    sidecar.
+    """
+    try:
+        from qbruntime import QbRuntimeError
+    except Exception:
+        return _UnreachableAllocError
+    return QbRuntimeError
+
+
 _NPU_ALLOC_ERROR_TYPE: type[BaseException] = _resolve_npu_alloc_error_type()
+_NPU_RUNTIME_ERROR_TYPE: type[BaseException] = _resolve_npu_runtime_error_type()
 
 _SKIPPED_SIDECAR_FILENAME = "skipped_records.json"
 
@@ -247,6 +267,44 @@ def _handle_npu_alloc_error(
             "skipped_reason": reason,
             "detail": _format_exception(exc),
             **{f"npu_{k}": v for k, v in context.items() if v is not None},
+        }
+    )
+    _write_skipped_sidecar(output_dir, skipped_records)
+
+
+def _handle_npu_runtime_error(
+    exc: BaseException,
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    debug_errors: bool,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+    output_dir: str | Path,
+) -> None:
+    """Log a structured Mobilint NPU non-alloc runtime skip record.
+
+    Distinct from :func:`_handle_npu_alloc_error`: the alloc handler wraps
+    device-memory ``BadAlloc`` failures with slot/dev/n_total context and
+    tells the user to lower ``max_batch_size``. This handler catches every
+    other :class:`~qbruntime.QbRuntimeError` (invalid MXQ, bad target
+    configuration, corrupted artifact, missing runtime dependency, ...) so
+    the failure is persisted with ``skipped_reason="npu_runtime"`` instead
+    of being lost in the generic ``except Exception`` catch-all.
+    """
+    reason = "npu_runtime"
+    print(f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase}: {exc}")
+    if debug_errors:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+    skipped_records.append(
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": _format_exception(exc),
         }
     )
     _write_skipped_sidecar(output_dir, skipped_records)
@@ -1646,6 +1704,18 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     output_dir=output_dir,
                 )
                 continue
+            except _NPU_RUNTIME_ERROR_TYPE as e:
+                _handle_npu_runtime_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                    output_dir=output_dir,
+                )
+                continue
             except Exception as e:
                 if _is_cuda_oom_error(e):
                     _handle_cuda_oom(
@@ -1718,6 +1788,19 @@ def _run_sweep(args: argparse.Namespace) -> int:
             result = _aggregate_benchmark_results(run_results)
         except _NPU_ALLOC_ERROR_TYPE as e:
             _handle_npu_alloc_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+                output_dir=output_dir,
+            )
+            _release_pipeline(pipeline, target_args.device)
+            continue
+        except _NPU_RUNTIME_ERROR_TYPE as e:
+            _handle_npu_runtime_error(
                 e,
                 label=label,
                 device=target_args.device,
@@ -2315,6 +2398,18 @@ def _run_measure(args: argparse.Namespace) -> int:
                     output_dir=output_dir,
                 )
                 continue
+            except _NPU_RUNTIME_ERROR_TYPE as e:
+                _handle_npu_runtime_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                    output_dir=output_dir,
+                )
+                continue
             except Exception as e:
                 if _is_cuda_oom_error(e):
                     _handle_cuda_oom(
@@ -2462,6 +2557,17 @@ def _run_measure(args: argparse.Namespace) -> int:
             print(f"Saved: {json_path.name}")
         except _NPU_ALLOC_ERROR_TYPE as e:
             _handle_npu_alloc_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+                output_dir=output_dir,
+            )
+        except _NPU_RUNTIME_ERROR_TYPE as e:
+            _handle_npu_runtime_error(
                 e,
                 label=label,
                 device=target_args.device,

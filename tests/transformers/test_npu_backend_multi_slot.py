@@ -23,6 +23,7 @@ from mblt_model_zoo.utils import npu_backend as npu_backend_module
 from mblt_model_zoo.utils.npu_backend import (
     MobilintBackendAllocError,
     MobilintNPUBackend,
+    _is_qbruntime_bad_alloc,
 )
 
 
@@ -102,6 +103,11 @@ class _StubQbRuntime:
         self.models: List[_FakeModel] = []
         self.create_should_fail_at: int | None = None
         self.launch_should_fail_at: int | None = None
+        # Default create/launch failure messages mimic the qbruntime BadAlloc
+        # text so the historical BadAlloc-only test cases still exercise the
+        # allocation path. Non-alloc tests override these to a benign message.
+        self.create_failure_message: str = "BadAlloc: device out of memory"
+        self.launch_failure_message: str = "BadAlloc: device out of memory"
         self.k_per_model: int = 1
 
 
@@ -113,14 +119,14 @@ def stub_qbruntime(monkeypatch: pytest.MonkeyPatch) -> _StubQbRuntime:
     def _model_factory(path: str, mc: _FakeModelConfig) -> _FakeModel:
         idx = len(stub.models)
         if stub.create_should_fail_at is not None and idx == stub.create_should_fail_at:
-            raise QbRuntimeError(f"stub create failure at slot {idx}")
+            raise QbRuntimeError(stub.create_failure_message)
         model = _FakeModel(path, mc, k=stub.k_per_model)
         if stub.launch_should_fail_at is not None:
             slot_idx = idx
 
             def _failing_launch(acc: _FakeAccelerator, slot_idx: int = slot_idx) -> None:
                 if slot_idx == stub.launch_should_fail_at:
-                    raise QbRuntimeError(f"stub launch failure at slot {slot_idx}")
+                    raise QbRuntimeError(stub.launch_failure_message)
                 model.launched_on = acc
 
             model.launch = _failing_launch  # type: ignore[assignment]
@@ -246,6 +252,67 @@ def test_backend_launch_badalloc_rolls_back_earlier_slots(tmp_path, stub_qbrunti
     assert err.n_total == 2
     assert isinstance(err.original, QbRuntimeError)
     # Rollback disposes every slot including the one that already launched.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert all(m.disposed for m in stub_qbruntime.models)
+
+
+def test_is_qbruntime_bad_alloc_predicate_matches_common_variants() -> None:
+    """The predicate must ignore case and interior whitespace on the ``BadAlloc`` token."""
+    assert _is_qbruntime_bad_alloc(QbRuntimeError("BadAlloc: device out of memory"))
+    assert _is_qbruntime_bad_alloc(QbRuntimeError("qbruntime: badalloc"))
+    assert _is_qbruntime_bad_alloc(QbRuntimeError("Bad Alloc: OOM"))
+    assert not _is_qbruntime_bad_alloc(QbRuntimeError("invalid mxq artifact"))
+    assert not _is_qbruntime_bad_alloc(QbRuntimeError("target core does not exist"))
+    assert not _is_qbruntime_bad_alloc(QbRuntimeError(""))
+
+
+def test_backend_create_non_alloc_error_reraises_unchanged(tmp_path, stub_qbruntime) -> None:
+    """A create-phase non-BadAlloc QbRuntimeError must propagate raw and clean up state.
+
+    Regression: previously every ``QbRuntimeError`` was wrapped as
+    :class:`MobilintBackendAllocError`, so an invalid MXQ / incompatible target
+    config surfaced as a memory-pressure skip and the caller was told to lower
+    ``max_batch_size`` — misleading and useless. Non-alloc errors must instead
+    be re-raised unchanged so the caller can act on the real failure.
+    """
+    stub_qbruntime.create_should_fail_at = 1
+    stub_qbruntime.create_failure_message = "invalid mxq artifact: mismatched compile target"
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+
+    with pytest.raises(QbRuntimeError) as excinfo:
+        backend.create()
+
+    assert not isinstance(excinfo.value, MobilintBackendAllocError)
+    assert "invalid mxq artifact" in str(excinfo.value)
+    # Partial state must still be cleaned up so a retry does not double-load.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert stub_qbruntime.models[0].disposed is True
+
+
+def test_backend_launch_non_alloc_error_reraises_unchanged(tmp_path, stub_qbruntime) -> None:
+    """A launch-phase non-BadAlloc QbRuntimeError must propagate raw and clean up state."""
+    stub_qbruntime.launch_should_fail_at = 1
+    stub_qbruntime.launch_failure_message = "cannot bind cores: driver refused target"
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+    backend.create()
+
+    with pytest.raises(QbRuntimeError) as excinfo:
+        backend.launch()
+
+    assert not isinstance(excinfo.value, MobilintBackendAllocError)
+    assert "cannot bind cores" in str(excinfo.value)
     assert backend.mxq_models == []
     assert backend.accs == {}
     assert all(m.disposed for m in stub_qbruntime.models)

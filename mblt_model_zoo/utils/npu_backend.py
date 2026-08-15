@@ -27,6 +27,7 @@ import logging
 import math
 import os
 import re
+import sys
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from huggingface_hub import HfApi, hf_hub_download
@@ -44,8 +45,32 @@ from .npu_target import (
 logger = logging.getLogger(__name__)
 
 
+def _is_qbruntime_bad_alloc(exc: BaseException) -> bool:
+    """Return True when ``exc`` looks like a device-memory ``BadAlloc`` failure.
+
+    ``qbruntime`` exposes a single :class:`~qbruntime.QbRuntimeError` class for
+    every runtime failure it can raise (device-memory ``BadAlloc``, invalid
+    MXQ artifact, incompatible target configuration, corrupted artifact,
+    missing runtime dependency, ...). The ``BadAlloc`` signal only lives
+    inside the error message, so we detect it by looking for the
+    ``BadAlloc`` token case-insensitively and ignoring interior whitespace to
+    be resilient to slight formatting differences across ``qbruntime``
+    versions. Isolated as a helper so a future ``BadAllocError`` subclass can
+    replace this check in one place.
+    """
+    message = str(exc) if exc is not None else ""
+    return "badalloc" in message.lower().replace(" ", "")
+
+
 class MobilintBackendAllocError(RuntimeError):
     """Raised when a multi-slot backend fails to create or launch a slot.
+
+    Only fires for ``qbruntime`` device-memory ``BadAlloc`` failures. Any
+    other :class:`~qbruntime.QbRuntimeError` (invalid MXQ, bad target
+    configuration, corrupted artifact, missing runtime dependency, ...) is
+    re-raised unchanged from :meth:`MobilintNPUBackend.create` and
+    :meth:`MobilintNPUBackend.launch` so callers can distinguish a memory
+    ceiling from a user-config or artifact bug.
 
     Carries enough context (phase, slot index, device, how many slots had
     already succeeded, current sizing knobs) to help the caller locate the
@@ -603,6 +628,9 @@ class MobilintNPUBackend:
         try:
             infos = mxq_model.get_cache_infos()
         except (AttributeError, QbRuntimeError) as exc:
+            # Best-effort probe: any qbruntime failure here (BadAlloc or not)
+            # is non-fatal — we fall back to K=1 rather than propagate,
+            # because the caller can still run with a conservative slot count.
             logger.warning("Failed to probe k_per_model from get_cache_infos: %s", exc)
             return 1
         if not infos:
@@ -639,13 +667,20 @@ class MobilintNPUBackend:
         The MXQ artifact is resolved via :meth:`check_model_path` exactly
         once; the resolved path is reused by every subsequent slot.
 
-        On any :class:`~qbruntime.QbRuntimeError` (typically a device-memory
-        ``BadAlloc``), every previously loaded slot is disposed and the
-        failure is rethrown as :class:`MobilintBackendAllocError` with slot /
-        device / progress context.
+        On a device-memory ``BadAlloc`` (see :func:`_is_qbruntime_bad_alloc`),
+        every previously loaded slot is disposed and the failure is rethrown
+        as :class:`MobilintBackendAllocError` with slot / device / progress
+        context. Any other :class:`~qbruntime.QbRuntimeError` (invalid MXQ
+        artifact, incompatible target configuration, corrupted artifact,
+        missing runtime dependency, ...) triggers the same partial-state
+        rollback but is re-raised unchanged so the caller can distinguish
+        a memory ceiling from a user-config or artifact bug.
 
         Raises:
-            MobilintBackendAllocError: If any slot fails to load.
+            MobilintBackendAllocError: If any slot hits a device-memory
+                ``BadAlloc``.
+            QbRuntimeError: If any slot fails for a non-alloc reason (after
+                partial-state rollback).
             ValueError: If ``self.core_mode`` is not one of the supported
                 values.
             AssertionError: If ``"global8"`` mode is requested but a device
@@ -678,16 +713,26 @@ class MobilintNPUBackend:
                 planned = max(self.n_models, slot_idx + 1)
                 self._dispose_all_slots()
                 self.accs = {}
-                raise MobilintBackendAllocError(
-                    phase="create",
-                    slot=slot_idx,
-                    dev=int(dev),
-                    succeeded_so_far=succeeded,
-                    n_total=planned,
-                    max_batch_size=self.max_batch_size,
-                    k_per_model=self.k_per_model,
-                    original=exc,
-                ) from exc
+                if _is_qbruntime_bad_alloc(exc):
+                    raise MobilintBackendAllocError(
+                        phase="create",
+                        slot=slot_idx,
+                        dev=int(dev),
+                        succeeded_so_far=succeeded,
+                        n_total=planned,
+                        max_batch_size=self.max_batch_size,
+                        k_per_model=self.k_per_model,
+                        original=exc,
+                    ) from exc
+                # Non-alloc runtime failure (invalid MXQ, bad target config,
+                # corrupted artifact, ...). Report progress on stderr so the
+                # caller sees which slot broke, then re-raise unchanged.
+                print(
+                    f"[Mobilint] NPU backend create failed at slot {slot_idx} on device {dev} "
+                    f"(succeeded {succeeded}/{planned}); re-raising qbruntime error unchanged.",
+                    file=sys.stderr,
+                )
+                raise
             self.mxq_models.append(m)
             self.model_dev_no.append(int(dev))
             return m
@@ -710,10 +755,21 @@ class MobilintNPUBackend:
     def launch(self) -> None:
         """Launch every loaded slot on its assigned accelerator.
 
-        Must be called after :meth:`create`. On any
-        :class:`~qbruntime.QbRuntimeError`, every previously launched slot
+        Must be called after :meth:`create`. On a device-memory ``BadAlloc``
+        (see :func:`_is_qbruntime_bad_alloc`), every previously launched slot
         is disposed and the failure is rethrown as
-        :class:`MobilintBackendAllocError`.
+        :class:`MobilintBackendAllocError`. Any other
+        :class:`~qbruntime.QbRuntimeError` (invalid MXQ, bad target
+        configuration, corrupted artifact, missing runtime dependency, ...)
+        triggers the same partial-state rollback but is re-raised unchanged
+        so the caller can distinguish a real memory ceiling from a
+        user-config or artifact bug.
+
+        Raises:
+            MobilintBackendAllocError: If any slot hits a device-memory
+                ``BadAlloc`` while launching.
+            QbRuntimeError: If any slot fails to launch for a non-alloc
+                reason (after partial-state rollback).
         """
         for i, m in enumerate(self.mxq_models):
             d = self.model_dev_no[i]
@@ -722,16 +778,25 @@ class MobilintNPUBackend:
             except QbRuntimeError as exc:
                 self._dispose_all_slots()
                 self.accs = {}
-                raise MobilintBackendAllocError(
-                    phase="launch",
-                    slot=i,
-                    dev=int(d),
-                    succeeded_so_far=i,
-                    n_total=self.n_models,
-                    max_batch_size=self.max_batch_size,
-                    k_per_model=self.k_per_model,
-                    original=exc,
-                ) from exc
+                if _is_qbruntime_bad_alloc(exc):
+                    raise MobilintBackendAllocError(
+                        phase="launch",
+                        slot=i,
+                        dev=int(d),
+                        succeeded_so_far=i,
+                        n_total=self.n_models,
+                        max_batch_size=self.max_batch_size,
+                        k_per_model=self.k_per_model,
+                        original=exc,
+                    ) from exc
+                # Non-alloc runtime failure — see :meth:`create` for the
+                # rationale. Report progress on stderr then re-raise unchanged.
+                print(
+                    f"[Mobilint] NPU backend launch failed at slot {i} on device {d} "
+                    f"(succeeded {i}/{self.n_models}); re-raising qbruntime error unchanged.",
+                    file=sys.stderr,
+                )
+                raise
 
     def __call__(self, x):
         """Runs inference on slot 0.
@@ -859,6 +924,9 @@ class MobilintNPUBackend:
         try:
             shapes = first.get_model_output_shape()
         except (AttributeError, QbRuntimeError) as exc:
+            # Best-effort probe: any qbruntime failure here (BadAlloc or not)
+            # is non-fatal — the dispatcher's runtime fallback pins the layout
+            # from the first unambiguous group instead.
             logger.debug("output_layout: get_model_output_shape unavailable (%s)", exc)
             return None
         if not shapes:
