@@ -919,7 +919,13 @@ def test_build_pipeline_vlm_gates_text_max_batch_size(monkeypatch) -> None:
 
 
 def test_build_pipeline_eagle3_gates_base_max_batch_size(monkeypatch) -> None:
-    """EAGLE-3 path uses ``base_max_batch_size`` and must gate on the Mobilint check."""
+    """EAGLE-3 path uses ``base_max_batch_size`` and must gate on the Mobilint check.
+
+    Uses ``max_batch_size=1`` because EAGLE-3 releases reject batch > 1 upstream
+    (see ``test_build_pipeline_eagle3_rejects_bare_max_batch_size_gt_one``); the
+    forwarding path itself must still route the single-slot capacity through the
+    prefixed ``base_max_batch_size`` setter.
+    """
     captured = _capture_pipeline_kwargs(monkeypatch)
     monkeypatch.setattr(
         tps_cli,
@@ -943,11 +949,11 @@ def test_build_pipeline_eagle3_gates_base_max_batch_size(monkeypatch) -> None:
         target_cores=None,
         target_clusters=None,
         default_single_target_cores=None,
-        max_batch_size=8,
+        max_batch_size=1,
     )
 
     model_kwargs = captured.get("model_kwargs", {})
-    assert model_kwargs.get("base_max_batch_size") == 8
+    assert model_kwargs.get("base_max_batch_size") == 1
     assert "max_batch_size" not in model_kwargs
 
 
@@ -1065,12 +1071,13 @@ def test_build_pipeline_non_eagle3_keeps_unprefixed_dev_no(monkeypatch) -> None:
     assert pipe.model_kwargs == {"dev_no": 1}
 
 
-def test_build_pipeline_eagle3_broadcasts_bare_max_batch_size(monkeypatch) -> None:
-    """A global --batch-size on an EAGLE-3 release must forward as ``base_max_batch_size``.
+def test_build_pipeline_eagle3_forwards_bare_max_batch_size_at_one(monkeypatch) -> None:
+    """A ``--batch-size 1`` on an EAGLE-3 release still routes through ``base_max_batch_size``.
 
     ``MobilintEagle3ConfigMixin`` only exposes prefixed max_batch_size setters, so an
-    unprefixed ``max_batch_size`` model kwarg would otherwise be silently dropped and the
-    base backend would launch at its configured capacity instead of the requested batch.
+    unprefixed ``max_batch_size`` model kwarg would otherwise be silently dropped.
+    Batch > 1 is rejected upstream (EAGLE-3 ``generate`` hard-fails); the single-slot
+    forwarding path itself must still land on the prefixed setter.
     """
     captured = _capture_pipeline_kwargs(monkeypatch)
     monkeypatch.setattr(
@@ -1100,12 +1107,215 @@ def test_build_pipeline_eagle3_broadcasts_bare_max_batch_size(monkeypatch) -> No
         target_cores=None,
         target_clusters=None,
         default_single_target_cores=None,
-        max_batch_size=4,
+        max_batch_size=1,
     )
 
     model_kwargs = captured.get("model_kwargs", {})
-    assert model_kwargs.get("base_max_batch_size") == 4
+    assert model_kwargs.get("base_max_batch_size") == 1
     assert "max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_eagle3_rejects_bare_max_batch_size_gt_one(monkeypatch) -> None:
+    """A bare ``--batch-size B > 1`` on an EAGLE-3 release fails fast before pipeline construction.
+
+    ``MobilintEagle3GenerationMixin.generate`` hard-fails on ``input_ids.shape[0] != 1``
+    (see ``mblt_model_zoo/hf_transformers/utils/generation_utils.py``), so allocating a
+    larger base backend would waste device memory for a run that cannot succeed.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"),
+        "pipeline",
+        lambda **kwargs: pytest.fail("pipeline() should not be reached when EAGLE-3 rejection fires"),
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/eagle3",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            max_batch_size=4,
+        )
+
+    message = str(excinfo.value)
+    assert "EAGLE-3 releases only support batch size 1" in message
+    assert "--batch-size=4" in message
+    assert "dummy/eagle3" in message
+
+
+def test_build_pipeline_eagle3_rejects_prefixed_sugar_with_batch_gt_one(monkeypatch) -> None:
+    """Prefixed EAGLE-3 sugar plus ``--batch-size B > 1`` is rejected without loading the config."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"),
+        "pipeline",
+        lambda **kwargs: pytest.fail("pipeline() should not be reached when EAGLE-3 rejection fires"),
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda *args, **kwargs: pytest.fail(
+            "_detect_eagle3_model should not run when prefixed EAGLE-3 options are set"
+        ),
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._build_pipeline(
+            task="text-generation",
+            model="mobilint/EAGLE3-Qwen3-4B",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(base_mxq_path="base.mxq"),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            max_batch_size=2,
+        )
+
+    assert "EAGLE-3 releases only support batch size 1" in str(excinfo.value)
+
+
+def test_build_pipeline_eagle3_accepts_batch_size_one(monkeypatch) -> None:
+    """``--batch-size 1`` (or unset) on an EAGLE-3 release must not be rejected."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/eagle3",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=1,
+    )
+
+
+def test_build_pipeline_non_eagle3_allows_batch_gt_one(monkeypatch) -> None:
+    """A ``--batch-size B > 1`` on a non-EAGLE-3 release must NOT be rejected (regression guard)."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/Qwen3-4B-W4V8",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    assert pipe.model_kwargs.get("max_batch_size") == 4
+    assert "base_max_batch_size" not in pipe.model_kwargs
+
+
+def test_build_pipeline_vlm_allows_batch_gt_one_with_eagle3_detected(monkeypatch) -> None:
+    """VLM path is on ``text_max_batch_size``; the EAGLE-3 rejection must not fire for VLM tasks."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    # VLM path skips EAGLE-3 detection (``_eagle3_broadcast_needed`` short-circuits on VLM),
+    # but even if it somehow ran, the guard must exclude VLM tasks.
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=2,
+    )
+
+    assert pipe.model_kwargs.get("text_max_batch_size") == 2
 
 
 def test_build_pipeline_non_eagle3_keeps_unprefixed_max_batch_size(monkeypatch) -> None:
@@ -1147,7 +1357,11 @@ def test_build_pipeline_non_eagle3_keeps_unprefixed_max_batch_size(monkeypatch) 
 
 
 def test_build_pipeline_eagle3_prefixed_option_skips_eagle3_detection(monkeypatch) -> None:
-    """Explicit prefixed sugar already targets the EAGLE-3 branch — skip the AutoConfig probe."""
+    """Explicit prefixed sugar already targets the EAGLE-3 branch — skip the AutoConfig probe.
+
+    Uses ``max_batch_size=1`` because EAGLE-3 releases reject batch > 1 upstream; the
+    detection-skip behavior itself is orthogonal to that rejection.
+    """
     captured = _capture_pipeline_kwargs(monkeypatch)
     monkeypatch.setattr(
         tps_cli,
@@ -1178,11 +1392,11 @@ def test_build_pipeline_eagle3_prefixed_option_skips_eagle3_detection(monkeypatc
         target_cores=None,
         target_clusters=None,
         default_single_target_cores=None,
-        max_batch_size=4,
+        max_batch_size=1,
     )
 
     model_kwargs = captured.get("model_kwargs", {})
-    assert model_kwargs.get("base_max_batch_size") == 4
+    assert model_kwargs.get("base_max_batch_size") == 1
     assert "max_batch_size" not in model_kwargs
 
 

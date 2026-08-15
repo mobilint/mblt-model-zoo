@@ -1041,6 +1041,24 @@ def _build_pipeline(
     )
     eagle3_broadcast_dev_no = _is_eagle3_release and dev_no is not None
     eagle3_broadcast_batch = _is_eagle3_release and max_batch_size is not None
+    # EAGLE-3 speculative decoding hard-fails on batch > 1 inside
+    # ``MobilintEagle3GenerationMixin.generate`` (see generation_utils.py). Rejecting
+    # ``--batch-size > 1`` here avoids allocating a larger base backend for a run that
+    # cannot succeed downstream. Both bare ``--batch-size`` and prefixed EAGLE-3 sugar
+    # request the same base capacity, so ``eagle3_prefix_requested`` and detected
+    # ``_is_eagle3_release`` both trigger the guard; VLM tasks stay on the
+    # ``text_max_batch_size`` path and are excluded.
+    if (
+        max_batch_size is not None
+        and int(max_batch_size) > 1
+        and not _is_vlm_task(task)
+        and (eagle3_prefix_requested or _is_eagle3_release)
+    ):
+        raise SystemExit(
+            "tps: EAGLE-3 releases only support batch size 1 "
+            f"(model={model!r}, --batch-size={int(max_batch_size)}); "
+            "drop --batch-size or use a non-EAGLE-3 release."
+        )
     subconfig_options = subconfig_options or SubconfigPipelineOptions()
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
@@ -4284,7 +4302,8 @@ def add_tps_parser(
                 "batch size for synthetic inputs; defaults to model max_batch_size when available. "
                 "max_batch_size is the aggregate capacity N*K, where K is the MXQ's compiled batch "
                 "axis and N = ceil(max_batch_size / K) Model slots are launched across the target "
-                "device set. Non-batch MXQ (K=1) uses sw-batch across N slots."
+                "device set. Non-batch MXQ (K=1) uses sw-batch across N slots. EAGLE-3 releases "
+                "only support batch size 1."
             ),
         )
         _add_device_tracking_args(p)
