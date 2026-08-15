@@ -456,6 +456,52 @@ def _is_vlm_config(config: Any) -> bool:
     return False
 
 
+def _is_eagle3_config(config: Any) -> bool:
+    """Return whether a Transformers config appears to describe an EAGLE-3 speculative release."""
+    try:
+        from mblt_model_zoo.hf_transformers.utils.configuration_utils import MobilintEagle3ConfigMixin
+    except Exception:
+        MobilintEagle3ConfigMixin = None  # type: ignore[assignment]
+    if MobilintEagle3ConfigMixin is not None and isinstance(config, MobilintEagle3ConfigMixin):
+        return True
+
+    model_type = str(getattr(config, "model_type", "") or "").lower()
+    if "eagle3" in model_type:
+        return True
+
+    architectures = getattr(config, "architectures", None)
+    if isinstance(architectures, (list, tuple)):
+        return any("eagle3" in str(item).lower() for item in architectures)
+
+    return False
+
+
+def _detect_eagle3_model(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> bool:
+    """Return whether the loaded model release appears to be an EAGLE-3 speculative bundle.
+
+    Failures to load ``AutoConfig`` are non-fatal: the caller silently falls back to the
+    non-EAGLE-3 path, matching prior behavior when EAGLE-3 auto-detection is unavailable.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return False
+
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return False
+    return _is_eagle3_config(config)
+
+
 def _auto_detect_vlm_task(args: argparse.Namespace) -> str | None:
     """Detect a VLM task from model config when the user did not explicitly pass ``--task``."""
     try:
@@ -810,6 +856,16 @@ def _build_pipeline(
             eagle3_options.fc_dev_no,
         )
     )
+    # MobilintEagle3ConfigMixin only exposes base_/draft_/fc_-prefixed dev_no setters, so a bare
+    # `--dev-no` on an EAGLE-3 release would otherwise be silently dropped. Detect the release and
+    # broadcast the global into the prefixed trio (per-prefix explicit values still win via the
+    # coalesce below). Skip detection for VLM tasks and when no prefixed sugar needs to be emitted.
+    eagle3_broadcast_dev_no = (
+        not _is_vlm_task(task)
+        and not eagle3_prefix_requested
+        and dev_no is not None
+        and _detect_eagle3_model(model, trust_remote_code=trust_remote_code, revision=revision)
+    )
     subconfig_options = subconfig_options or SubconfigPipelineOptions()
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
@@ -841,7 +897,7 @@ def _build_pipeline(
             effective_dev_no = prefix_dev_no if prefix_dev_no is not None else dev_no
             if effective_dev_no is not None:
                 model_kwargs[f"{prefix}_dev_no"] = effective_dev_no
-    elif eagle3_prefix_requested:
+    elif eagle3_prefix_requested or eagle3_broadcast_dev_no:
         _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
         _warn_eagle3_override("--core-mode", "--draft-core-mode", core_mode, eagle3_options.draft_core_mode)
         _warn_eagle3_override("--core-mode", "--fc-core-mode", core_mode, eagle3_options.fc_core_mode)

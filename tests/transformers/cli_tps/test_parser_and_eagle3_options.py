@@ -949,3 +949,125 @@ def test_build_pipeline_eagle3_gates_base_max_batch_size(monkeypatch) -> None:
     model_kwargs = captured.get("model_kwargs", {})
     assert model_kwargs.get("base_max_batch_size") == 8
     assert "max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_eagle3_broadcasts_bare_dev_no(monkeypatch) -> None:
+    """A global --dev-no on an EAGLE-3 release must broadcast to base_/draft_/fc_ prefixes.
+
+    MobilintEagle3ConfigMixin exposes only prefixed dev_no setters, so an unprefixed
+    ``dev_no`` model kwarg would otherwise be silently dropped by HF ``from_pretrained``.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/eagle3",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=1,
+    )
+
+    assert "dev_no" not in pipe.model_kwargs
+    assert pipe.model_kwargs["base_dev_no"] == 1
+    assert pipe.model_kwargs["draft_dev_no"] == 1
+    assert pipe.model_kwargs["fc_dev_no"] == 1
+
+
+def test_build_pipeline_eagle3_bare_dev_no_respects_explicit_prefix(monkeypatch) -> None:
+    """Explicit --draft-dev-no still wins when the global --dev-no is broadcast for EAGLE-3."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    # Explicit prefixed option already triggers the EAGLE-3 branch; no need to detect the config.
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda *args, **kwargs: pytest.fail("_detect_eagle3_model should not run when prefixed options are set"),
+    )
+
+    with pytest.warns(UserWarning, match="Conflicting options detected"):
+        pipe = tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/eagle3",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(draft_dev_no=7),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            dev_no=1,
+        )
+
+    assert "dev_no" not in pipe.model_kwargs
+    assert pipe.model_kwargs["base_dev_no"] == 1
+    assert pipe.model_kwargs["draft_dev_no"] == 7
+    assert pipe.model_kwargs["fc_dev_no"] == 1
+
+
+def test_build_pipeline_non_eagle3_keeps_unprefixed_dev_no(monkeypatch) -> None:
+    """A non-EAGLE-3 model must continue to receive an unprefixed ``dev_no`` model kwarg."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/plain",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=1,
+    )
+
+    assert pipe.model_kwargs == {"dev_no": 1}
+
+
+def test_is_eagle3_config_detects_model_type_marker() -> None:
+    """`_is_eagle3_config` recognizes the ``eagle3`` marker in ``model_type`` and ``architectures``."""
+
+    assert tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3_eagle3"))
+    assert tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3", architectures=["Qwen3ForCausalLMEagle3"]))
+    assert not tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3", architectures=["Qwen3ForCausalLM"]))
