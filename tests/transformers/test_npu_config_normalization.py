@@ -500,6 +500,110 @@ def test_atomic_replace_p2_core_mode_and_cluster_override_syncs_dev_no() -> None
     assert backend._target_cores_serialized == []
 
 
+def test_atomic_replace_target_clusters_before_core_mode_matches_reverse_order() -> None:
+    """PR #109 review: ``target_clusters`` BEFORE ``core_mode`` must converge on the same spec.
+
+    HF ``from_pretrained`` calls ``setattr`` on each ``model_kwargs`` key in
+    whatever order the dict yields them, so ``target_clusters`` may land
+    before ``core_mode`` on an override that switches both. Under the old
+    ``_with`` logic the target-only path unioned the stale dev0 cores with
+    the new ``"1:0"`` cluster into ``dev_no=[0, 1]``, and then
+    :meth:`NPUTargetSpec.from_kwargs` dropped the off-mode ``target_clusters``
+    (mode is still ``single`` at that moment) and raised a device-set
+    mismatch. The sibling-clear in :meth:`_with` makes the setter order
+    symmetric.
+    """
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": [f"0:{c}:{k}" for c in (0, 1) for k in range(4)],
+        }
+    )
+    backend.target_clusters = ["1:0"]
+    backend.core_mode = "global4"
+
+    assert backend.dev_no == 1
+    assert backend.core_mode == "global4"
+    assert backend._target_clusters_serialized == ["1:0"]
+    assert backend._target_cores_serialized == []
+
+
+def test_atomic_replace_target_cores_before_core_mode_matches_reverse_order() -> None:
+    """Mirror: full-cluster ``target_cores`` BEFORE ``core_mode='global4'`` from a single-mode config.
+
+    Starts from the same single-mode config with pre-populated dev0 cores
+    as the previous test, but overrides via the ``target_cores`` grain
+    instead. A full-cluster core list (``1:0:{0..3}``) avoids the lossy
+    partial-cluster fold, so both setter orders must converge on the same
+    ``NPUTargetSpec``. Without the sibling-clear the ``target_cores``
+    setter would carry the stale dev0 cores through and the target-only
+    ``dev_no`` sync would still work here (both grains resolve to the
+    same device set), but exercising this order guards against future
+    regressions in the mirror path.
+    """
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": [f"0:{c}:{k}" for c in (0, 1) for k in range(4)],
+        }
+    )
+    backend.target_cores = [f"1:0:{k}" for k in range(4)]
+    backend.core_mode = "global4"
+
+    assert backend.dev_no == 1
+    assert backend.core_mode == "global4"
+    assert backend._target_clusters_serialized == ["1:0"]
+    assert backend._target_cores_serialized == []
+
+
+@pytest.mark.parametrize(
+    "target_key,target_value",
+    [
+        ("target_clusters", ["1:0"]),
+        ("target_cores", [f"1:0:{k}" for k in range(4)]),
+    ],
+)
+def test_atomic_replace_setter_order_is_symmetric_across_permutations(
+    target_key: str, target_value: list
+) -> None:
+    """Both HF ``setattr`` orders (core_mode-then-target, target-then-core_mode) yield the same spec.
+
+    Runs the two-setter permutation for both target grains starting from
+    the same single-mode config with pre-populated dev0 cores, asserting
+    the resulting :class:`NPUTargetSpec` is identical. This is the
+    parity check the PR #109 review asked for.
+    """
+
+    def _apply(order: tuple[str, ...]) -> tuple:
+        backend = _load_backend(
+            {
+                "mxq_path": "model.mxq",
+                "core_mode": "single",
+                "dev_no": 0,
+                "target_cores": [f"0:{c}:{k}" for c in (0, 1) for k in range(4)],
+            }
+        )
+        for key in order:
+            if key == "core_mode":
+                backend.core_mode = "global4"
+            else:
+                setattr(backend, target_key, target_value)
+        return (
+            backend.dev_no,
+            backend.core_mode,
+            tuple(backend._target_cores_serialized),
+            tuple(backend._target_clusters_serialized),
+        )
+
+    forward = _apply(("core_mode", target_key))
+    reverse = _apply((target_key, "core_mode"))
+    assert forward == reverse
+
+
 def test_atomic_replace_default_bare_dev_no_leaves_expanded_targets_intact() -> None:
     """Bare ``dev_no=0`` default with sugar-expanded targets stays canonical."""
     kwargs = {"mxq_path": "model.mxq", "core_mode": "single", "dev_no": 0}

@@ -461,6 +461,21 @@ class NPUTargetSpec:
         new_cores: list = list(target_cores) if cores_changed else list(self.cores)
         new_clusters: list = list(target_clusters) if clusters_changed else list(self.clusters)
 
+        # When exactly one target grain is explicitly overridden, discard the
+        # sibling grain carried over from ``self`` before renormalization. The
+        # sibling reflects the previous ``core_mode`` epoch and is only stale
+        # intent once the caller re-authoritatively names one grain; keeping
+        # it would (a) pollute the target-only ``dev_no`` sync below by
+        # unioning stale device prefixes with the new grain, and (b) surface
+        # as a spurious device-set mismatch inside :meth:`from_kwargs` when
+        # its off-mode-grain drop then reduces the target device set. This
+        # makes the setter order symmetric: applying ``target_clusters``
+        # before ``core_mode`` converges on the same spec as the reverse.
+        if cores_changed and not clusters_changed:
+            new_clusters = []
+        elif clusters_changed and not cores_changed:
+            new_cores = []
+
         if targets_changed and not dev_no_changed and not self._dev_no_overridden:
             # Target-only override with un-overridden ``dev_no``: the
             # canonical target strings unambiguously carry the device prefix,
