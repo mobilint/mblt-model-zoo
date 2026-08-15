@@ -945,6 +945,32 @@ def test_benchmark_target_device_preserves_explicit_device() -> None:
     assert target_args.device == "cuda:1"
 
 
+def test_text_original_models_mixed_run_keeps_mobilint_npu() -> None:
+    """Verify --original-models mixed runs route Mobilint rows to NPU/CPU, parents to CUDA/GPU."""
+    argv = ["measure", "--original-models", "--model", "mobilint/model-a"]
+    args = text_bench._build_arg_parser().parse_args(argv)
+    text_bench._resolve_runtime_defaults(args, argv)
+
+    mobilint_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
+    parent_args = text_bench._args_for_target_device_backend(args, model_id="meta-llama/model-a")
+
+    assert mobilint_args.device == "cpu"
+    assert mobilint_args.device_backend == "npu"
+    assert parent_args.device == "cuda"
+    assert parent_args.device_backend == "gpu"
+
+
+def test_text_original_models_mixed_run_preserves_explicit_device() -> None:
+    """Verify explicit --device on Mobilint targets wins over the mixed-run override."""
+    argv = ["measure", "--original-models", "--device", "cuda:0", "--model", "mobilint/model-a"]
+    args = text_bench._build_arg_parser().parse_args(argv)
+    text_bench._resolve_runtime_defaults(args, argv)
+
+    mobilint_args = text_bench._args_for_target_device_backend(args, model_id="mobilint/model-a")
+
+    assert mobilint_args.device == "cuda:0"
+
+
 def test_text_measure_rebuild_outputs(tmp_path) -> None:
     """Verify text measure rebuild creates combined files from synthetic JSON."""
     payload = {

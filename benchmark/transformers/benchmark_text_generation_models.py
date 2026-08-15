@@ -1494,13 +1494,23 @@ def _args_for_target_device_backend(
     model_id: str,
     mxq_path: str | None = None,
 ) -> argparse.Namespace:
-    """Return an args copy with a device backend resolved for one benchmark target."""
+    """Return an args copy with a device backend resolved for one benchmark target.
+
+    ``--original-models`` mixed runs retain the caller's Mobilint IDs alongside the resolved
+    upstream parents. The retained Mobilint target keeps its NPU/CPU defaults by treating
+    ``args.original_models`` as ``False`` for that specific row, so the resolver does not
+    short-circuit to ``cuda``/``gpu`` and colocate the Mobilint sibling on the same device as
+    its parent.
+    """
+    is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path, mxq_dir=args.mxq_dir)
+    original_models_override = False if (args.original_models and is_mobilint) else None
     return _args_for_target_device_backend_shared(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
         resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
+        original_models_override=original_models_override,
     )
 
 

@@ -319,8 +319,15 @@ def args_for_target_device_backend(
     mxq_path: str | None,
     resolve_default_device: Callable[..., str | None] | None = None,
     resolve_default_device_backend: Callable[..., str | None],
+    original_models_override: bool | None = None,
 ) -> argparse.Namespace:
     """Return an args copy with runtime policy resolved for one target.
+
+    In a mixed-run where ``--original-models`` retains a Mobilint target alongside its resolved
+    upstream parent, the retained Mobilint target must keep NPU/CPU defaults instead of following
+    the global ``--original-models`` policy that routes to GPU. Callers signal this per target via
+    ``original_models_override``; when supplied, it replaces ``args.original_models`` for both the
+    device and device-backend resolvers.
 
     Args:
         args: Parsed benchmark arguments.
@@ -328,10 +335,12 @@ def args_for_target_device_backend(
         mxq_path: Optional MXQ path for the specific target.
         resolve_default_device: Optional shared device-policy resolver.
         resolve_default_device_backend: Shared backend-policy resolver.
+        original_models_override: Optional per-target replacement for ``args.original_models``.
 
     Returns:
         A shallow copy of ``args`` with per-target ``device`` and ``device_backend`` values.
     """
+    effective_original_models = args.original_models if original_models_override is None else original_models_override
     resolved = copy.copy(args)
     if resolve_default_device is not None:
         requested_device = getattr(args, "_device_requested", args.device)
@@ -341,7 +350,7 @@ def args_for_target_device_backend(
             model_id=model_id,
             mxq_path=mxq_path,
             mxq_dir=args.mxq_dir,
-            original_models=args.original_models,
+            original_models=effective_original_models,
         )
     requested_backend = getattr(args, "_device_backend_requested", args.device_backend)
     resolved.device_backend = resolve_default_device_backend(
@@ -350,6 +359,6 @@ def args_for_target_device_backend(
         model_id=model_id,
         mxq_path=mxq_path,
         mxq_dir=args.mxq_dir,
-        original_models=args.original_models,
+        original_models=effective_original_models,
     )
     return resolved
