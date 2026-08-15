@@ -1315,6 +1315,52 @@ def test_text_generate_supports_phase_callbacks_for_all_batch_sizes(batch_size: 
     assert result.num_decode == 4
 
 
+def test_batched_generate_derives_phase_boundary_without_npu_timing():
+    """Batched generate on a non-NPU-timed backend must split prefill and decode
+    at the first-generated-token callback rather than attributing the full wall
+    clock to both phases.
+    """
+    import time
+
+    class _PhasedBatchedModel(_DummyBatchedGenerateNPUModel):
+        """Model double whose generate mimics a real prefill/decode phase gap."""
+
+        def generate(self, **kwargs):
+            self.generate_kwargs = kwargs
+            input_ids = kwargs["input_ids"]
+            new_tokens = int(kwargs["max_new_tokens"])
+            # Simulate the prefill phase compute window.
+            time.sleep(0.02)
+            outputs = torch.zeros(
+                (int(input_ids.shape[0]), int(input_ids.shape[1]) + new_tokens),
+                dtype=torch.long,
+            )
+            stopping_criteria = kwargs.get("stopping_criteria")
+            if stopping_criteria is not None:
+                stopping_criteria(outputs[:, : int(input_ids.shape[1]) + 1], None)
+            # Simulate the decode phase compute window.
+            time.sleep(0.04)
+            return outputs
+
+    model = _PhasedBatchedModel()
+    measurer = TPSMeasurer(_DummyTextPipeline(model))
+
+    result = measurer.measure(num_prefill=8, num_decode=4, batch_size=2)
+
+    assert result.prefill_latency > 0.0
+    assert result.decode_duration > 0.0
+    # Phases must not both equal the full wall clock (the previous bug).
+    assert result.prefill_latency < result.total_time
+    assert result.decode_duration < result.total_time
+    # Prefill + decode should closely account for the total wall clock.
+    assert (
+        result.prefill_latency + result.decode_duration
+        == pytest.approx(result.total_time, abs=5e-3)
+    )
+    # The simulated decode window is longer than the prefill window.
+    assert result.decode_duration > result.prefill_latency
+
+
 def test_run_text_measure_starts_phase_trackers_for_resolved_batch(monkeypatch, tmp_path):
     import mblt_model_zoo.hf_transformers.utils.benchmark_utils as benchmark_utils
 

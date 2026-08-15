@@ -64,15 +64,35 @@ class _GenerationPhaseCallbacks:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        sync_before_timestamp: Optional[Callable[[], None]] = None,
     ) -> None:
         self._on_prefill_start = on_prefill_start
         self._on_prefill_end = on_prefill_end
         self._on_decode_start = on_decode_start
         self._on_decode_end = on_decode_end
+        self._sync_before_timestamp = sync_before_timestamp
         self._prefill_started = False
         self._prefill_finished = False
         self._decode_started = False
         self._decode_finished = False
+        self._first_token_ns: Optional[int] = None
+        self._decode_end_ns: Optional[int] = None
+
+    @property
+    def first_token_ns(self) -> Optional[int]:
+        """Return the perf-counter timestamp captured at the prefill/decode boundary."""
+        return self._first_token_ns
+
+    @property
+    def decode_end_ns(self) -> Optional[int]:
+        """Return the perf-counter timestamp captured when decode finished."""
+        return self._decode_end_ns
+
+    def _capture_now_ns(self) -> int:
+        """Sync the compute device (if configured) then read the perf counter."""
+        if self._sync_before_timestamp is not None:
+            self._sync_before_timestamp()
+        return time.perf_counter_ns()
 
     def start_prefill(self) -> None:
         """Mark the prefill phase as started."""
@@ -86,6 +106,9 @@ class _GenerationPhaseCallbacks:
         """Mark the first generated token boundary between prefill and decode."""
         self.start_prefill()
         if not self._prefill_finished:
+            # Capture the boundary timestamp before firing the external callback so
+            # the recorded phase durations align with what the tracker observes.
+            self._first_token_ns = self._capture_now_ns()
             self._prefill_finished = True
             if self._on_prefill_end is not None:
                 self._on_prefill_end()
@@ -100,6 +123,7 @@ class _GenerationPhaseCallbacks:
             return
         if not self._decode_started:
             self.finish_prefill_start_decode()
+        self._decode_end_ns = self._capture_now_ns()
         self._decode_finished = True
         if self._on_decode_end is not None:
             self._on_decode_end()
@@ -152,6 +176,32 @@ def _with_first_token_stopping_criteria(
         existing.append(marker)
         return
     gen_kwargs["stopping_criteria"] = StoppingCriteriaList([*list(existing), marker])
+
+
+def _make_device_sync_callable(device: object) -> Optional[Callable[[], None]]:
+    """Return a zero-arg callable that synchronizes ``device`` when it is CUDA-like.
+
+    Non-Mobilint compute backends (CUDA, XPU) dispatch generation ops asynchronously,
+    so wall-clock timestamps captured from ``StoppingCriteria`` on the CPU thread can
+    read before the corresponding device work has actually completed. Callers should
+    invoke the returned closure right before recording ``perf_counter_ns`` to close
+    that gap. Returns ``None`` when no sync is available or needed (e.g., CPU device
+    or an unsupported device string).
+    """
+    if not isinstance(device, torch.device):
+        try:
+            device = torch.device(device)
+        except (TypeError, ValueError):
+            return None
+    device_type = device.type
+    if device_type == "cuda" and torch.cuda.is_available():
+        return lambda: torch.cuda.synchronize(device)
+    xpu_module = getattr(torch, "xpu", None)
+    if device_type == "xpu" and xpu_module is not None:
+        is_available = getattr(xpu_module, "is_available", None)
+        if callable(is_available) and is_available():
+            return lambda: xpu_module.synchronize(device)
+    return None
 
 
 def _ns_to_seconds(value_ns: int) -> float:
@@ -951,17 +1001,21 @@ class TPSMeasurer:
             _reset_npu_timing(npu_timing_target)
         _apply_eagle3_gen_kwargs(gen_kwargs, self.model)
 
+        device_sync = _make_device_sync_callable(self.device)
         phase_callbacks = _GenerationPhaseCallbacks(
             on_prefill_start=on_prefill_start,
             on_prefill_end=on_prefill_end,
             on_decode_start=on_decode_start,
             on_decode_end=on_decode_end,
+            sync_before_timestamp=device_sync,
         )
         _with_first_token_stopping_criteria(
             gen_kwargs,
             prompt_length=int(input_ids.shape[1]),
             phase_callbacks=phase_callbacks,
         )
+        if device_sync is not None:
+            device_sync()
         t_start_ns = time.perf_counter_ns()
         phase_callbacks.start_prefill()
         if fake_prefill:
@@ -969,6 +1023,8 @@ class TPSMeasurer:
         try:
             with torch.no_grad(), _temporarily_sanitize_generation_config(self.model):
                 outputs = self.model.generate(**gen_kwargs)
+            if device_sync is not None:
+                device_sync()
             t_end_ns = time.perf_counter_ns()
             phase_callbacks.finish_decode()
         except Exception:
@@ -994,6 +1050,7 @@ class TPSMeasurer:
         total_time_ns = t_end_ns - t_start_ns
         total_time = _ns_to_seconds(total_time_ns)
         has_npu_time, npu_prefill_time, npu_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+        first_token_ns = phase_callbacks.first_token_ns
         if fake_prefill:
             prefill_latency = 0.0
             decode_duration = total_time
@@ -1001,9 +1058,16 @@ class TPSMeasurer:
         elif has_npu_time and (npu_prefill_time > 0 or npu_decode_time > 0):
             prefill_latency = npu_prefill_time if npu_prefill_time > 0 else total_time
             decode_duration = npu_decode_time if npu_decode_time > 0 else max(total_time - prefill_latency, 0.0)
+        elif first_token_ns is not None and t_start_ns <= first_token_ns <= t_end_ns:
+            # Non-NPU compute backends (e.g., CUDA GPU) do not expose aggregate phase timing.
+            # Derive the phase boundary from the first-generated-token callback that fires
+            # inside the ``StoppingCriteria`` after the first decode step completes.
+            prefill_latency = _ns_to_seconds(first_token_ns - t_start_ns)
+            decode_duration = _ns_to_seconds(t_end_ns - first_token_ns)
         else:
-            # When aggregate phase timing is unavailable, keep total-throughput semantics by assigning
-            # the same wall time to both phase metrics.
+            # Callback boundary unavailable (e.g., generation ended before the first token).
+            # Fall back to attributing the full wall clock to both phases so downstream
+            # total-throughput math stays consistent.
             prefill_latency = total_time
             decode_duration = total_time
 
@@ -1844,10 +1908,27 @@ class VLMTPSMeasurer:
                 gen_kwargs["count_npu_time"] = True
                 _reset_npu_timing(npu_timing_target)
             _apply_eagle3_gen_kwargs(gen_kwargs, gen_model)
+            device_sync = _make_device_sync_callable(inputs_embeds.device)
+            phase_callbacks = _GenerationPhaseCallbacks(sync_before_timestamp=device_sync)
+            _with_first_token_stopping_criteria(
+                gen_kwargs,
+                prompt_length=seq_len,
+                phase_callbacks=phase_callbacks,
+            )
+            if device_sync is not None:
+                device_sync()
             t_start_ns = time.perf_counter_ns()
-            with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
-                outputs = gen_model.generate(**gen_kwargs)
-            t_end_ns = time.perf_counter_ns()
+            phase_callbacks.start_prefill()
+            try:
+                with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
+                    outputs = gen_model.generate(**gen_kwargs)
+                if device_sync is not None:
+                    device_sync()
+                t_end_ns = time.perf_counter_ns()
+                phase_callbacks.finish_decode()
+            except Exception:
+                phase_callbacks.close_on_error()
+                raise
             if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2:
                 generated_per_row = max(int(outputs.shape[1]) - seq_len, 0)
             else:
@@ -1856,9 +1937,15 @@ class VLMTPSMeasurer:
             total_time_ns = t_end_ns - t_start_ns
             total_time = _ns_to_seconds(total_time_ns)
             has_npu_time, npu_prefill_time, npu_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+            first_token_ns = phase_callbacks.first_token_ns
             if has_npu_time and (npu_prefill_time > 0 or npu_decode_time > 0):
                 prefill_latency = npu_prefill_time if npu_prefill_time > 0 else total_time
                 decode_duration = npu_decode_time if npu_decode_time > 0 else max(total_time - prefill_latency, 0.0)
+            elif first_token_ns is not None and t_start_ns <= first_token_ns <= t_end_ns:
+                # Non-NPU compute backends (e.g., CUDA GPU) lack aggregate phase timing;
+                # derive the phase boundary from the first-generated-token callback.
+                prefill_latency = _ns_to_seconds(first_token_ns - t_start_ns)
+                decode_duration = _ns_to_seconds(t_end_ns - first_token_ns)
             else:
                 prefill_latency = total_time
                 decode_duration = total_time
