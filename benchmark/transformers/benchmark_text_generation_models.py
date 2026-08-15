@@ -347,18 +347,26 @@ def _filter_text_targets_by_batch_mode(
     batch_mode: str | None = None,
     task: str = "text-generation",
     override_batch_size: int | None = None,
+    original_models: bool = False,
 ) -> list[TextBenchmarkTarget]:
     """Filter unsupported targets and annotate each supported target with batch metadata.
 
-    When ``override_batch_size`` is provided and greater than one, upstream/original
-    targets that report ``config.max_batch_size == 1`` are still admitted under the
-    ``batch`` filter so a mixed Mobilint-vs-GPU sweep can share one CLI. The
-    override becomes the effective input batch dim for both Mobilint and non-
-    Mobilint targets, and it is later gated to Mobilint targets when it is
-    forwarded as a backend ``max_batch_size`` kwarg.
+    When ``original_models`` is set and ``override_batch_size`` is greater than one,
+    upstream/original targets that report ``config.max_batch_size == 1`` are still
+    admitted under the ``batch`` filter so a mixed Mobilint-vs-GPU sweep can share
+    one CLI. Outside ``--original-models`` the relaxation must not fire, otherwise
+    non-batch Mobilint MXQs (``K == 1``) would fan out into ``N == override_batch_size``
+    slots and exhaust device memory. In all cases ``override_batch_size`` becomes the
+    effective input batch dim for admitted targets, and it is later gated to Mobilint
+    targets when it is forwarded as a backend ``max_batch_size`` kwarg.
     """
     filtered: list[TextBenchmarkTarget] = []
-    forced_batch = override_batch_size is not None and int(override_batch_size) > 1 and batch_mode == _BATCH_MODE_BATCH
+    relax_original = (
+        original_models
+        and override_batch_size is not None
+        and int(override_batch_size) > 1
+        and batch_mode == _BATCH_MODE_BATCH
+    )
     for model_id, revision_candidates, label, base, mxq_path in targets:
         revision = _target_filter_revision(model_id, revision_candidates, mxq_path)
         if _is_gguf_model_id(model_id) or _has_gguf_artifact(model_id, revision):
@@ -371,7 +379,8 @@ def _filter_text_targets_by_batch_mode(
             effective_max_batch_size = int(override_batch_size)
         else:
             effective_max_batch_size = cfg_max_batch_size
-        resolved_batch_mode = _batch_mode_from_max_batch_size(effective_max_batch_size)
+        resolved_batch_mode = _batch_mode_from_max_batch_size(cfg_max_batch_size)
+        forced_batch = relax_original and not _is_mobilint_target_common(model_id, mxq_path=mxq_path)
         if forced_batch and cfg_max_batch_size == 1:
             resolved_batch_mode = _BATCH_MODE_BATCH
         if batch_mode is not None and resolved_batch_mode != batch_mode:
@@ -1415,6 +1424,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         targets,
         batch_mode=args.batch_mode,
         override_batch_size=getattr(args, "batch_size", None),
+        original_models=bool(getattr(args, "original_models", False)),
     )
     run_targets: list[
         tuple[str, list[str | None], str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
@@ -2104,6 +2114,7 @@ def _collect_text_run_targets(
         targets,
         batch_mode=args.batch_mode,
         override_batch_size=getattr(args, "batch_size", None),
+        original_models=bool(getattr(args, "original_models", False)),
     )
     run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]] = []
     for target in filtered_targets:

@@ -1168,12 +1168,106 @@ def test_text_target_filtering_admits_original_under_batch_size_override(monkeyp
     monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
     monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: 1)
 
-    admitted = text_bench._filter_text_targets_by_batch_mode(raw_targets, batch_mode="batch", override_batch_size=32)
+    admitted = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="batch",
+        override_batch_size=32,
+        original_models=True,
+    )
 
     assert len(admitted) == 1
     assert admitted[0].model_id == "upstream/original"
     assert admitted[0].batch_mode == "batch"
     assert admitted[0].max_batch_size == 32
+
+
+def test_text_target_filtering_rejects_non_batch_mobilint_under_batch_size_override(monkeypatch) -> None:
+    """Verify non-batch Mobilint MXQs are filtered out of --batch --batch-size N>1 without --original-models.
+
+    Regression guard: previously the ``forced_batch`` relaxation applied to every target under
+    ``batch_mode=batch`` with ``batch_size>1``, causing config max_batch_size==1 Mobilint targets
+    to fan out into ``N=batch_size`` slots and hit ``MobilintBackendAllocError``.
+    """
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("mobilint/non-batch", [None], "non-batch", "non-batch", None),
+    ]
+
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: 1)
+
+    batch = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="batch",
+        override_batch_size=64,
+        original_models=False,
+    )
+    non_batch = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="non_batch",
+        override_batch_size=64,
+        original_models=False,
+    )
+
+    assert batch == []
+    assert [target.model_id for target in non_batch] == ["mobilint/non-batch"]
+
+
+def test_text_target_filtering_batch_size_override_applies_to_batch_mobilint(monkeypatch) -> None:
+    """Verify --batch-size overrides the effective batch dim on already-batch-eligible Mobilint targets."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("mobilint/batch16", [None], "batch16", "batch16", None),
+    ]
+
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: 16)
+
+    admitted = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="batch",
+        override_batch_size=64,
+        original_models=False,
+    )
+
+    assert len(admitted) == 1
+    assert admitted[0].model_id == "mobilint/batch16"
+    assert admitted[0].batch_mode == "batch"
+    assert admitted[0].max_batch_size == 64
+
+
+def test_text_target_filtering_original_models_mixed_admits_only_batch_and_upstream(monkeypatch) -> None:
+    """Verify --original-models mixed batch admits batch mobilint + upstream, drops non-batch mobilint."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("mobilint/non-batch", [None], "non-batch", "non-batch", None),
+        ("mobilint/batch16", [None], "batch16", "batch16", None),
+        ("upstream/original", [None], "original", "original", None),
+    ]
+
+    cfg_map = {
+        "mobilint/non-batch": 1,
+        "mobilint/batch16": 16,
+        "upstream/original": 1,
+    }
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(
+        text_bench,
+        "_resolve_config_max_batch_size",
+        lambda model_id, revision, *, task: cfg_map[model_id],
+    )
+
+    admitted = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="batch",
+        override_batch_size=64,
+        original_models=True,
+    )
+
+    assert sorted(target.model_id for target in admitted) == ["mobilint/batch16", "upstream/original"]
+    for target in admitted:
+        assert target.batch_mode == "batch"
+        assert target.max_batch_size == 64
 
 
 def test_build_pipeline_forwards_dev_no_only_for_mobilint(monkeypatch) -> None:
