@@ -567,9 +567,7 @@ def test_atomic_replace_target_cores_before_core_mode_matches_reverse_order() ->
         ("target_cores", [f"1:0:{k}" for k in range(4)]),
     ],
 )
-def test_atomic_replace_setter_order_is_symmetric_across_permutations(
-    target_key: str, target_value: list
-) -> None:
+def test_atomic_replace_setter_order_is_symmetric_across_permutations(target_key: str, target_value: list) -> None:
     """Both HF ``setattr`` orders (core_mode-then-target, target-then-core_mode) yield the same spec.
 
     Runs the two-setter permutation for both target grains starting from
@@ -900,3 +898,71 @@ def test_from_kwargs_prefix_scoped_targets_derive_dev_no() -> None:
     spec = NPUTargetSpec.from_kwargs({"vision_target_cores": ["3:0:0"]}, prefix="vision_")
     assert spec.dev_no == 3
     assert spec.cores == ("3:0:0",)
+
+
+# ---------------------------------------------------------------------------
+# PR #109 P2 (third surface): NPUTargetSpec._with target-only override must
+# migrate legacy items (CoreId/Cluster, "c:k", bare ints) to canonical form
+# before deriving the device set. Otherwise ``_devices_from_targets`` reads
+# ``split(":", 1)[0]`` on non-canonical inputs and either raises
+# ``AttributeError`` (CoreId/Cluster objects) or silently mis-reads the
+# cluster component as the device index (legacy 2-part strings).
+# ---------------------------------------------------------------------------
+
+
+def test_with_target_only_override_accepts_coreid_object_on_scalar_dev_no() -> None:
+    """A legacy ``CoreId`` target override no longer raises ``AttributeError``."""
+    from qbruntime import Cluster, Core, CoreId
+
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"dev_no": 3, "core_mode": "single", "target_cores": ["3:0:0"]})
+    updated = spec._with(target_cores=[CoreId(Cluster.Cluster0, Core.Core1)])
+    assert updated.dev_no == 3
+    assert updated.cores == ("3:0:1",)
+
+
+def test_with_target_only_override_migrates_legacy_two_part_using_inherited_dev_no() -> None:
+    """A legacy ``"c:k"`` target override adopts ``self.dev_no`` as the device prefix, not ``0``."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"dev_no": 3, "core_mode": "single", "target_cores": ["3:0:0"]})
+    updated = spec._with(target_cores=["0:1"])
+    # Under the pre-fix code, ``_devices_from_targets`` read the ``"0"`` prefix
+    # as the device index, synced ``dev_no`` to ``0``, and :meth:`from_kwargs`
+    # then migrated ``"0:1"`` with fallback ``0`` — producing ``"0:0:1"`` and
+    # silently dropping the intended device 3.
+    assert updated.dev_no == 3
+    assert updated.cores == ("3:0:1",)
+
+
+def test_with_target_only_override_canonical_string_still_syncs_dev_no() -> None:
+    """Fully-qualified canonical target overrides still sync ``dev_no`` to the target device."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"dev_no": 3, "core_mode": "single", "target_cores": ["3:0:0"]})
+    updated = spec._with(target_cores=["5:0:1"])
+    assert updated.dev_no == 5
+    assert updated.cores == ("5:0:1",)
+
+
+def test_with_target_only_override_accepts_cluster_object_on_scalar_dev_no() -> None:
+    """A legacy ``Cluster`` target override no longer raises ``AttributeError``."""
+    from qbruntime import Cluster
+
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"dev_no": 3, "core_mode": "global4", "target_clusters": ["3:0"]})
+    updated = spec._with(target_clusters=[Cluster.Cluster1])
+    assert updated.dev_no == 3
+    assert updated.clusters == ("3:1",)
+
+
+def test_with_target_only_override_migrates_bare_int_cluster_using_inherited_dev_no() -> None:
+    """A legacy bare-int cluster override adopts ``self.dev_no`` as the device prefix."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"dev_no": 3, "core_mode": "global4", "target_clusters": ["3:0"]})
+    updated = spec._with(target_clusters=[1])
+    assert updated.dev_no == 3
+    assert updated.clusters == ("3:1",)

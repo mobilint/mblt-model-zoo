@@ -481,10 +481,39 @@ class NPUTargetSpec:
             # canonical target strings unambiguously carry the device prefix,
             # so sync ``dev_no`` to match rather than clobbering the caller's
             # explicit target.
-            target_devs = _devices_from_targets(new_cores, new_clusters)
+            #
+            # Migrate any legacy items (``CoreId`` / ``Cluster`` objects, 2-part
+            # ``"c:k"`` strings, bare ``int`` clusters) to canonical form before
+            # asking :func:`_devices_from_targets` for the device set. That
+            # helper reads ``split(":", 1)[0]`` and would either raise
+            # ``AttributeError`` on non-string items or silently mis-read a
+            # legacy ``"c:k"`` string's cluster component as the device index.
+            # Use ``self.dev_no`` as the fallback prefix — this branch is
+            # reached only when ``dev_no`` was not overridden, so the caller's
+            # inherited ``dev_no`` is the intended prefix, matching what
+            # :meth:`from_kwargs` will do below via the synced ``new_dev_no``.
+            inherited_dev_no = _thaw_dev_no(self.dev_no)
+            inherited_dev_no_is_list = isinstance(inherited_dev_no, list)
+            inherited_fallback_dev = inherited_dev_no[0] if inherited_dev_no_is_list else int(inherited_dev_no)
+            migrated_cores = (
+                _migrate_target_cores(list(new_cores), inherited_fallback_dev, inherited_dev_no_is_list)
+                if new_cores
+                else []
+            )
+            migrated_clusters = (
+                _migrate_target_clusters(list(new_clusters), inherited_fallback_dev, inherited_dev_no_is_list)
+                if new_clusters
+                else []
+            )
+            target_devs = _devices_from_targets(migrated_cores, migrated_clusters)
             if target_devs:
                 sorted_devs = sorted(target_devs)
                 new_dev_no = sorted_devs if len(sorted_devs) > 1 else sorted_devs[0]
+            # Hand the migrated (canonical) lists to :meth:`from_kwargs` so its
+            # own migration is a no-op and the fallback prefix used to resolve
+            # legacy items is the same one we used above.
+            new_cores = migrated_cores
+            new_clusters = migrated_clusters
         elif dev_no_changed and not targets_changed and not self._targets_overridden:
             # ``dev_no``-only override with un-overridden targets: clear the
             # stale target lists so :meth:`from_kwargs` re-expands them from
