@@ -495,6 +495,19 @@ def test_mobilint_cache_rejects_conflicting_batch_size_and_per_model_batch() -> 
         MobilintCache(_FakeMxqModel(), per_model_batch=2, batch_size=3)
 
 
+def test_mobilint_cache_rejects_legacy_batch_size_with_multi_model_list() -> None:
+    """Multi-Model list + legacy batch_size must raise; it silently misroutes slots.
+
+    ``MobilintCache([m0, m1], batch_size=B)`` was previously accepted as ``K = B``,
+    producing ``2 * B`` rows where the first ``B`` rows landed entirely on model 0
+    and the second ``B`` rows entirely on model 1 — defeating the caller's intended
+    "batch of B distributed across 2 slots". Reject at construction with a clear
+    pointer at ``per_model_batch``.
+    """
+    with pytest.raises(TypeError, match="per_model_batch"):
+        MobilintCache([_FakeMxqModel(), _FakeMxqModel()], batch_size=4)
+
+
 def test_mobilint_cache_copy_preserves_multi_model_layout_and_seq_lengths() -> None:
     """copy() should keep the same Model list identity and layer sequence lengths."""
     models = [_FakeMxqModel() for _ in range(2)]

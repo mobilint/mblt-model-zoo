@@ -152,21 +152,18 @@ class MobilintCache(Cache):
             per_model_batch: Cache slots per Model (``K``). Total rows =
                 ``N * K``.
             batch_size: Legacy keyword-only alias for ``per_model_batch``.
-                Accepted when a single Model is used (``N = 1``) so that
-                ``MobilintCache(model, batch_size=K)`` keeps working.
+                Only accepted when the cache hosts a single Model (``N = 1``)
+                so that ``MobilintCache(model, batch_size=K)`` keeps working;
+                rejected with a multi-Model list because the legacy alias
+                would silently double the total capacity and pin the first
+                ``K`` rows entirely to slot 0.
 
         Raises:
             TypeError: If both ``per_model_batch`` and legacy ``batch_size``
-                are provided.
+                are provided, or if the legacy ``batch_size`` is combined
+                with a multi-Model list.
             ValueError: If ``mxq_models`` is an empty list.
         """
-        if batch_size is not None:
-            if per_model_batch != 1:
-                raise TypeError(
-                    "Pass either per_model_batch or the legacy batch_size, not both"
-                )
-            per_model_batch = int(batch_size)
-
         if isinstance(mxq_models, list):
             models_list: List[qbruntime.Model] = list(mxq_models)
         else:
@@ -174,6 +171,20 @@ class MobilintCache(Cache):
 
         if not models_list:
             raise ValueError("mxq_models must contain at least one Model")
+
+        if batch_size is not None:
+            if per_model_batch != 1:
+                raise TypeError(
+                    "Pass either per_model_batch or the legacy batch_size, not both"
+                )
+            if len(models_list) > 1:
+                raise TypeError(
+                    "MobilintCache legacy batch_size= is a single-Model (N=1) shim; "
+                    f"pass per_model_batch=K instead (got N={len(models_list)} Models). "
+                    "The legacy alias would misroute rows across slots and defeat "
+                    "multi-slot dispatch."
+                )
+            per_model_batch = int(batch_size)
 
         self.mxq_models: List[qbruntime.Model] = models_list
         self.k_per_model: int = max(1, int(per_model_batch))
@@ -777,7 +788,7 @@ class MobilintDeepStackCache(MobilintCache):
         """Return a copy preserving KV state and the current deepstack tensor."""
         copied = MobilintDeepStackCache(
             list(self.mxq_models),
-            batch_size=self.k_per_model,
+            per_model_batch=self.k_per_model,
             num_deepstack_layers=self.num_deepstack_layers,
             hidden_size=self.hidden_size,
         )
