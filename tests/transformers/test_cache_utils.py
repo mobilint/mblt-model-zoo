@@ -12,6 +12,7 @@ from mblt_model_zoo.hf_transformers.utils.cache_utils import (
     MobilintEagle3Cache,
     MobilintWhisperCache,
     append_whisper_beam_debug_event,
+    build_mobilint_cache_from_model,
     is_whisper_beam_debug_trace_enabled,
 )
 
@@ -262,6 +263,66 @@ def test_deepstack_cache_reset_clears_deepstack_tensor() -> None:
 
     assert cache.get_seq_length() == 0
     assert torch.count_nonzero(chunk).item() == 0
+
+
+def test_deepstack_cache_multi_model_routes_rows_across_slots() -> None:
+    """Multi-slot deepstack cache should route flat rows to their owning ``qbruntime.Model``."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    cache = MobilintDeepStackCache(
+        models,
+        per_model_batch=1,
+        num_deepstack_layers=1,
+        hidden_size=2,
+    )
+
+    assert cache.n_models == 2
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 2
+    assert cache.slot_of(0) == (0, 0)
+    assert cache.slot_of(1) == (1, 0)
+    assert cache.model_of(0) is models[0]
+    assert cache.model_of(1) is models[1]
+    # The deepstack payload plumbing is preserved end-to-end on a multi-slot cache.
+    cache.set_deepstack_tensor(torch.ones(1, 4, 2))
+    chunk = cache.get_deepstack_chunk(0, 2, device=torch.device("cpu"), dtype=torch.float32)
+    assert chunk.shape == (1, 2, 2)
+
+
+def test_build_mobilint_cache_from_model_dispatches_deepstack_cache_to_slots() -> None:
+    """``build_mobilint_cache_from_model`` must forward ``MobilintDeepStackCache`` extras to slots.
+
+    Regression for PR #109 Codex P1: ``MobilintQwen3VLTextModel._get_cache`` used to build the
+    deepstack cache from ``get_cache_mxq_model()`` (slot 0), so a multi-slot text backend never
+    received rows ``1..B-1``. The shared factory now handles ``cache_cls=MobilintDeepStackCache``
+    plus its keyword-only ``num_deepstack_layers`` / ``hidden_size`` extras.
+    """
+
+    class _StubBackend:
+        def __init__(self, models: list) -> None:
+            self.mxq_models = models
+            self.k_per_model = 1
+
+    class _StubModel:
+        def __init__(self, models: list) -> None:
+            self.npu_backend = _StubBackend(models)
+
+    models = [_FakeMxqModel() for _ in range(3)]
+    stub_model = _StubModel(models)
+    cache = build_mobilint_cache_from_model(
+        stub_model,
+        batch_size=3,
+        cache_cls=MobilintDeepStackCache,
+        num_deepstack_layers=2,
+        hidden_size=4,
+    )
+    assert isinstance(cache, MobilintDeepStackCache)
+    assert cache.n_models == 3
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 3
+    assert cache.num_deepstack_layers == 2
+    assert cache.hidden_size == 4
+    for row in range(3):
+        assert cache.model_of(row) is models[row]
 
 
 def test_eagle3_cache_tracks_base_and_draft_lengths_independently() -> None:

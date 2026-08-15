@@ -19,7 +19,7 @@ from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintDeepStackCache
+from ...utils.cache_utils import MobilintDeepStackCache, build_mobilint_cache_from_model
 from ...utils.generation_utils import (
     MobilintGenerationMixin,
     build_loss_kwargs_dynamic,
@@ -767,20 +767,28 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         max_cache_len: int,
         *args: object,
     ) -> MobilintDeepStackCache:
-        """Return a Qwen3-VL cache that also supplies deepstack decoder chunks."""
+        """Return a Qwen3-VL cache that also supplies deepstack decoder chunks.
+
+        Delegates cache construction to :func:`build_mobilint_cache_from_model` so a
+        multi-slot text backend (``N`` Model slots × ``K`` per-model cache IDs) routes
+        each flat row to its owning ``qbruntime.Model``. The legacy single-Model path
+        still falls back to ``MobilintDeepStackCache(slot_0_model, batch_size=B)``
+        through the same helper.
+        """
         del cache_implementation, batch_size, max_cache_len, args
-        configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
+        configured_batch_size = max(1, int(getattr(self.config, "max_batch_size", 1)))
         needs_new_cache = (
             not hasattr(self, "_cache")
             or not isinstance(self._cache, MobilintDeepStackCache)
-            or getattr(self._cache, "batch_size", 1) != configured_batch_size
+            or getattr(self._cache, "batch_size", 1) < configured_batch_size
             or self._cache.num_deepstack_layers != self.num_deepstack_layers
             or self._cache.hidden_size != int(self.config.hidden_size)
         )
         if needs_new_cache:
-            self._cache = MobilintDeepStackCache(
-                self.get_cache_mxq_model(),
-                batch_size=configured_batch_size,
+            self._cache = build_mobilint_cache_from_model(
+                self,
+                configured_batch_size,
+                cache_cls=MobilintDeepStackCache,
                 num_deepstack_layers=self.num_deepstack_layers,
                 hidden_size=int(self.config.hidden_size),
             )

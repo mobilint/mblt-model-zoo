@@ -680,16 +680,26 @@ class MobilintDeepStackCache(MobilintCache):
     This cache keeps the KV sequence length in ``MobilintCache`` while providing the matching
     deepstack chunk for each decoder invocation. Fake prefill stores only the requested sequence
     length and lazily serves zero deepstack chunks for synthetic decode TPS measurements.
+
+    The constructor mirrors :class:`MobilintCache`'s dual signature so a multi-slot backend can
+    build the deepstack cache through :func:`build_mobilint_cache_from_model` with
+    ``per_model_batch=K`` while the legacy single-Model path keeps its ``batch_size=B`` keyword.
     """
 
     def __init__(
         self,
         mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
-        batch_size: int = 1,
+        per_model_batch: int = 1,
+        *,
         num_deepstack_layers: int = 0,
         hidden_size: int = 0,
+        batch_size: Optional[int] = None,
     ) -> None:
-        super().__init__(mxq_models=mxq_models, batch_size=batch_size)
+        super().__init__(
+            mxq_models=mxq_models,
+            per_model_batch=per_model_batch,
+            batch_size=batch_size,
+        )
         if num_deepstack_layers < 0:
             raise ValueError(f"num_deepstack_layers must be non-negative, got {num_deepstack_layers}")
         if hidden_size < 0:
