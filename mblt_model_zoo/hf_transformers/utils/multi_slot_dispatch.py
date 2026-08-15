@@ -335,11 +335,35 @@ class MultiSlotDispatcher:
         step) collapses ``first_n_items == first_n_tokens`` and used to
         default silently to layout A, truncating longer prompts in later
         groups.
+
+        Belt-and-suspenders: the cached layout is cross-checked against an
+        unambiguous group's actual row count. If they disagree — which
+        happens when the compile-time probe locked ``"n_tokens"`` on a
+        ``K > 1`` MXQ whose compiled batch axis was reported dynamic at
+        position ``-2`` — the runtime observation wins and the backend
+        cache is overwritten via :meth:`MobilintNPUBackend._set_output_layout`.
         """
         layout = self.backend.output_layout
-        if layout is None:
-            layout = self._resolve_layout_from_groups(group_raw, groups, group_seq_lens)
-            self.backend._set_output_layout(layout)
+        observed = self._observe_layout_from_groups(group_raw, groups, group_seq_lens)
+        if observed is not None:
+            if layout is None:
+                layout = observed
+                self.backend._set_output_layout(layout)
+            elif layout != observed:
+                logger.debug(
+                    "output_layout override: probe pinned %r but runtime observed %r; "
+                    "re-pinning backend cache",
+                    layout,
+                    observed,
+                )
+                layout = observed
+                self.backend._set_output_layout(layout)
+        elif layout is None:
+            raise RuntimeError(
+                "Cannot resolve output_layout: every non-empty group has "
+                "n_rows == n_items == n_tokens (typically an all-decode batch). "
+                "Re-issue a dispatch that includes at least one row with seq_len > 1."
+            )
 
         # Find the first non-empty group so we can size the merged buffer.
         first_arr: Optional[np.ndarray] = None
@@ -377,17 +401,18 @@ class MultiSlotDispatcher:
         return merged
 
     @staticmethod
-    def _resolve_layout_from_groups(
+    def _observe_layout_from_groups(
         group_raw: List[np.ndarray],
         groups: List[Tuple[int, List[int], List[int]]],
         group_seq_lens: List[List[int]],
-    ) -> LayoutName:
+    ) -> Optional[LayoutName]:
         """Inspect groups until one is unambiguous, then return that layout.
 
         A group is ambiguous when its row count equals both ``n_items`` and
         ``n_tokens`` (typically all rows have ``seq_len == 1``). Skip those
-        and read the next; if the whole dispatch is ambiguous, raise so the
-        caller knows the compile-time probe never populated a real answer.
+        and read the next; when every non-empty group is ambiguous, return
+        ``None`` so the caller can decide whether to trust a cached layout
+        or raise.
         """
         for gi, arr in enumerate(group_raw):
             if arr.size == 0:
@@ -406,8 +431,24 @@ class MultiSlotDispatcher:
                     f"{n_rows} (vocab={vocab}) for active={n_group_items}, "
                     f"total_tokens={n_group_tokens}"
                 )
-        raise RuntimeError(
-            "Cannot resolve output_layout: every non-empty group has "
-            "n_rows == n_items == n_tokens (typically an all-decode batch). "
-            "Re-issue a dispatch that includes at least one row with seq_len > 1."
-        )
+        return None
+
+    @classmethod
+    def _resolve_layout_from_groups(
+        cls,
+        group_raw: List[np.ndarray],
+        groups: List[Tuple[int, List[int], List[int]]],
+        group_seq_lens: List[List[int]],
+    ) -> LayoutName:
+        """Inspect groups until one is unambiguous, then return that layout.
+
+        Raises when every non-empty group is ambiguous.
+        """
+        observed = cls._observe_layout_from_groups(group_raw, groups, group_seq_lens)
+        if observed is None:
+            raise RuntimeError(
+                "Cannot resolve output_layout: every non-empty group has "
+                "n_rows == n_items == n_tokens (typically an all-decode batch). "
+                "Re-issue a dispatch that includes at least one row with seq_len > 1."
+            )
+        return observed

@@ -344,6 +344,37 @@ def test_output_layout_probe_returns_n_tokens_for_dynamic_token_axis(tmp_path, s
     assert backend.output_layout == "n_tokens"
 
 
+def test_output_layout_probe_defers_when_dynamic_axis_meets_batched_mxq(tmp_path, stub_qbruntime) -> None:
+    """A ``K > 1`` batched MXQ with a dynamic ``-2`` axis must probe as ambiguous.
+
+    Regression: the compiled batch axis of a batched MXQ (e.g. Batch16) can
+    occupy position ``-2`` and be reported ``-1`` by ``get_model_output_shape``.
+    The shape metadata alone cannot distinguish "token axis dynamic" from
+    "batch axis dynamic," and pinning ``"n_tokens"`` in that case caused
+    :meth:`MultiSlotDispatcher._merge_group_outputs` to slice per-item last-row
+    outputs as if they were per-token flat, producing a shape-broadcast error
+    on multi-slot dispatch. The probe must defer to the runtime fallback here.
+    """
+    stub_qbruntime.k_per_model = 16
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    # Simulate the compiled shape that fires the bug: dynamic at position ``-2``.
+    backend.mxq_models[0]._output_shape = (1, -1, 128256)
+    backend._output_layout_cached = None
+
+    assert backend.k_per_model == 16
+    assert backend.output_layout is None
+    # The dispatcher's runtime fallback will pin the answer from an
+    # unambiguous group; nothing should be cached at probe time.
+    assert backend._output_layout_cached is None
+
+
 def test_output_layout_probe_returns_none_when_probe_raises(tmp_path, stub_qbruntime) -> None:
     """Missing/erroring ``get_model_output_shape`` yields ``None`` so callers fall back."""
     from qbruntime import QbRuntimeError

@@ -108,11 +108,15 @@
   single-group; wall time for multi-group so parallel work is not double-counted), and per-group
   merge. `modeling_utils._llm_forward_batch` collapses to a thin delegation.
 - `MobilintNPUBackend.output_layout` (`"n_items"` / `"n_tokens"`) probed once from slot 0's
-  `get_model_output_shape` (token axis `-2`: `-1` -> `"n_tokens"`, static -> `"n_items"`).
-  Consumed in `MultiSlotDispatcher._merge_group_outputs`; the old per-dispatch shape inference
-  is gone. Ambiguous or missing shape probe falls back to inspecting an unambiguous runtime
-  group and pins the answer via `_set_output_layout`; a wholly-ambiguous dispatch (every group
-  is `n_rows == n_items == n_tokens`) hard-fails rather than silently defaulting to layout A.
+  `get_model_output_shape` (index `-2`: static -> `"n_items"`; `-1` -> `"n_tokens"` only when
+  `k_per_model == 1`; `-1` + `K > 1` is ambiguous — the compiled batch axis can occupy
+  position `-2` — so the probe returns `None` and defers to the runtime fallback). Consumed in
+  `MultiSlotDispatcher._merge_group_outputs`; the old per-dispatch shape inference is gone.
+  Ambiguous or missing shape probe falls back to inspecting an unambiguous runtime group and
+  pins the answer via `_set_output_layout`; a wholly-ambiguous dispatch (every group is
+  `n_rows == n_items == n_tokens`) hard-fails rather than silently defaulting to layout A.
+  The dispatcher also cross-checks the cached layout against each dispatch's observed row
+  count and re-pins the backend cache on disagreement, so a stale probe self-heals.
 - On HBM `BadAlloc`, `MobilintNPUBackend.create` / `.launch` disposes every previously loaded
   slot and re-raises as `MobilintBackendAllocError` with `phase`, `slot`, `dev`,
   `succeeded_so_far`, `n_total`, `max_batch_size`, `k_per_model` context. Callers should lower

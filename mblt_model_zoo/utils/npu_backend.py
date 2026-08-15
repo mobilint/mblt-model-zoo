@@ -841,10 +841,17 @@ class MobilintNPUBackend:
         streaming; layout is ``"n_tokens"``); any static value collapses
         the token axis to a single row per batch item (layout ``"n_items"``).
 
-        Returns ``None`` when the shape accessor is missing / errors, or when
-        the first output has fewer than two dims — the runtime fallback in
-        :class:`MultiSlotDispatcher` then pins the answer from an
-        unambiguous group.
+        A ``K > 1`` batched MXQ complicates the probe: the compiled batch
+        axis can occupy position ``-2`` and be reported dynamic even though
+        the runtime still emits per-item last-token logits (``"n_items"``).
+        Shape metadata alone cannot distinguish "token axis dynamic" from
+        "batch axis dynamic," so ``K > 1`` + dynamic ``-2`` returns ``None``
+        and defers to the :class:`MultiSlotDispatcher` runtime fallback,
+        which pins the answer from an unambiguous group.
+
+        Returns ``None`` when the shape accessor is missing / errors, when
+        the first output has fewer than two dims, or when the probe is
+        ambiguous (see above) — the runtime fallback then pins the answer.
         """
         if not self.mxq_models:
             return None
@@ -863,7 +870,14 @@ class MobilintNPUBackend:
             token_axis = int(first_shape[-2])
         except (TypeError, ValueError):
             return None
-        return "n_tokens" if token_axis == -1 else "n_items"
+        if token_axis != -1:
+            return "n_items"
+        if self.k_per_model > 1:
+            # Ambiguous: the ``-1`` at position -2 could be the compiled batch
+            # axis (K) rather than the token axis. Defer to the runtime
+            # fallback rather than lock the wrong layout.
+            return None
+        return "n_tokens"
 
     def dispose(self) -> None:
         """Release every model and accelerator handle held by this backend.

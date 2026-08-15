@@ -317,6 +317,63 @@ def test_dispatch_runtime_layout_fallback_pins_backend_cache() -> None:
     assert backend.output_layout == "n_items"
 
 
+def test_dispatch_reoverrides_stale_n_tokens_cache_from_runtime_observation() -> None:
+    """A ``K > 1`` batched MXQ whose probe misfired must be re-pinned at runtime.
+
+    Regression (P1): ``MobilintNPUBackend._probe_output_layout`` reads the
+    token axis at position ``-2`` of the compiled shape. For a batched MXQ
+    (K=16) whose batch axis is reported ``-1`` at that position, the probe
+    incorrectly pinned ``"n_tokens"``. ``_merge_group_outputs`` then sliced
+    per-item last-row outputs as if they were per-token flat, producing a
+    broadcast error on multi-slot dispatch.
+
+    This test simulates the failure: prime the backend cache with the wrong
+    ``"n_tokens"`` layout, dispatch a multi-slot prefill batch whose raw
+    outputs are per-item (``_StaticN1Mxq`` shape), and assert the dispatcher
+    overwrites the cache with the observed ``"n_items"`` layout and merges
+    without error.
+    """
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=2)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    # Simulate the probe misfire: cache "n_tokens" even though the fake MXQs
+    # emit per-item rows.
+    backend._set_output_layout("n_tokens")
+    assert backend.output_layout == "n_tokens"
+
+    class _RoutingCache:
+        # k=2 splits rows 0/1 -> slot 0, rows 2/3 -> slot 1. Multi-token
+        # sequence lengths guarantee unambiguous observation.
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            return divmod(row, 2)
+
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0, 1, 2, 3],
+        sequence_lengths=[3, 3, 3, 3],
+        cache_sizes=[0, 0, 0, 0],
+        inputs_embeds_chunks=[_make_embed(3) for _ in range(4)],
+        max_sequence_length=3,
+        past_key_values=_RoutingCache(),
+    )
+
+    # Merge succeeded with the corrected layout, one row per caller item.
+    assert merged.shape == (4, 3)
+    # Cache was overwritten to the observed layout.
+    assert backend.output_layout == "n_items"
+    # Row order preserved. ``_StaticN1Mxq`` fills every vocab entry with
+    # ``tag + 10 * local_cache_id + 0.1 * local_row_within_group``, so:
+    #   row 0 -> m0, local_cache_id=0, local_row=0 -> 0.0
+    #   row 1 -> m0, local_cache_id=1, local_row=1 -> 10.1
+    #   row 2 -> m1, local_cache_id=0, local_row=0 -> 100.0
+    #   row 3 -> m1, local_cache_id=1, local_row=1 -> 110.1
+    assert merged[0][0] == pytest.approx(0.0)
+    assert merged[1][0] == pytest.approx(10.1)
+    assert merged[2][0] == pytest.approx(100.0)
+    assert merged[3][0] == pytest.approx(110.1)
+
+
 # ---------------------------------------------------------------------------
 # N==1 guard
 # ---------------------------------------------------------------------------

@@ -228,13 +228,19 @@ truth when this snapshot becomes stale.
   and every downstream (Qwen3-VL deepstack included) delegate here rather than reimplementing
   the closure.
 - `MobilintNPUBackend.output_layout` (`"n_items"` or `"n_tokens"`) is a fixed property of the
-  compiled MXQ probed once from slot 0's `get_model_output_shape` — a `-1` on the token axis
-  (index `-2`) marks the artifact as per-token flat, any static value as per-item last row.
-  The layout drives `MultiSlotDispatcher._merge_group_outputs`; the old per-dispatch shape
-  inference is gone. When the compile-time probe is ambiguous or unavailable the dispatcher
-  inspects an unambiguous runtime group and pins the answer via `_set_output_layout` for the
-  remainder of the process, and hard-fails if every group in the dispatch collapses to
-  `n_rows == n_items == n_tokens`.
+  compiled MXQ probed once from slot 0's `get_model_output_shape` — a static value at index
+  `-2` marks the artifact as per-item last row. A `-1` at index `-2` maps to per-token flat
+  (`"n_tokens"`) only when `k_per_model == 1`; on a `K > 1` batched MXQ the compiled batch
+  axis can also be reported dynamic at that position, so the probe cannot disambiguate and
+  returns `None` (defers to the runtime fallback). The layout drives
+  `MultiSlotDispatcher._merge_group_outputs`; the old per-dispatch shape inference is gone.
+  When the compile-time probe is ambiguous or unavailable the dispatcher inspects an
+  unambiguous runtime group and pins the answer via `_set_output_layout` for the remainder
+  of the process, and hard-fails if every group in the dispatch collapses to
+  `n_rows == n_items == n_tokens`. Belt-and-suspenders: the dispatcher also cross-checks a
+  cached layout against every dispatch's observed row count and re-pins the backend cache
+  when they disagree, so a stale/incorrect compile-time probe self-heals on the first
+  unambiguous dispatch.
 - On HBM `BadAlloc` during `create` or `launch`, `MobilintNPUBackend` disposes every previously
   loaded slot and re-raises the underlying `qbruntime.QbRuntimeError` as
   `MobilintBackendAllocError` with `phase`, `slot`, `dev`, `succeeded_so_far`, `n_total`,
