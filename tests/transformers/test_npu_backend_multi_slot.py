@@ -67,15 +67,26 @@ class _FakeCacheInfo:
 class _FakeModel:
     """qbruntime.Model stand-in that always succeeds and records lifecycle events."""
 
-    def __init__(self, path: str, mc: _FakeModelConfig, k: int = 1, n_layers: int = 32) -> None:
+    def __init__(
+        self,
+        path: str,
+        mc: _FakeModelConfig,
+        k: int = 1,
+        n_layers: int = 32,
+        output_shape: tuple[int, ...] = (1, 1, 32000),
+    ) -> None:
         self.path = path
         self.mc = mc
         self.launched_on: _FakeAccelerator | None = None
         self.disposed = False
         self._cache_infos = [_FakeCacheInfo(k)] * int(n_layers)
+        self._output_shape = tuple(output_shape)
 
     def get_cache_infos(self):
         return self._cache_infos
+
+    def get_model_output_shape(self):
+        return [self._output_shape]
 
     def launch(self, acc: _FakeAccelerator) -> None:
         self.launched_on = acc
@@ -298,6 +309,92 @@ def test_probe_k_per_model_falls_back_on_driver_error(tmp_path, stub_qbruntime) 
 
     k = MobilintNPUBackend._probe_k_per_model(_BrokenModel("stub", _FakeModelConfig()))
     assert k == 1
+
+
+def test_output_layout_probe_returns_n_items_for_static_token_axis(tmp_path, stub_qbruntime) -> None:
+    """A static token-axis compiled MXQ (``(1, 1, vocab)``) probes as ``n_items``."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    assert backend.output_layout == "n_items"
+    # Result is cached on the backend for the rest of the process.
+    assert backend._output_layout_cached == "n_items"
+
+
+def test_output_layout_probe_returns_n_tokens_for_dynamic_token_axis(tmp_path, stub_qbruntime, monkeypatch) -> None:
+    """A ``-1`` sentinel on the token axis flags the MXQ as per-token flat."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    # Rewire slot 0's compiled output shape to the dynamic-axis form.
+    backend.mxq_models[0]._output_shape = (1, -1, 32000)
+    # Clear the cache so the next read forces a re-probe.
+    backend._output_layout_cached = None
+
+    assert backend.output_layout == "n_tokens"
+
+
+def test_output_layout_probe_returns_none_when_probe_raises(tmp_path, stub_qbruntime) -> None:
+    """Missing/erroring ``get_model_output_shape`` yields ``None`` so callers fall back."""
+    from qbruntime import QbRuntimeError
+
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    class _BrokenShape:
+        def get_model_output_shape(self):
+            raise QbRuntimeError("probe unavailable")
+
+    backend.mxq_models[0] = _BrokenShape()
+    backend._output_layout_cached = None
+    assert backend.output_layout is None
+
+
+def test_output_layout_setter_pins_backend_state(tmp_path, stub_qbruntime) -> None:
+    """The runtime fallback pins the answer via ``_set_output_layout``."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+    # Force an override to prove the setter caches.
+    backend._set_output_layout("n_tokens")
+    assert backend.output_layout == "n_tokens"
+
+
+def test_backend_dispatcher_property_wires_multi_slot_dispatcher(tmp_path, stub_qbruntime) -> None:
+    """``backend.dispatcher`` returns a live :class:`MultiSlotDispatcher`."""
+    from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    dispatcher = backend.dispatcher
+    assert isinstance(dispatcher, MultiSlotDispatcher)
+    # Cached: a second read returns the same instance.
+    assert backend.dispatcher is dispatcher
 
 
 def test_backend_infer_slot_dispatches_to_the_selected_model(

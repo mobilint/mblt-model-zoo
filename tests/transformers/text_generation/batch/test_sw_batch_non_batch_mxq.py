@@ -45,6 +45,36 @@ class _MultiSlotFakeBackend:
         # cacheless dispatch path in ``_run_batch_infer`` reads this to derive
         # ``(row // K, row % K)`` routing when ``past_key_values`` is absent.
         self.k_per_model = int(k_per_model)
+        self._output_layout_cached = None
+        self._dispatcher = None
+
+    @property
+    def output_layout(self):
+        cached = self._output_layout_cached
+        if cached is not None:
+            return cached
+        try:
+            shapes = self.mxq_models[0].get_model_output_shape()
+        except Exception:
+            return None
+        if not shapes:
+            return None
+        first_shape = tuple(shapes[0])
+        if len(first_shape) < 2:
+            return None
+        token_axis = int(first_shape[-2])
+        return "n_tokens" if token_axis == -1 else "n_items"
+
+    def _set_output_layout(self, layout):
+        self._output_layout_cached = layout
+
+    @property
+    def dispatcher(self):
+        if self._dispatcher is None:
+            from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+
+            self._dispatcher = MultiSlotDispatcher(self)
+        return self._dispatcher
 
 
 def _make_multi_slot_model(mxq_models: List[StaticLastOnlyMxq], k_per_model: int = 1) -> MobilintModelMixin:

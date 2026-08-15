@@ -100,7 +100,19 @@
 - Shared `MobilintModelMixin.decoder_forward` (BLIP text head) is `N==1` only — one blocking
   `mxq_model.infer` on slot 0 with no cross-slot routing / beam-cache reorder. `N>1` (e.g.
   `text_max_batch_size>K` on a `K==1` text MXQ) hard-fails with `NotImplementedError`; drop
-  `--batch-size` or compile a `K>1` text MXQ.
+  `--batch-size` or compile a `K>1` text MXQ. Guard is routed through
+  `MultiSlotDispatcher.assert_single_slot` so every `N==1` caller shares one enforcement site.
+- `MobilintNPUBackend.dispatcher` (`multi_slot_dispatch.MultiSlotDispatcher`) is the sole entry
+  point for batched NPU dispatch. Owns `slot_of` routing, single-group fast path, multi-group
+  `ThreadPoolExecutor` fan-out with worker-exception re-raise, NPU-time accounting (elapsed for
+  single-group; wall time for multi-group so parallel work is not double-counted), and per-group
+  merge. `modeling_utils._llm_forward_batch` collapses to a thin delegation.
+- `MobilintNPUBackend.output_layout` (`"n_items"` / `"n_tokens"`) probed once from slot 0's
+  `get_model_output_shape` (token axis `-2`: `-1` -> `"n_tokens"`, static -> `"n_items"`).
+  Consumed in `MultiSlotDispatcher._merge_group_outputs`; the old per-dispatch shape inference
+  is gone. Ambiguous or missing shape probe falls back to inspecting an unambiguous runtime
+  group and pins the answer via `_set_output_layout`; a wholly-ambiguous dispatch (every group
+  is `n_rows == n_items == n_tokens`) hard-fails rather than silently defaulting to layout A.
 - On HBM `BadAlloc`, `MobilintNPUBackend.create` / `.launch` disposes every previously loaded
   slot and re-raises as `MobilintBackendAllocError` with `phase`, `slot`, `dev`,
   `succeeded_so_far`, `n_total`, `max_batch_size`, `k_per_model` context. Callers should lower

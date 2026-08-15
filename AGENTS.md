@@ -216,7 +216,25 @@ truth when this snapshot becomes stale.
   `text_max_batch_size > K` on a `K == 1` text MXQ is rejected with a clear
   `NotImplementedError`. Users needing higher batched throughput should either drop the CLI
   `--batch-size` request or compile a batched (`K > 1`) text MXQ so slot-0 hardware batching
-  services the load.
+  services the load. The guard is routed through `MultiSlotDispatcher.assert_single_slot` so
+  every caller that requires `N == 1` shares one enforcement site.
+- Batched multi-slot NPU dispatch is centralized in
+  `mblt_model_zoo/hf_transformers/utils/multi_slot_dispatch.py::MultiSlotDispatcher`. It owns
+  slot routing (`slot_of`, `k_per_model`), single-vs-multi-group dispatch (single-group fast path;
+  multi-group `ThreadPoolExecutor` with `max_workers = len(groups)` and worker-exception
+  re-raise), NPU-time accounting (elapsed for single-group, wall time for multi-group so parallel
+  work is not double-counted), and merging per-group outputs back into caller row order.
+  `MobilintNPUBackend.dispatcher` is the sole entry point; `modeling_utils._llm_forward_batch`
+  and every downstream (Qwen3-VL deepstack included) delegate here rather than reimplementing
+  the closure.
+- `MobilintNPUBackend.output_layout` (`"n_items"` or `"n_tokens"`) is a fixed property of the
+  compiled MXQ probed once from slot 0's `get_model_output_shape` — a `-1` on the token axis
+  (index `-2`) marks the artifact as per-token flat, any static value as per-item last row.
+  The layout drives `MultiSlotDispatcher._merge_group_outputs`; the old per-dispatch shape
+  inference is gone. When the compile-time probe is ambiguous or unavailable the dispatcher
+  inspects an unambiguous runtime group and pins the answer via `_set_output_layout` for the
+  remainder of the process, and hard-fails if every group in the dispatch collapses to
+  `n_rows == n_items == n_tokens`.
 - On HBM `BadAlloc` during `create` or `launch`, `MobilintNPUBackend` disposes every previously
   loaded slot and re-raises the underlying `qbruntime.QbRuntimeError` as
   `MobilintBackendAllocError` with `phase`, `slot`, `dev`, `succeeded_so_far`, `n_total`,

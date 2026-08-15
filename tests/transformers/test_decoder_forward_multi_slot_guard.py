@@ -61,6 +61,24 @@ class _MultiSlotFakeBackend:
     def __init__(self, mxq_models: List[_RecordingCrossAttnMxq]) -> None:
         self.mxq_models = list(mxq_models)
         self.mxq_model = self.mxq_models[0]
+        self.k_per_model = 1
+        self._output_layout_cached = None
+        self._dispatcher = None
+
+    @property
+    def output_layout(self):
+        return self._output_layout_cached
+
+    def _set_output_layout(self, layout):
+        self._output_layout_cached = layout
+
+    @property
+    def dispatcher(self):
+        if self._dispatcher is None:
+            from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+
+            self._dispatcher = MultiSlotDispatcher(self)
+        return self._dispatcher
 
 
 def _make_encoder_decoder_model(mxq_models: List[_RecordingCrossAttnMxq]) -> MobilintModelMixin:

@@ -27,7 +27,7 @@ import logging
 import math
 import os
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError
@@ -174,6 +174,15 @@ class MobilintNPUBackend:
         self.model_dev_no: List[int] = []
         self.k_per_model: int = 1
         self.n_models: int = 0
+        # Cached batched-infer output layout. Populated lazily by
+        # :attr:`output_layout` from the compiled MXQ shape probe or the
+        # runtime fallback in :mod:`multi_slot_dispatch`.
+        self._output_layout_cached: Optional[Literal["n_items", "n_tokens"]] = None
+        # Cached :class:`MultiSlotDispatcher` bound to this backend. Populated
+        # lazily by :attr:`dispatcher` so callers can import the backend
+        # without pulling the ``hf_transformers`` package into the compile-only
+        # path.
+        self._dispatcher: Optional[Any] = None
 
         # Collapse the four target-topology fields into a single frozen
         # :class:`NPUTargetSpec`. Every per-field setter below rebuilds
@@ -768,6 +777,89 @@ class MobilintNPUBackend:
             :class:`~qbruntime.Model` for slot 0.
         """
         return self.mxq_models[0].get_input_buffer_info()
+
+    # ---- Multi-slot dispatch ------------------------------------------------
+
+    @property
+    def dispatcher(self):
+        """Return the :class:`MultiSlotDispatcher` bound to this backend.
+
+        Imported lazily so the base ``mblt_model_zoo.utils`` package does not
+        pull the ``hf_transformers`` dependency graph into the compile-only
+        code path.
+        """
+        if self._dispatcher is None:
+            from ..hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+
+            self._dispatcher = MultiSlotDispatcher(self)
+        return self._dispatcher
+
+    # ---- Output layout probe ------------------------------------------------
+
+    @property
+    def output_layout(self) -> Optional[Literal["n_items", "n_tokens"]]:
+        """Return the compiled batched-infer output layout, or ``None`` when unknown.
+
+        Two layouts show up in practice for a batched LLM MXQ call:
+        ``"n_items"`` (one row per active batch item — a static last-token
+        MXQ, or a dynamic-axis kernel that collapses the token axis for
+        batched dispatch) and ``"n_tokens"`` (one row per input token,
+        emitted by a truly dynamic-axis MXQ).
+
+        The layout is a fixed property of the compiled MXQ — every slot in
+        the backend runs the same artifact — so we probe it once from slot
+        0's :meth:`qbruntime.Model.get_model_output_shape` output and cache
+        the result. When the shape probe is ambiguous or the accessor is
+        missing, this returns ``None`` and :class:`MultiSlotDispatcher`
+        falls back to inspecting an unambiguous runtime group and pins the
+        answer via :meth:`_set_output_layout` for the remainder of the
+        process. Never defaults silently.
+        """
+        cached = self._output_layout_cached
+        if cached is not None:
+            return cached
+        probed = self._probe_output_layout()
+        if probed is not None:
+            self._output_layout_cached = probed
+        return probed
+
+    def _set_output_layout(self, layout: Literal["n_items", "n_tokens"]) -> None:
+        """Cache the runtime-observed output layout for the rest of this backend's life."""
+        if layout not in ("n_items", "n_tokens"):
+            raise ValueError(f"invalid output layout: {layout!r}")
+        self._output_layout_cached = layout
+
+    def _probe_output_layout(self) -> Optional[Literal["n_items", "n_tokens"]]:
+        """Probe the batched output layout from slot 0's compiled shape.
+
+        LLM MXQs declare their token axis at index ``-2`` of the first
+        output shape. A ``-1`` sentinel marks the axis as dynamic (per-token
+        streaming; layout is ``"n_tokens"``); any static value collapses
+        the token axis to a single row per batch item (layout ``"n_items"``).
+
+        Returns ``None`` when the shape accessor is missing / errors, or when
+        the first output has fewer than two dims — the runtime fallback in
+        :class:`MultiSlotDispatcher` then pins the answer from an
+        unambiguous group.
+        """
+        if not self.mxq_models:
+            return None
+        first = self.mxq_models[0]
+        try:
+            shapes = first.get_model_output_shape()
+        except (AttributeError, QbRuntimeError) as exc:
+            logger.debug("output_layout: get_model_output_shape unavailable (%s)", exc)
+            return None
+        if not shapes:
+            return None
+        first_shape = tuple(shapes[0])
+        if len(first_shape) < 2:
+            return None
+        try:
+            token_axis = int(first_shape[-2])
+        except (TypeError, ValueError):
+            return None
+        return "n_tokens" if token_axis == -1 else "n_items"
 
     def dispose(self) -> None:
         """Release every model and accelerator handle held by this backend.
