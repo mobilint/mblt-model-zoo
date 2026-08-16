@@ -1030,6 +1030,24 @@ def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Name
     )
 
 
+def _qwen3_vl_batched_non_batch_text_mxq_message(model: str, max_batch_size: int) -> str:
+    """Shared reject message for the Qwen3-VL batched sw-batch guard.
+
+    Kept between the pre-launch fast path
+    (:func:`_reject_qwen3_vl_batched_non_batch_text_mxq`) and the post-launch
+    verifier (:func:`_verify_qwen3_vl_batch_constraint_post_launch`) so both
+    surfaces raise the same ``SystemExit`` text.
+    """
+    return (
+        "tps: batched Qwen3-VL sw-batch requires a batched text MXQ (K > 1). "
+        "The selected release ships a non-batch text MXQ (K = 1) whose "
+        "[inputs, deepstack, rope] signature is incompatible with the Batch16 "
+        "[inputs, rope, deepstack] layout expected by the batched path. "
+        "Drop --batch-size or use a Batch16 release "
+        f"(model={model!r}, --batch-size={int(max_batch_size)})."
+    )
+
+
 def _reject_qwen3_vl_batched_non_batch_text_mxq(
     *,
     model: str,
@@ -1039,7 +1057,7 @@ def _reject_qwen3_vl_batched_non_batch_text_mxq(
     revision: str | None,
     subconfig_options: SubconfigPipelineOptions | None,
 ) -> None:
-    """Reject ``--batch-size B > 1`` on a Qwen3-VL release that ships a non-batch text MXQ.
+    """Fast-path reject for ``--batch-size B > 1`` on a Qwen3-VL non-batch text MXQ.
 
     ``MobilintQwen3VLTextModel._llm_forward_batch_deepstack`` only supports the
     3-input ``[inputs, rope, deepstack]`` Batch16 layout. Routing ``B > 1`` onto
@@ -1048,16 +1066,16 @@ def _reject_qwen3_vl_batched_non_batch_text_mxq(
     ``[inputs, deepstack, rope]`` order does not match the batched helper's
     packed ``[rope, deepstack]`` extras).
 
-    Precedence for the compiled ``K`` probe:
-
-    * A user-supplied ``--text-mxq-path`` local file wins (probed via
-      :func:`_probe_mxq_artifact_k`).
-    * Otherwise fall back to the release's ``text_config.max_batch_size``
-      declaration (via :func:`_probe_config_max_batch_size`), which the
-      shipped release config sets to the compiled batch axis.
-
-    Probe failures (missing extras, non-local override, unavailable metadata)
-    fall through silently so the guard does not false-positive.
+    Probes the compiled ``K`` only through a locally-resolvable
+    ``--text-mxq-path`` (via :func:`_probe_mxq_artifact_k`). When the override
+    is Hub-relative or absent, the probe returns ``None`` and the guard defers
+    to :func:`_verify_qwen3_vl_batch_constraint_post_launch`, which reads the
+    authoritative ``k_per_model`` off the launched text backend. The release
+    config's ``text_config.max_batch_size`` is intentionally NOT consulted
+    here: it reflects the shipped artifact, not the ``--text-mxq-path``
+    override, so a Batch16 release with a non-batch override would be false-
+    approved and a non-batch release with a batched override would be false-
+    rejected.
     """
     if max_batch_size <= 1:
         return
@@ -1065,32 +1083,57 @@ def _reject_qwen3_vl_batched_non_batch_text_mxq(
         return
 
     text_override = subconfig_options.text_mxq_path if subconfig_options is not None else None
-    probed_k: int | None = None
-    if text_override:
-        probed_k = _probe_mxq_artifact_k(text_override)
-    if probed_k is None:
-        # ``_probe_config_max_batch_size`` returns ``1`` when the config lookup
-        # fails; that already matches the "no batching" default we would reject
-        # on, but Qwen3-VL detection above already required a successful
-        # AutoConfig load, so a fallback ``1`` here signals a genuine non-batch
-        # release.
-        probed_k = _probe_config_max_batch_size(
-            model,
-            trust_remote_code=trust_remote_code,
-            revision=revision,
-            task=task,
-        )
+    if not text_override:
+        return
+    probed_k = _probe_mxq_artifact_k(text_override)
     if probed_k is None or probed_k > 1:
         return
 
-    raise SystemExit(
-        "tps: batched Qwen3-VL sw-batch requires a batched text MXQ (K > 1). "
-        "The selected release ships a non-batch text MXQ (K = 1) whose "
-        "[inputs, deepstack, rope] signature is incompatible with the Batch16 "
-        "[inputs, rope, deepstack] layout expected by the batched path. "
-        "Drop --batch-size or use a Batch16 release "
-        f"(model={model!r}, --batch-size={int(max_batch_size)})."
-    )
+    raise SystemExit(_qwen3_vl_batched_non_batch_text_mxq_message(model, max_batch_size))
+
+
+def _verify_qwen3_vl_batch_constraint_post_launch(pipeline: Any, args: argparse.Namespace) -> None:
+    """Post-launch counterpart to :func:`_reject_qwen3_vl_batched_non_batch_text_mxq`.
+
+    The pre-launch guard only rejects when a locally-resolvable
+    ``--text-mxq-path`` override probes ``K == 1``; a Hub-relative override
+    (a filename inside the release repo, not a local path) or an unset
+    override yields ``probed_k is None`` and the pre-launch guard defers.
+    This post-launch verifier reads the authoritative ``k_per_model`` off the
+    constructed text backend — reflecting the actually loaded artifact, not
+    the shipped release config's ``text_config.max_batch_size`` — and raises
+    the same friendly :class:`SystemExit` when ``K == 1`` under
+    ``--batch-size B > 1``.
+
+    Non-VLM tasks, ``batch_size <= 1``, non-Qwen3-VL releases, and unknown
+    model structures fall through silently, matching the pre-launch guard's
+    fall-through discipline.
+
+    TODO(beomsu): unify with :func:`_verify_batched_mxq_core_mode_post_launch`
+    if a general ``_verify_backend_k(pipeline, k_predicate, error_factory)``
+    helper lands.
+    """
+    task = getattr(args, "task", None)
+    if not _is_vlm_task(task):
+        return
+    batch_size = getattr(args, "batch_size", None)
+    if batch_size is None or int(batch_size) <= 1:
+        return
+    model = getattr(args, "model", None)
+    if not model:
+        return
+    trust_remote_code = getattr(args, "trust_remote_code", True)
+    revision = getattr(args, "revision", None)
+    if not _detect_qwen3_vl_model(model, trust_remote_code=trust_remote_code, revision=revision):
+        return
+    inner = getattr(pipeline, "model", None)
+    backend = _resolve_llm_npu_backend(inner)
+    if backend is None:
+        return
+    k = getattr(backend, "k_per_model", None)
+    if not isinstance(k, int) or k > 1:
+        return
+    raise SystemExit(_qwen3_vl_batched_non_batch_text_mxq_message(str(model), int(batch_size)))
 
 
 def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:
@@ -2370,6 +2413,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         dev_no=getattr(args, "dev_no", None),
     )
     _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -2714,6 +2758,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         dev_no=getattr(args, "dev_no", None),
     )
     _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
@@ -3278,6 +3323,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         dev_no=getattr(args, "dev_no", None),
     )
     _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
 
@@ -3767,6 +3813,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         dev_no=getattr(args, "dev_no", None),
     )
     _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
 

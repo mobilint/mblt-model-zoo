@@ -1429,13 +1429,17 @@ def test_build_pipeline_non_qwen3_vl_vlm_allows_batch_gt_one_on_k1(monkeypatch) 
     assert pipe.model_kwargs.get("text_max_batch_size") == 2
 
 
-def test_build_pipeline_qwen3_vl_falls_back_to_config_when_no_text_mxq_override(monkeypatch) -> None:
-    """Without ``--text-mxq-path``, the guard falls back to config ``text_config.max_batch_size``."""
+def test_build_pipeline_qwen3_vl_defers_when_no_text_mxq_override(monkeypatch) -> None:
+    """Without ``--text-mxq-path``, the pre-launch guard defers to the post-launch verifier.
+
+    The release config's ``text_config.max_batch_size`` reflects the shipped
+    artifact — not the (potentially Hub-relative) override — so the pre-launch
+    guard must not consult it. Post-launch verification against the launched
+    text backend's ``k_per_model`` is the authoritative check.
+    """
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
     monkeypatch.setattr(
-        importlib.import_module("transformers"),
-        "pipeline",
-        lambda **kwargs: pytest.fail("pipeline() should not be reached when Qwen3-VL rejection fires"),
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
     )
     monkeypatch.setattr(
         tps_cli,
@@ -1447,34 +1451,218 @@ def test_build_pipeline_qwen3_vl_falls_back_to_config_when_no_text_mxq_override(
         "_detect_qwen3_vl_model",
         lambda model, *, trust_remote_code, revision: True,
     )
+    # If the pre-launch fallback ever reintroduces a config probe, this fails.
     monkeypatch.setattr(
         tps_cli,
         "_probe_config_max_batch_size",
-        lambda model, *, trust_remote_code, revision, task: 1,
+        lambda *a, **kw: pytest.fail("pre-launch Qwen3-VL guard must not consult the release config"),
     )
 
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._build_pipeline(
-            task="image-text-to-text",
-            model="mobilint/Qwen3-VL-8B",
-            tokenizer=None,
-            device="cpu",
-            trust_remote_code=True,
-            dtype=None,
-            device_map=None,
-            revision=None,
-            embedding_weight=None,
-            eagle3_options=tps_cli.Eagle3PipelineOptions(),
-            mxq_path=None,
-            core_mode=None,
-            target_cores=None,
-            target_clusters=None,
-            default_single_target_cores=None,
-            subconfig_options=tps_cli.SubconfigPipelineOptions(),
-            max_batch_size=4,
-        )
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=4,
+    )
 
-    assert "batched Qwen3-VL sw-batch requires a batched text MXQ" in str(excinfo.value)
+    assert pipe.model_kwargs.get("text_max_batch_size") == 4
+
+
+def test_build_pipeline_qwen3_vl_defers_when_text_mxq_probe_returns_none(monkeypatch) -> None:
+    """A Hub-relative ``--text-mxq-path`` (probe returns None) must NOT fall back to the config.
+
+    Reviewer's concrete case: a Batch16 release config declares K=16, but the
+    caller overrides the shipped text MXQ with a Hub-relative artifact whose
+    K might be 1. The pre-launch guard cannot resolve K cheaply, so it must
+    defer instead of false-approving based on the unselected config's K=16.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(tps_cli, "_probe_mxq_artifact_k", lambda path: None)  # non-local
+    monkeypatch.setattr(
+        tps_cli,
+        "_probe_config_max_batch_size",
+        lambda *a, **kw: pytest.fail("pre-launch Qwen3-VL guard must not consult the release config"),
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B-Batch16",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(text_mxq_path="text-k1.mxq"),
+        max_batch_size=2,
+    )
+
+    assert pipe.model_kwargs.get("text_max_batch_size") == 2
+
+
+def _make_qwen3_vl_measure_args(**overrides) -> argparse.Namespace:
+    """Parse a ``tps measure --task image-text-to-text`` args namespace for post-launch tests."""
+    parser = build_parser()
+    argv = [
+        "tps",
+        "measure",
+        "--task",
+        "image-text-to-text",
+        "--model",
+        "mobilint/Qwen3-VL-8B",
+    ]
+    for key, value in overrides.items():
+        argv.extend([key, str(value)])
+    return parser.parse_args(argv)
+
+
+class _FakeQwen3VLBackend:
+    """Minimal ``MobilintNPUBackend`` stand-in exposing ``k_per_model``."""
+
+    def __init__(self, k: int) -> None:
+        self.k_per_model = k
+
+
+def _fake_qwen3_vl_pipeline(k: int) -> SimpleNamespace:
+    """Return a pipeline whose ``.model.model.language_model.npu_backend`` mimics Qwen3-VL."""
+    language_model = SimpleNamespace(npu_backend=_FakeQwen3VLBackend(k))
+    inner = SimpleNamespace(language_model=language_model)
+    return SimpleNamespace(model=SimpleNamespace(model=inner))
+
+
+def test_verify_qwen3_vl_post_launch_rejects_k1_on_hub_relative_override(monkeypatch) -> None:
+    """Hub-relative --text-mxq-path (probe returns None) + K=1 backend must reject post-launch."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = _fake_qwen3_vl_pipeline(k=1)
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+    message = str(excinfo.value)
+    assert "batched Qwen3-VL sw-batch requires a batched text MXQ" in message
+    assert "--batch-size=2" in message
+    assert "mobilint/Qwen3-VL-8B" in message
+
+
+def test_verify_qwen3_vl_post_launch_accepts_k_gt_1_on_batched_release(monkeypatch) -> None:
+    """Reviewer's Batch16 case: config K=16 stale, actual launched K=16 must not reject."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = _fake_qwen3_vl_pipeline(k=16)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_skips_non_qwen3_vl_release(monkeypatch) -> None:
+    """Non-Qwen3-VL VLM release: post-launch guard falls through (regression guard)."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = _fake_qwen3_vl_pipeline(k=1)  # would reject if detection said yes
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_skips_batch_size_one(monkeypatch) -> None:
+    """--batch-size <= 1: post-launch guard falls through (no sw-batch fan-out possible)."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda *a, **kw: pytest.fail("detection should not run when batch_size <= 1"),
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=1)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_skips_non_vlm_task(monkeypatch) -> None:
+    """Non-VLM task: post-launch guard falls through even when detection would say yes."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda *a, **kw: pytest.fail("detection should not run on non-VLM tasks"),
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--task",
+            "text-generation",
+            "--model",
+            "mobilint/Qwen3-4B",
+            "--batch-size",
+            "2",
+        ]
+    )
+    pipeline = _fake_qwen3_vl_pipeline(k=1)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_skips_when_backend_missing(monkeypatch) -> None:
+    """No text-side ``npu_backend`` (non-Mobilint pipeline): fall through silently."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = SimpleNamespace(model=SimpleNamespace())  # no npu_backend
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
 
 
 def test_is_qwen3_vl_config_detects_model_type_marker() -> None:
