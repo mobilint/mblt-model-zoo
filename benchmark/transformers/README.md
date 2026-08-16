@@ -551,10 +551,15 @@ failed-target rows for that mode even when the original process crashed mid-run.
 `skipped_records.json` files from earlier runs are ignored on read. A new normal run preloads
 the current mode's sidecar so a subset re-run does not drop failed-target rows recorded by a
 prior run; if a preloaded target now succeeds during the current run, its stale skip row is
-dropped before the final rebuild persists the reconciled sidecar and combined outputs. The
-sidecar keeps at most one row per target (identified by its model label): a later failure for
-the same target replaces the earlier record, so retries do not accumulate duplicate rows in the
-sidecar or rebuilt combined outputs.
+dropped before the final rebuild persists the reconciled sidecar and combined outputs.
+Reconciliation also scans the current mode's per-target result JSONs already on disk, so a
+preloaded skip row for a target whose successful result was written by a prior process — for
+example a `--skip-existing` retry that succeeded but crashed before reaching the final rebuild
+— is dropped even when the current loop never re-runs that target. `--rebuild-charts` alone
+applies the same disk-scan reconciliation to the loaded sidecar before writing the combined
+outputs. The sidecar keeps at most one row per target (identified by its model label): a later
+failure for the same target replaces the earlier record, so retries do not accumulate duplicate
+rows in the sidecar or rebuilt combined outputs.
 
 ```bash
 # Retry the GPU target at a smaller batch after the NPU row was cached.

@@ -220,20 +220,77 @@ def _write_skipped_sidecar(output_dir: str | Path, records: Sequence[dict[str, A
     os.replace(tmp, path)
 
 
+def _labels_from_existing_result_jsons(output_dir: str | Path, benchmark_type: str) -> set[str]:
+    """Return model labels present as per-target result JSONs at ``output_dir``.
+
+    Scans on-disk per-target JSONs (from successful runs in the current or a
+    prior process) and returns their ``payload["model"]`` labels so
+    reconciliation can drop stale skip rows for targets that a ``--skip-existing``
+    pass never re-runs. Filters by ``benchmark_type``: measure reads
+    ``*_measure.json`` payloads that declare ``benchmark_type == "measure"``;
+    sweep reads ``*.json`` payloads that lack that marker, excluding the mode-
+    specific skip sidecars and the host_pc_info file. Missing directories and
+    unreadable or malformed JSON files are treated as absent.
+    """
+    if benchmark_type not in _SKIPPED_SIDECAR_MODES:
+        raise ValueError(f"benchmark_type must be one of {_SKIPPED_SIDECAR_MODES}, got {benchmark_type!r}")
+    output_dir = Path(output_dir)
+    if not output_dir.is_dir():
+        return set()
+    labels: set[str] = set()
+    candidates = sorted(output_dir.glob("*_measure.json" if benchmark_type == "measure" else "*.json"))
+    for path in candidates:
+        if _is_skipped_sidecar_name(path.name):
+            continue
+        if benchmark_type == "sweep" and path.name == _HOST_PC_INFO_FILENAME:
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload_bench = payload.get("benchmark_type")
+        if benchmark_type == "measure":
+            if payload_bench != "measure":
+                continue
+        else:
+            if payload_bench == "measure":
+                continue
+        label = payload.get("model")
+        if isinstance(label, str) and label:
+            labels.add(label)
+    return labels
+
+
 def _drop_stale_skips_for_successful_targets(
     skipped_records: list[dict[str, Any]],
     successful_labels: Iterable[str],
+    *,
+    output_dir: str | Path | None = None,
+    benchmark_type: str | None = None,
 ) -> None:
     """Drop skip rows for targets that now have a successful per-target JSON.
 
-    A model label present in ``successful_labels`` produced a fresh per-target
-    result during this run, so any preloaded skip row for that label from a
-    prior run's sidecar is stale and must be removed before the final rebuild
-    persists the reconciled combined list. The list is mutated in place so all
-    references to ``skipped_records`` (mid-run handlers and the final rebuild)
-    observe the same reconciled contents.
+    The reconciliation set is the union of:
+
+    * ``successful_labels`` — targets that produced a fresh per-target JSON in
+      the current process.
+    * When ``output_dir`` and ``benchmark_type`` are both supplied, labels read
+      from existing per-target JSONs on disk. This covers ``--skip-existing``
+      targets whose result JSON was written by a prior process — the current
+      loop ``continue``s past them without adding to ``successful_labels`` —
+      and ``--rebuild-charts`` invocations that only touch the sidecar.
+
+    The list is mutated in place so all references to ``skipped_records`` (mid-
+    run handlers and the final rebuild) observe the same reconciled contents.
     """
+    if (output_dir is None) != (benchmark_type is None):
+        raise ValueError("output_dir and benchmark_type must be provided together")
     labels = {label for label in successful_labels if label}
+    if output_dir is not None and benchmark_type is not None:
+        labels |= _labels_from_existing_result_jsons(output_dir, benchmark_type)
     if not labels:
         return
     skipped_records[:] = [record for record in skipped_records if record.get("model") not in labels]
@@ -1129,6 +1186,10 @@ def _rebuild_combined_outputs(
     combined_device_rows: list[dict[str, float | str | None]] = []
     if skipped_records is None:
         skipped_records = _read_skipped_sidecar(output_dir, "sweep")
+        before_len = len(skipped_records)
+        _drop_stale_skips_for_successful_targets(skipped_records, set(), output_dir=output_dir, benchmark_type="sweep")
+        if before_len != len(skipped_records):
+            _write_skipped_sidecar(output_dir, skipped_records, "sweep")
     else:
         skipped_records = list(skipped_records)
         _write_skipped_sidecar(output_dir, skipped_records, "sweep")
@@ -2112,7 +2173,9 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
         _release_pipeline(pipeline, target_args.device)
 
-    _drop_stale_skips_for_successful_targets(skipped_records, successful_labels)
+    _drop_stale_skips_for_successful_targets(
+        skipped_records, successful_labels, output_dir=output_dir, benchmark_type="sweep"
+    )
     _rebuild_combined_outputs(output_dir, skipped_records=skipped_records)
 
     return 0
@@ -2297,6 +2360,12 @@ def _rebuild_measure_outputs(
             payloads.append(payload)
     if skipped_records is None:
         skipped_records = _read_skipped_sidecar(output_dir, "measure")
+        before_len = len(skipped_records)
+        _drop_stale_skips_for_successful_targets(
+            skipped_records, set(), output_dir=output_dir, benchmark_type="measure"
+        )
+        if before_len != len(skipped_records):
+            _write_skipped_sidecar(output_dir, skipped_records, "measure")
     else:
         skipped_records = list(skipped_records)
         _write_skipped_sidecar(output_dir, skipped_records, "measure")
@@ -2682,7 +2751,9 @@ def _run_measure(args: argparse.Namespace) -> int:
                 print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, target_args.device)
-    _drop_stale_skips_for_successful_targets(skipped_records, successful_labels)
+    _drop_stale_skips_for_successful_targets(
+        skipped_records, successful_labels, output_dir=output_dir, benchmark_type="measure"
+    )
     _rebuild_measure_outputs(output_dir, skipped_records=skipped_records)
     return 0
 
