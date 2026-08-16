@@ -539,6 +539,31 @@ class MobilintBeamCache(MobilintCache):
         self._active_source_index = None
         self._beam_seq_lengths = [0 for _ in range(self.batch_size)]
 
+    def matches_live_topology(
+        self,
+        expected_mxq_model: qbruntime.Model,
+        n_slots: Optional[int] = None,
+    ) -> bool:
+        """Return True when this cache can be reused for the current backend topology.
+
+        The beam-cache contract is ``N == 1``: one active qbruntime cache and one
+        Model handle. Callers reuse an existing beam cache via :meth:`reset`, but
+        the constructor-time guard does not re-run on that path. This helper
+        performs the same invariant check so ``_get_cache`` implementations can
+        rebuild rather than reset when either (a) the owning backend now hosts
+        more than one slot (breaking the ``N == 1`` contract) or (b) the stored
+        Model handle no longer matches the current slot 0 (the backend was
+        disposed and re-created with a fresh Model).
+        """
+        if n_slots is not None and int(n_slots) > 1:
+            return False
+        cached_models = getattr(self, "mxq_models", None)
+        if not cached_models:
+            return False
+        if len(cached_models) != 1:
+            return False
+        return cached_models[0] is expected_mxq_model
+
     def ensure_batch_size(self, batch_size: int) -> None:
         """Grow logical beam token storage for beam-expanded generation."""
         previous_batch_size = self.batch_size
