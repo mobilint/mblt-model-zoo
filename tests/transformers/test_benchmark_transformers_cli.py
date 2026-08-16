@@ -1818,6 +1818,91 @@ def test_text_drop_stale_skips_fresh_success_and_failure_mix(tmp_path) -> None:
     assert [record["model"] for record in skipped_records] == ["model-y"]
 
 
+def test_text_rebuild_measure_excludes_stale_success_for_skipped_target(tmp_path) -> None:
+    """Fresh failure preserved via ``skipped_records=`` excludes stale on-disk success.
+
+    Follow-up to task ``2efaa``: when a fresh in-process failure for ``model-x``
+    is passed through ``skipped_records`` while a prior ``model-x_measure.json``
+    still sits on disk, the rebuilt combined CSV must contain only the fresh
+    skip row — not a duplicate passing row derived from the stale JSON.
+    """
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
+
+    # Stale JSON stays on disk for manual inspection.
+    assert (tmp_path / "model-x_measure.json").exists()
+    rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
+    passing_rows = [row for row in rows if row.get("model") == "model-x" and row.get("skipped_reason", "") == ""]
+    assert passing_rows == []
+    skipped_rows = [row for row in rows if row.get("model") == "model-x" and row.get("skipped_reason") == "cuda_oom"]
+    assert len(skipped_rows) == 1
+
+
+def test_text_rebuild_measure_keeps_success_when_sidecar_empty(tmp_path) -> None:
+    """Regression guard: no matching sidecar row keeps the on-disk success payload."""
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+
+    rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
+    model_rows = [row for row in rows if row.get("model") == "model-x"]
+    assert len(model_rows) == 1
+    assert model_rows[0].get("skipped_reason", "") == ""
+
+
+def test_text_rebuild_measure_keeps_success_for_unrelated_target(tmp_path) -> None:
+    """Unrelated Y success + X skip yields both rows without cross-contamination."""
+    _write_measure_result_json(tmp_path / "model-y_measure.json", "model-y")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-x", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+
+    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
+
+    rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
+    labels_and_reason = [(row.get("model"), row.get("skipped_reason", "")) for row in rows]
+    assert ("model-y", "") in labels_and_reason
+    assert ("model-x", "npu_alloc") in labels_and_reason
+    assert ("model-x", "") not in labels_and_reason
+
+
+def test_text_rebuild_sweep_excludes_stale_success_for_skipped_target(tmp_path) -> None:
+    """Sweep sibling: fresh failure via ``skipped_records=`` excludes stale sweep JSON."""
+    _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "sweep-x", "batch_size": 16, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+
+    text_bench._rebuild_combined_outputs(tmp_path, skipped_records=skipped_records)
+
+    assert (tmp_path / "sweep-x.json").exists()
+    rows = list(csv.DictReader((tmp_path / "combined.csv").open("r", encoding="utf-8")))
+    passing_rows = [row for row in rows if row.get("model") == "sweep-x" and row.get("skipped_reason", "") == ""]
+    assert passing_rows == []
+    skipped_rows = [row for row in rows if row.get("model") == "sweep-x" and row.get("skipped_reason") == "npu_alloc"]
+    assert len(skipped_rows) == 1
+
+
+def test_text_rebuild_sweep_keeps_success_for_unrelated_target(tmp_path) -> None:
+    """Sweep sibling: unrelated Y success + X skip yields both rows."""
+    _write_sweep_result_json(tmp_path / "sweep-y.json", "sweep-y")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "sweep-x", "batch_size": 16, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+
+    text_bench._rebuild_combined_outputs(tmp_path, skipped_records=skipped_records)
+
+    rows = list(csv.DictReader((tmp_path / "combined.csv").open("r", encoding="utf-8")))
+    labels_and_reason = {(row.get("model"), row.get("skipped_reason", "")) for row in rows}
+    assert ("sweep-y", "") in labels_and_reason
+    assert ("sweep-x", "npu_alloc") in labels_and_reason
+    assert ("sweep-x", "") not in labels_and_reason
+
+
 def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
     """Verify old text sweep JSON without latency arrays still produces rows."""
     payload = {

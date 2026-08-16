@@ -1205,6 +1205,18 @@ def _rebuild_combined_outputs(
     *,
     skipped_records: Sequence[dict[str, Any]] | None = None,
 ) -> None:
+    """Rebuild combined text-generation sweep CSV, Markdown, and charts.
+
+    A per-target sweep JSON on disk is superseded when the finalized
+    ``skipped_records`` contain a matching entry for its label. A fresh
+    in-process failure (task ``2efaa``) or a preloaded sidecar row that is
+    not reconciled away by :func:`_drop_stale_skips_for_successful_targets`
+    represents the current-run outcome for that target; letting the older
+    passing payload also flow into the combined CSV / Markdown / charts
+    would double-represent the target as both a success and a skip. The
+    stale JSON is left on disk for manual inspection — only the rebuilt
+    aggregate view drops it.
+    """
     output_dir = Path(output_dir)
     combined_results = []
     combined_rows = []
@@ -1218,6 +1230,9 @@ def _rebuild_combined_outputs(
     else:
         skipped_records = list(skipped_records)
         _write_skipped_sidecar(output_dir, skipped_records, "sweep")
+    skipped_labels = {
+        record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
+    }
     for path in sorted(output_dir.glob("*.json")):
         if _is_skipped_sidecar_name(path.name):
             continue
@@ -1232,6 +1247,8 @@ def _rebuild_combined_outputs(
             continue
         label = payload.get("model")
         if not isinstance(label, str) or not label:
+            continue
+        if label in skipped_labels:
             continue
         json_path = str(path)
         result = _load_result(json_path)
@@ -2384,16 +2401,19 @@ def _rebuild_measure_outputs(
     *,
     skipped_records: Sequence[dict[str, Any]] | None = None,
 ) -> None:
-    """Rebuild combined text-generation measure CSV, Markdown, and charts."""
+    """Rebuild combined text-generation measure CSV, Markdown, and charts.
+
+    A per-target ``*_measure.json`` on disk is superseded when the finalized
+    ``skipped_records`` contain a matching entry for its label. A fresh
+    in-process failure (task ``2efaa``) or a preloaded sidecar row that is
+    not reconciled away by :func:`_drop_stale_skips_for_successful_targets`
+    represents the current-run outcome for that target; letting the older
+    passing payload also flow into the combined CSV / Markdown / charts
+    would double-represent the target as both a success and a skip. The
+    stale JSON is left on disk for manual inspection — only the rebuilt
+    aggregate view drops it.
+    """
     output_dir = Path(output_dir)
-    payloads: list[dict[str, Any]] = []
-    for path in sorted(output_dir.glob("*_measure.json")):
-        if _is_skipped_sidecar_name(path.name):
-            continue
-        with path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if isinstance(payload, dict) and payload.get("benchmark_type") == "measure":
-            payloads.append(payload)
     if skipped_records is None:
         skipped_records = _read_skipped_sidecar(output_dir, "measure")
         before_len = len(skipped_records)
@@ -2405,6 +2425,20 @@ def _rebuild_measure_outputs(
     else:
         skipped_records = list(skipped_records)
         _write_skipped_sidecar(output_dir, skipped_records, "measure")
+    skipped_labels = {
+        record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
+    }
+    payloads: list[dict[str, Any]] = []
+    for path in sorted(output_dir.glob("*_measure.json")):
+        if _is_skipped_sidecar_name(path.name):
+            continue
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict) or payload.get("benchmark_type") != "measure":
+            continue
+        if payload.get("model") in skipped_labels:
+            continue
+        payloads.append(payload)
     if not payloads and not skipped_records:
         print("No measure JSON results found. Nothing to aggregate.")
         _write_text_generation_summary(output_dir, measure=True)
