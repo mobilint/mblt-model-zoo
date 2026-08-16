@@ -502,6 +502,45 @@ def _detect_eagle3_model(
     return _is_eagle3_config(config)
 
 
+def _is_qwen3_vl_config(config: Any) -> bool:
+    """Return whether a Transformers config appears to describe a Mobilint Qwen3-VL release."""
+    model_type = str(getattr(config, "model_type", "") or "").lower()
+    if "qwen3_vl" in model_type or "qwen3-vl" in model_type:
+        return True
+
+    architectures = getattr(config, "architectures", None)
+    if isinstance(architectures, (list, tuple)):
+        return any("qwen3vl" in str(item).lower() or "qwen3_vl" in str(item).lower() for item in architectures)
+
+    return False
+
+
+def _detect_qwen3_vl_model(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> bool:
+    """Return whether the loaded model release appears to be a Mobilint Qwen3-VL bundle.
+
+    Failures to load ``AutoConfig`` are non-fatal: the caller silently falls back to the
+    non-Qwen3-VL path, matching prior behavior when auto-detection is unavailable.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return False
+
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return False
+    return _is_qwen3_vl_config(config)
+
+
 def _auto_detect_vlm_task(args: argparse.Namespace) -> str | None:
     """Detect a VLM task from model config when the user did not explicitly pass ``--task``."""
     try:
@@ -877,6 +916,69 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     setattr(args, args_attr, "single")
 
 
+def _reject_qwen3_vl_batched_non_batch_text_mxq(
+    *,
+    model: str,
+    task: str,
+    max_batch_size: int,
+    trust_remote_code: bool,
+    revision: str | None,
+    subconfig_options: SubconfigPipelineOptions | None,
+) -> None:
+    """Reject ``--batch-size B > 1`` on a Qwen3-VL release that ships a non-batch text MXQ.
+
+    ``MobilintQwen3VLTextModel._llm_forward_batch_deepstack`` only supports the
+    3-input ``[inputs, rope, deepstack]`` Batch16 layout. Routing ``B > 1`` onto
+    a ``K == 1`` text MXQ either raises mid-benchmark (static 2-input build) or
+    silently corrupts outputs (dynamic 3-input build whose compiled
+    ``[inputs, deepstack, rope]`` order does not match the batched helper's
+    packed ``[rope, deepstack]`` extras).
+
+    Precedence for the compiled ``K`` probe:
+
+    * A user-supplied ``--text-mxq-path`` local file wins (probed via
+      :func:`_probe_mxq_artifact_k`).
+    * Otherwise fall back to the release's ``text_config.max_batch_size``
+      declaration (via :func:`_probe_config_max_batch_size`), which the
+      shipped release config sets to the compiled batch axis.
+
+    Probe failures (missing extras, non-local override, unavailable metadata)
+    fall through silently so the guard does not false-positive.
+    """
+    if max_batch_size <= 1:
+        return
+    if not _detect_qwen3_vl_model(model, trust_remote_code=trust_remote_code, revision=revision):
+        return
+
+    text_override = subconfig_options.text_mxq_path if subconfig_options is not None else None
+    probed_k: int | None = None
+    if text_override:
+        probed_k = _probe_mxq_artifact_k(text_override)
+    if probed_k is None:
+        # ``_probe_config_max_batch_size`` returns ``1`` when the config lookup
+        # fails; that already matches the "no batching" default we would reject
+        # on, but Qwen3-VL detection above already required a successful
+        # AutoConfig load, so a fallback ``1`` here signals a genuine non-batch
+        # release.
+        probed_k = _probe_config_max_batch_size(
+            model,
+            trust_remote_code=trust_remote_code,
+            revision=revision,
+            task=task,
+        )
+    if probed_k is None or probed_k > 1:
+        return
+
+    raise SystemExit(
+        "tps: batched Qwen3-VL sw-batch requires a batched text MXQ (K > 1). "
+        "The selected release ships a non-batch text MXQ (K = 1) whose "
+        "[inputs, deepstack, rope] signature is incompatible with the Batch16 "
+        "[inputs, rope, deepstack] layout expected by the batched path. "
+        "Drop --batch-size or use a Batch16 release "
+        f"(model={model!r}, --batch-size={int(max_batch_size)})."
+    )
+
+
 def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:
     """Return default single-mode target cores for the pipeline construction phase.
 
@@ -1231,6 +1333,22 @@ def _build_pipeline(
         # bare `--batch-size` onto `base_max_batch_size` to match the prefixed-sugar path when the
         # release is detected as EAGLE-3.
         if _is_vlm_task(task):
+            # Qwen3-VL batched sw-batch (``text_max_batch_size = B > 1`` on a non-batch text
+            # MXQ, ``K == 1``) enters ``MobilintQwen3VLTextModel._llm_forward_batch_deepstack``,
+            # which only supports the Batch16 3-input ``[inputs, rope, deepstack]`` MXQ signature.
+            # A static 2-input non-batch release raises ``ValueError`` mid-benchmark; a dynamic
+            # 3-input non-batch release passes the ``_uses_rope_input`` guard but the compiled
+            # ``[inputs, deepstack, rope]`` order does not match the batched helper's packed
+            # ``[rope, deepstack]`` extras, silently corrupting outputs. Reject early so the
+            # user does not pay the model-load cost before failing (or, worse, get wrong results).
+            _reject_qwen3_vl_batched_non_batch_text_mxq(
+                model=model,
+                task=task,
+                max_batch_size=int(max_batch_size),
+                trust_remote_code=trust_remote_code,
+                revision=revision,
+                subconfig_options=subconfig_options,
+            )
             model_kwargs["text_max_batch_size"] = int(max_batch_size)
         elif eagle3_prefix_requested or eagle3_broadcast_batch:
             model_kwargs["base_max_batch_size"] = int(max_batch_size)
@@ -4348,7 +4466,8 @@ def add_tps_parser(
                 "max_batch_size is the aggregate capacity N*K, where K is the MXQ's compiled batch "
                 "axis and N = ceil(max_batch_size / K) Model slots are launched across the target "
                 "device set. Non-batch MXQ (K=1) uses sw-batch across N slots. EAGLE-3 releases "
-                "only support batch size 1."
+                "only support batch size 1. Qwen3-VL VLM batching requires a batched (Batch16) "
+                "text MXQ; non-batch text releases are rejected."
             ),
         )
         _add_device_tracking_args(p)
