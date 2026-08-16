@@ -1658,30 +1658,96 @@ def test_text_measure_unrelated_existing_json_preserves_skip(tmp_path) -> None:
     assert [record["model"] for record in persisted] == ["model-x"]
 
 
-def test_text_rebuild_measure_charts_drops_stale_skip(tmp_path) -> None:
-    """Case (d): ``--rebuild-charts`` alone reconciles stale skip against existing JSON.
+def test_text_rebuild_measure_charts_preserves_sidecar_fresh_failure(tmp_path) -> None:
+    """``--rebuild-charts`` alone must not sweep preserved fresh failures out of the sidecar.
 
-    When ``_rebuild_measure_outputs`` is invoked without an explicit records
-    list it must load the sidecar and drop skip rows for targets whose result
-    JSON is already on disk, then persist the cleaned sidecar.
+    Scenario: an earlier run wrote ``X_measure.json`` at one ``--batch-size``,
+    a later run re-ran X at a bigger ``--batch-size`` and it OOMed. Task
+    ``2efaa`` preserved the fresh failure in ``skipped_records_measure.json``
+    and task ``ea993`` masked the stale success from that run's combined
+    output. A subsequent standalone ``--rebuild-charts`` must keep treating
+    the preloaded skip row as authoritative rather than deleting it because
+    ``X_measure.json`` still sits on disk.
     """
     _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
     text_bench._write_skipped_sidecar(
         tmp_path,
-        [{"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"}],
+        [{"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"}],
         "measure",
     )
 
     text_bench._rebuild_measure_outputs(tmp_path)
 
     persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert persisted == []
+    assert [record["model"] for record in persisted] == ["model-x"]
+    assert persisted[0]["skipped_reason"] == "cuda_oom"
     rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
-    assert not [row for row in rows if row.get("skipped_reason") == "cuda_oom"]
+    passing_rows = [row for row in rows if row.get("model") == "model-x" and row.get("skipped_reason", "") == ""]
+    assert passing_rows == []
+    skipped_rows = [row for row in rows if row.get("model") == "model-x" and row.get("skipped_reason") == "cuda_oom"]
+    assert len(skipped_rows) == 1
 
 
-def test_text_rebuild_sweep_charts_drops_stale_skip(tmp_path) -> None:
-    """Sweep counterpart to case (d): ``--rebuild-charts`` reconciles the sweep sidecar."""
+def test_text_rebuild_measure_charts_keeps_orphan_skip_row(tmp_path) -> None:
+    """Regression guard: an orphan skip (no on-disk JSON) is retained after ``--rebuild-charts``.
+
+    Preload the sidecar with a skip row for ``model-x`` while only an
+    unrelated ``model-y_measure.json`` exists on disk. The reconciler must
+    leave ``model-x``'s row untouched — the disk-union only contains
+    ``model-y`` and does not intersect the sidecar.
+    """
+    _write_measure_result_json(tmp_path / "model-y_measure.json", "model-y")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [{"model": "model-x", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"}],
+        "measure",
+    )
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert [record["model"] for record in persisted] == ["model-x"]
+    rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
+    y_rows = [row for row in rows if row.get("model") == "model-y" and row.get("skipped_reason", "") == ""]
+    assert len(y_rows) == 1
+    x_skipped = [row for row in rows if row.get("model") == "model-x" and row.get("skipped_reason") == "npu_alloc"]
+    assert len(x_skipped) == 1
+
+
+def test_text_rebuild_measure_charts_preserve_fresh_failure_is_idempotent(tmp_path) -> None:
+    """Repeated ``--rebuild-charts`` invocations must not drift the sidecar or CSV.
+
+    Same setup as ``test_text_rebuild_measure_charts_preserves_sidecar_fresh_failure``:
+    call ``_rebuild_measure_outputs`` twice back-to-back and assert the
+    persisted sidecar and combined CSV are byte-for-byte unchanged between
+    invocations.
+    """
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [{"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"}],
+        "measure",
+    )
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+    sidecar_after_first = (tmp_path / "skipped_records_measure.json").read_text(encoding="utf-8")
+    csv_after_first = (tmp_path / "combined_measure.csv").read_text(encoding="utf-8")
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+    sidecar_after_second = (tmp_path / "skipped_records_measure.json").read_text(encoding="utf-8")
+    csv_after_second = (tmp_path / "combined_measure.csv").read_text(encoding="utf-8")
+
+    assert sidecar_after_first == sidecar_after_second
+    assert csv_after_first == csv_after_second
+
+
+def test_text_rebuild_sweep_charts_preserves_sidecar_fresh_failure(tmp_path) -> None:
+    """Sweep sibling of the preserved-fresh-failure rebuild guard.
+
+    Mirrors ``test_text_rebuild_measure_charts_preserves_sidecar_fresh_failure``
+    against ``_rebuild_combined_outputs`` so the sweep code path receives the
+    same protection against sweeping preloaded skip rows out via the disk-union.
+    """
     _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
     text_bench._write_skipped_sidecar(
         tmp_path,
@@ -1692,9 +1758,54 @@ def test_text_rebuild_sweep_charts_drops_stale_skip(tmp_path) -> None:
     text_bench._rebuild_combined_outputs(tmp_path)
 
     persisted = text_bench._read_skipped_sidecar(tmp_path, "sweep")
-    assert persisted == []
+    assert [record["model"] for record in persisted] == ["sweep-x"]
+    assert persisted[0]["skipped_reason"] == "npu_alloc"
     rows = list(csv.DictReader((tmp_path / "combined.csv").open("r", encoding="utf-8")))
-    assert not [row for row in rows if row.get("skipped_reason") == "npu_alloc"]
+    passing_rows = [row for row in rows if row.get("model") == "sweep-x" and row.get("skipped_reason", "") == ""]
+    assert passing_rows == []
+    skipped_rows = [row for row in rows if row.get("model") == "sweep-x" and row.get("skipped_reason") == "npu_alloc"]
+    assert len(skipped_rows) == 1
+
+
+def test_text_rebuild_sweep_charts_keeps_orphan_skip_row(tmp_path) -> None:
+    """Sweep sibling of the orphan-skip regression guard."""
+    _write_sweep_result_json(tmp_path / "sweep-y.json", "sweep-y")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [{"model": "sweep-x", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"}],
+        "sweep",
+    )
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "sweep")
+    assert [record["model"] for record in persisted] == ["sweep-x"]
+    rows = list(csv.DictReader((tmp_path / "combined.csv").open("r", encoding="utf-8")))
+    y_rows = [row for row in rows if row.get("model") == "sweep-y" and row.get("skipped_reason", "") == ""]
+    assert y_rows, "unrelated sweep success payload must still contribute rows"
+    x_skipped = [row for row in rows if row.get("model") == "sweep-x" and row.get("skipped_reason") == "npu_alloc"]
+    assert len(x_skipped) == 1
+
+
+def test_text_rebuild_sweep_charts_preserve_fresh_failure_is_idempotent(tmp_path) -> None:
+    """Sweep sibling of the preserved-fresh-failure idempotency guard."""
+    _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [{"model": "sweep-x", "batch_size": 16, "phase": "measure", "skipped_reason": "npu_alloc"}],
+        "sweep",
+    )
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+    sidecar_after_first = (tmp_path / "skipped_records_sweep.json").read_text(encoding="utf-8")
+    csv_after_first = (tmp_path / "combined.csv").read_text(encoding="utf-8")
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+    sidecar_after_second = (tmp_path / "skipped_records_sweep.json").read_text(encoding="utf-8")
+    csv_after_second = (tmp_path / "combined.csv").read_text(encoding="utf-8")
+
+    assert sidecar_after_first == sidecar_after_second
+    assert csv_after_first == csv_after_second
 
 
 def test_text_drop_stale_skips_fresh_failure_supersedes_existing_json(tmp_path) -> None:

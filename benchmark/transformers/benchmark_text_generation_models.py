@@ -289,10 +289,11 @@ def _drop_stale_skips_for_successful_targets(
       NPU alloc / runtime error, the fresh skip record supersedes the
       on-disk success so the diagnostic output reflects the current-run
       failure instead of the older passing run at a different ``--batch-size``
-      or ``--dev-no``. ``fresh_failure_labels`` must be populated by callers
-      that run the benchmark loop; ``_rebuild_*`` reconciliation callsites
-      leave it ``None`` because their ``skipped_records`` contain only
-      preloaded stale rows.
+      or ``--dev-no``. Callers that run the benchmark loop populate
+      ``fresh_failure_labels`` from :func:`_replace_skip_record`;
+      ``_rebuild_*`` reconciliation callsites pass the preloaded sidecar's
+      labels so any preserved fresh failure from a prior run stays protected
+      across repeat ``--rebuild-charts`` invocations.
 
     The list is mutated in place so all references to ``skipped_records`` (mid-
     run handlers and the final rebuild) observe the same reconciled contents.
@@ -1223,8 +1224,21 @@ def _rebuild_combined_outputs(
     combined_device_rows: list[dict[str, float | str | None]] = []
     if skipped_records is None:
         skipped_records = _read_skipped_sidecar(output_dir, "sweep")
+        # Preloaded sidecar rows are the authoritative record of preserved fresh
+        # failures from prior runs (task ``2efaa``). Pass their labels as
+        # ``fresh_failure_labels`` so their on-disk stale success payloads do
+        # not sweep them out of the sidecar via the disk-union reconciliation.
+        preloaded_fresh_labels = {
+            record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
+        }
         before_len = len(skipped_records)
-        _drop_stale_skips_for_successful_targets(skipped_records, set(), output_dir=output_dir, benchmark_type="sweep")
+        _drop_stale_skips_for_successful_targets(
+            skipped_records,
+            set(),
+            output_dir=output_dir,
+            benchmark_type="sweep",
+            fresh_failure_labels=preloaded_fresh_labels,
+        )
         if before_len != len(skipped_records):
             _write_skipped_sidecar(output_dir, skipped_records, "sweep")
     else:
@@ -2416,9 +2430,20 @@ def _rebuild_measure_outputs(
     output_dir = Path(output_dir)
     if skipped_records is None:
         skipped_records = _read_skipped_sidecar(output_dir, "measure")
+        # Preloaded sidecar rows are the authoritative record of preserved fresh
+        # failures from prior runs (task ``2efaa``). Pass their labels as
+        # ``fresh_failure_labels`` so their on-disk stale success payloads do
+        # not sweep them out of the sidecar via the disk-union reconciliation.
+        preloaded_fresh_labels = {
+            record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
+        }
         before_len = len(skipped_records)
         _drop_stale_skips_for_successful_targets(
-            skipped_records, set(), output_dir=output_dir, benchmark_type="measure"
+            skipped_records,
+            set(),
+            output_dir=output_dir,
+            benchmark_type="measure",
+            fresh_failure_labels=preloaded_fresh_labels,
         )
         if before_len != len(skipped_records):
             _write_skipped_sidecar(output_dir, skipped_records, "measure")
