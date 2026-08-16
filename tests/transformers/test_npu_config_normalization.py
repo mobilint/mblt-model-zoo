@@ -450,8 +450,19 @@ def test_atomic_replace_consistent_state_is_noop() -> None:
     assert not [w for w in recorded if issubclass(w.category, UserWarning)]
 
 
-def test_atomic_replace_core_mode_change_folds_cores_to_clusters() -> None:
-    """Switching ``core_mode`` to ``global4`` folds a full-cluster core list to a cluster string."""
+def test_atomic_replace_core_mode_change_clears_stale_targets_and_reexpands_from_dev_no() -> None:
+    """``core_mode``-only override drops the previous mode's targets and re-expands from ``dev_no`` sugar.
+
+    Stored config carries single-mode ``target_cores`` on cluster 0; the
+    caller changes only ``core_mode`` to ``global4`` without touching
+    targets. :meth:`NPUTargetSpec._with`'s ``core_mode``-only branch
+    clears the stale grain so :meth:`from_kwargs` re-expands from
+    ``dev_no`` sugar under the new mode; the alternative (fold-preserving)
+    would fail :func:`_validate_global8_coverage` when the new mode is
+    ``global8`` and a sibling ``target_clusters`` setter is still queued
+    behind the ``core_mode`` setter, hard-locking the whole HF
+    per-field-setattr chain.
+    """
     backend = _load_backend(
         {
             "mxq_path": "model.mxq",
@@ -461,8 +472,8 @@ def test_atomic_replace_core_mode_change_folds_cores_to_clusters() -> None:
         }
     )
     backend.core_mode = "global4"
-    assert backend._target_clusters_serialized == ["0:0"]
-    # ``NPUTargetSpec.from_kwargs`` drops the off-mode grain under global4.
+    # Both clusters on device 0 via ``dev_no`` sugar re-expansion.
+    assert backend._target_clusters_serialized == ["0:0", "0:1"]
     assert backend._target_cores_serialized == []
 
 
@@ -852,9 +863,11 @@ def test_from_kwargs_derived_dev_no_survives_subsequent_core_mode_with() -> None
     # named device 1; the ``_with`` call then passed ``dev_no=0`` back through
     # ``from_kwargs`` with ``dev_no_given=True`` and the device-set consistency
     # check raised. The derivation makes the in-memory spec self-consistent.
+    # ``core_mode``-only override clears the load-time cores and re-expands
+    # from the derived ``dev_no=1`` sugar under global4.
     updated = spec._with(core_mode="global4")
     assert updated.dev_no == 1
-    assert updated.clusters == ("1:0",)
+    assert updated.clusters == ("1:0", "1:1")
     assert updated.cores == ()
 
 
@@ -966,6 +979,122 @@ def test_with_target_only_override_migrates_bare_int_cluster_using_inherited_dev
     updated = spec._with(target_clusters=[1])
     assert updated.dev_no == 3
     assert updated.clusters == ("3:1",)
+
+
+# ---------------------------------------------------------------------------
+# PR #109 review (r3790658388): ``core_mode``-only override with un-overridden
+# targets must drop stale grain from the previous ``core_mode`` epoch so
+# :meth:`from_kwargs` re-expands from ``dev_no`` sugar under the new mode.
+# The failing scenario is a stored config with ``core_mode='single'`` and a
+# single-cluster ``target_cores``; an HF setattr override to
+# ``core_mode='global8'`` fires *before* the queued ``target_clusters=[0, 1]``
+# setter, and preservation would fold the stale cores into a single-cluster
+# ``target_clusters=['0:0']`` that fails :func:`_validate_global8_coverage`.
+# ---------------------------------------------------------------------------
+
+
+def test_with_core_mode_only_override_to_global8_from_single_cluster_targets_reexpands_from_dev_no() -> None:
+    """``core_mode='global8'`` override alone does not raise on a single-cluster stored config.
+
+    Reproducer for the review comment: single-mode config with cluster-0-only
+    ``target_cores`` and scalar ``dev_no``. Prior to the fix,
+    ``_with(core_mode='global8')`` folded the stale cores into
+    ``target_clusters=['0:0']`` and :func:`_validate_global8_coverage` raised,
+    hard-locking the HF per-field-setattr chain before the queued
+    ``target_clusters`` setter could run.
+    """
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"],
+        }
+    )
+    updated = spec._with(core_mode="global8")
+    assert updated.dev_no == 0
+    assert updated.core_mode == "global8"
+    assert updated.clusters == ("0:0", "0:1")
+    assert updated.cores == ()
+
+
+def test_with_core_mode_global8_then_target_clusters_matches_full_hf_setattr_chain() -> None:
+    """HF ``model_kwargs`` chain (``core_mode`` then ``target_clusters``) converges under the fix."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"],
+        }
+    )
+    # First HF setter (``core_mode``) does not raise; the sibling
+    # ``target_clusters`` setter then re-applies the caller's explicit list.
+    updated = spec._with(core_mode="global8")._with(target_clusters=["0:0", "0:1"])
+    assert updated.dev_no == 0
+    assert updated.core_mode == "global8"
+    assert updated.clusters == ("0:0", "0:1")
+    assert updated.cores == ()
+
+
+def test_with_explicit_incomplete_global8_target_clusters_still_raises_regression_guard() -> None:
+    """Regression guard: explicit incomplete ``target_clusters`` under global8 still surfaces the coverage failure.
+
+    The ``core_mode``-only stale-drop must not swallow a genuine
+    caller-authored global8 mismatch. When ``target_clusters`` is provided
+    explicitly, the ``core_mode``-only branch does not fire and
+    :func:`_validate_global8_coverage` runs on the caller's grain.
+    """
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    with pytest.raises(ValueError, match="global8"):
+        NPUTargetSpec.from_kwargs(
+            {
+                "core_mode": "global8",
+                "dev_no": 0,
+                "target_clusters": ["0:0"],
+            }
+        )
+
+
+def test_with_core_mode_and_target_clusters_same_call_override_to_global8_works() -> None:
+    """Same-call ``_with(core_mode='global8', target_clusters=['0:0', '0:1'])`` passes validation."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"],
+        }
+    )
+    updated = spec._with(core_mode="global8", target_clusters=["0:0", "0:1"])
+    assert updated.dev_no == 0
+    assert updated.core_mode == "global8"
+    assert updated.clusters == ("0:0", "0:1")
+    assert updated.cores == ()
+
+
+def test_with_core_mode_only_override_preserves_caller_overridden_targets() -> None:
+    """``_targets_overridden`` intent guard keeps caller-authored targets across a later ``core_mode`` change.
+
+    Once the caller has explicitly named targets via a prior :meth:`_with`
+    call, the ``core_mode``-only stale-drop no longer fires — the caller's
+    target list is authoritative and folds through :meth:`from_kwargs` under
+    the new mode.
+    """
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs({"core_mode": "single", "dev_no": 0})
+    # Caller-authored target override marks the intent flag.
+    with_targets = spec._with(target_cores=[f"0:0:{k}" for k in range(4)])
+    assert with_targets._targets_overridden
+    updated = with_targets._with(core_mode="global4")
+    # Fold-preserving path: full-cluster cores fold to ``["0:0"]``.
+    assert updated.clusters == ("0:0",)
+    assert updated.cores == ()
 
 
 # ---------------------------------------------------------------------------

@@ -416,10 +416,10 @@ class NPUTargetSpec:
         renormalization through :meth:`from_kwargs`, so callers never
         observe a moment where the four target fields disagree.
 
-        Intent resolution when only one of ``{dev_no, targets}`` is
-        overridden in this call and its sibling was never previously
-        overridden (i.e., still reflects the initial :meth:`from_kwargs`
-        load):
+        Intent resolution when only one of ``{dev_no, targets, core_mode}``
+        is overridden in this call and any target sibling was never
+        previously overridden (i.e., still reflects the initial
+        :meth:`from_kwargs` load):
 
         - **Target-only override**: sync ``dev_no`` to the target device
           set. This is the ``--vision-target-cores 1:0:0`` path where the
@@ -429,6 +429,13 @@ class NPUTargetSpec:
           :meth:`from_kwargs` re-expands them from the new ``dev_no``
           sugar. This is the ``--dev-no 1`` path where the JSON's stale
           dev0 cores must not pin the new backend to the old device.
+        - **``core_mode``-only override**: clear the stale target lists
+          so :meth:`from_kwargs` re-expands them from ``dev_no`` sugar
+          under the new mode. This is the ``--core-mode global8`` path
+          where a JSON's stale single-cluster ``target_cores`` cannot
+          satisfy global8's dual-cluster coverage requirement, so
+          preserving them would raise before any sibling target setter
+          gets a chance to run.
 
         When both fields have been overridden at any point in the
         ``setattr`` chain, both are treated as caller-authoritative and the
@@ -518,6 +525,29 @@ class NPUTargetSpec:
             # ``dev_no``-only override with un-overridden targets: clear the
             # stale target lists so :meth:`from_kwargs` re-expands them from
             # the new ``dev_no`` sugar.
+            new_cores = []
+            new_clusters = []
+        elif (
+            core_mode_changed
+            and new_core_mode != self.core_mode
+            and not targets_changed
+            and not dev_no_changed
+            and not self._targets_overridden
+        ):
+            # ``core_mode``-only override that actually changes the value
+            # with un-overridden targets: the stored cores/clusters reflect
+            # the previous ``core_mode`` epoch and may not satisfy the new
+            # mode's coverage requirements — notably, a single-cluster
+            # ``target_cores`` folds to a single ``"d:c"`` cluster that
+            # fails :func:`_validate_global8_coverage` when the new mode
+            # is ``global8``. Clear both grains so :meth:`from_kwargs`
+            # re-expands from ``dev_no`` sugar under the new mode. The
+            # value-equality guard preserves noop-setter idempotence
+            # (``spec._with(core_mode=self.core_mode)`` is a true no-op).
+            # Mirrors the ``dev_no``-only branch above: whichever scalar
+            # the caller changes, the stale target lists from load time
+            # are dropped when the caller has not asserted authority over
+            # them.
             new_cores = []
             new_clusters = []
         # else: both explicitly overridden at some point (or both untouched
