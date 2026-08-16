@@ -1,5 +1,5 @@
 import os
-from typing import Any, Union, cast
+from typing import Any, Optional, Union, cast
 
 import torch
 import torch.nn as nn
@@ -413,7 +413,15 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
             encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
 
         if use_cache and past_key_values is None and input_ids is not None:
-            past_key_values = MobilintWhisperCache(self.get_mxq_model(), batch_size=input_shape[0])
+            decoder_backend = getattr(self, "npu_backend", None)
+            decoder_n_slots = (
+                len(decoder_backend.mxq_models)
+                if decoder_backend is not None and getattr(decoder_backend, "mxq_models", None)
+                else None
+            )
+            past_key_values = MobilintWhisperCache(
+                self.get_mxq_model(), batch_size=input_shape[0], n_slots=decoder_n_slots,
+            )
 
         past_key_values_length = 0
         if cache_position is not None:
@@ -650,15 +658,39 @@ class MobilintWhisperForConditionalGeneration(
         """Return a Whisper-specific Mobilint cache for Hugging Face generation."""
         del cache_implementation, max_cache_len, args
         configured_batch_size = max(1, int(batch_size), int(getattr(self.config, "max_batch_size", 1)))
+        # Pass the owning decoder's slot count so MobilintBeamCache enforces N==1
+        # against the real backend topology, not just the list-vs-single mxq_model
+        # shape at the call site (get_cache_mxq_model returns slot 0 as a single
+        # qbruntime.Model even when the backend launched N > 1 slots).
+        # TODO(beomsu): consider capping decoder max_batch_size to K at backend
+        # construction time so N>1 slots are never launched for beam decoders.
+        decoder_n_slots = self._resolve_decoder_n_slots()
         if not hasattr(self, "_cache"):
-            self._cache = MobilintWhisperCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+            self._cache = MobilintWhisperCache(
+                self.get_cache_mxq_model(), batch_size=configured_batch_size, n_slots=decoder_n_slots,
+            )
         elif not isinstance(self._cache, MobilintWhisperCache):
-            self._cache = MobilintWhisperCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+            self._cache = MobilintWhisperCache(
+                self.get_cache_mxq_model(), batch_size=configured_batch_size, n_slots=decoder_n_slots,
+            )
         elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
-            self._cache = MobilintWhisperCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+            self._cache = MobilintWhisperCache(
+                self.get_cache_mxq_model(), batch_size=configured_batch_size, n_slots=decoder_n_slots,
+            )
         else:
             self._cache.reset()
         return self._cache
+
+    def _resolve_decoder_n_slots(self) -> Optional[int]:
+        """Return the Whisper decoder backend's slot count, or ``None`` if unavailable."""
+        decoder = self.get_decoder()
+        backend = getattr(decoder, "npu_backend", None)
+        if backend is None:
+            return None
+        mxq_models = getattr(backend, "mxq_models", None)
+        if not mxq_models:
+            return None
+        return len(mxq_models)
 
     def prepare_inputs_for_generation(
         self,

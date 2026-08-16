@@ -490,17 +490,38 @@ class MobilintBeamCache(MobilintCache):
     qbruntime cache. Callers can compare a target beam history with the active
     history, skip the common prefix, and forward only the suffix with the proper
     cache position.
+
+    The beam-cache dispatch path is ``N == 1`` only: it issues one blocking
+    ``mxq_model.infer`` on the single tracked slot with no cross-slot routing or
+    beam-cache reorder. The ``mxq_models`` argument alone cannot detect the
+    owning-backend topology when a caller passes ``get_cache_mxq_model()`` (which
+    returns slot 0 as a single :class:`qbruntime.Model`) even though the backend
+    launched ``N > 1`` slots. Callers that own a Mobilint NPU backend should pass
+    ``n_slots=backend.dispatcher.n_slots`` (or equivalent) so the invariant is
+    enforced at construction time rather than deep in generation. When
+    ``n_slots`` is not supplied, only the existing multi-Model list guard runs
+    to preserve backward compatibility for unit-test stubs.
     """
 
     def __init__(
         self,
         mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
         batch_size: int = 1,
+        *,
+        n_slots: Optional[int] = None,
     ) -> None:
         if isinstance(mxq_models, list) and len(mxq_models) > 1:
             raise NotImplementedError(
                 "MobilintBeamCache does not support multi-Model dispatch (N > 1); "
                 "beam search keeps N=1 (encoder-decoder) — use MobilintCache for N > 1"
+            )
+        if n_slots is not None and int(n_slots) > 1:
+            raise NotImplementedError(
+                "MobilintBeamCache does not support multi-slot dispatch "
+                f"(owning backend launched N={int(n_slots)} slots); beam search "
+                "keeps N=1. Cap the owning backend's max_batch_size at K so it "
+                "keeps a single slot, or compile a batched (K>1) MXQ so slot-0 "
+                "hardware batching serves the load — use MobilintCache for N > 1."
             )
         super().__init__(mxq_models=mxq_models, batch_size=batch_size)
         self._beam_token_histories: list[list[int]] = [[] for _ in range(self.batch_size)]
@@ -709,8 +730,10 @@ class MobilintWhisperCache(MobilintBeamCache):
         self,
         mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
         batch_size: int = 1,
+        *,
+        n_slots: Optional[int] = None,
     ) -> None:
-        super().__init__(mxq_models=mxq_models, batch_size=batch_size)
+        super().__init__(mxq_models=mxq_models, batch_size=batch_size, n_slots=n_slots)
         self._encoder_source_count: int | None = None
 
     def reset(self) -> None:

@@ -544,6 +544,40 @@ def test_mobilint_beam_cache_accepts_single_element_list() -> None:
     assert cache.batch_size == 2
 
 
+def test_mobilint_beam_cache_defaults_are_backwards_compatible() -> None:
+    """A single mxq_model without n_slots must construct cleanly (backwards compat)."""
+    cache = MobilintBeamCache(_FakeMxqModel(), batch_size=2)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2
+
+
+def test_mobilint_beam_cache_rejects_multi_slot_backend_topology() -> None:
+    """Beam cache should refuse N > 1 owning-backend topology even when only slot 0 is passed.
+
+    Production call sites (Whisper, Qwen3-ASR) pass ``get_cache_mxq_model()`` — a
+    single ``qbruntime.Model`` handle — so the existing list-vs-single guard
+    would silently admit a backend that launched N > 1 slots. The ``n_slots``
+    kwarg is what makes the guard reflect the real topology.
+    """
+    with pytest.raises(NotImplementedError, match="multi-slot"):
+        MobilintBeamCache(_FakeMxqModel(), batch_size=1, n_slots=2)
+
+
+def test_mobilint_beam_cache_accepts_single_slot_topology() -> None:
+    """Beam cache should accept ``n_slots=1`` because the backend stayed at N=1."""
+    cache = MobilintBeamCache(_FakeMxqModel(), batch_size=2, n_slots=1)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2
+
+
+def test_mobilint_whisper_cache_rejects_multi_slot_backend_topology() -> None:
+    """MobilintWhisperCache should propagate the beam-cache multi-slot guard."""
+    with pytest.raises(NotImplementedError, match="multi-slot"):
+        MobilintWhisperCache(_FakeMxqModel(), batch_size=1, n_slots=2)
+
+
 def test_cache_utils_imports_when_cache_layer_mixin_is_missing() -> None:
     """cache_utils should import cleanly when transformers<4.54 (no CacheLayerMixin).
 
