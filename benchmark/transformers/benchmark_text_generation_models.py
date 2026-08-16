@@ -270,6 +270,7 @@ def _drop_stale_skips_for_successful_targets(
     *,
     output_dir: str | Path | None = None,
     benchmark_type: str | None = None,
+    fresh_failure_labels: Iterable[str] | None = None,
 ) -> None:
     """Drop skip rows for targets that now have a successful per-target JSON.
 
@@ -278,10 +279,20 @@ def _drop_stale_skips_for_successful_targets(
     * ``successful_labels`` — targets that produced a fresh per-target JSON in
       the current process.
     * When ``output_dir`` and ``benchmark_type`` are both supplied, labels read
-      from existing per-target JSONs on disk. This covers ``--skip-existing``
-      targets whose result JSON was written by a prior process — the current
-      loop ``continue``s past them without adding to ``successful_labels`` —
-      and ``--rebuild-charts`` invocations that only touch the sidecar.
+      from existing per-target JSONs on disk, minus ``fresh_failure_labels``.
+      This covers ``--skip-existing`` targets whose result JSON was written by
+      a prior process — the current loop ``continue``s past them without
+      adding to ``successful_labels`` — and ``--rebuild-charts`` invocations
+      that only touch the sidecar. Subtracting ``fresh_failure_labels``
+      preserves fresh-failure precedence: if the current process re-ran a
+      target that had a stale success JSON on disk and it OOMed or hit an
+      NPU alloc / runtime error, the fresh skip record supersedes the
+      on-disk success so the diagnostic output reflects the current-run
+      failure instead of the older passing run at a different ``--batch-size``
+      or ``--dev-no``. ``fresh_failure_labels`` must be populated by callers
+      that run the benchmark loop; ``_rebuild_*`` reconciliation callsites
+      leave it ``None`` because their ``skipped_records`` contain only
+      preloaded stale rows.
 
     The list is mutated in place so all references to ``skipped_records`` (mid-
     run handlers and the final rebuild) observe the same reconciled contents.
@@ -290,7 +301,9 @@ def _drop_stale_skips_for_successful_targets(
         raise ValueError("output_dir and benchmark_type must be provided together")
     labels = {label for label in successful_labels if label}
     if output_dir is not None and benchmark_type is not None:
-        labels |= _labels_from_existing_result_jsons(output_dir, benchmark_type)
+        existing = _labels_from_existing_result_jsons(output_dir, benchmark_type)
+        fresh = {label for label in (fresh_failure_labels or ()) if label}
+        labels |= existing - fresh
     if not labels:
         return
     skipped_records[:] = [record for record in skipped_records if record.get("model") not in labels]
@@ -299,17 +312,23 @@ def _drop_stale_skips_for_successful_targets(
 def _replace_skip_record(
     skipped_records: list[dict[str, Any]],
     new_record: dict[str, Any],
+    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Insert ``new_record`` replacing any prior entry with the same target identity.
 
     Target identity is the model label; a later failure for the same model
     replaces the earlier record so retries do not accumulate duplicate rows in
     the sidecar or rebuilt combined outputs. The list is mutated in place.
+    When ``fresh_failure_labels`` is supplied, the record's label is added to
+    it so downstream reconciliation can distinguish a fresh in-process failure
+    from a preloaded stale sidecar row.
     """
     label = new_record.get("model")
     if label:
         skipped_records[:] = [record for record in skipped_records if record.get("model") != label]
     skipped_records.append(new_record)
+    if fresh_failure_labels is not None and label:
+        fresh_failure_labels.add(label)
 
 
 def _handle_cuda_oom(
@@ -323,6 +342,7 @@ def _handle_cuda_oom(
     phase: str,
     output_dir: str | Path,
     benchmark_type: str,
+    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Log a structured CUDA OOM skip record and clear GPU state."""
     reason = "cuda_oom"
@@ -339,6 +359,7 @@ def _handle_cuda_oom(
             "skipped_reason": reason,
             "detail": _format_exception(exc),
         },
+        fresh_failure_labels,
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -354,6 +375,7 @@ def _handle_npu_alloc_error(
     phase: str,
     output_dir: str | Path,
     benchmark_type: str,
+    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Log a structured Mobilint NPU allocation skip record."""
     reason = "npu_alloc"
@@ -383,6 +405,7 @@ def _handle_npu_alloc_error(
             "detail": _format_exception(exc),
             **{f"npu_{k}": v for k, v in context.items() if v is not None},
         },
+        fresh_failure_labels,
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -398,6 +421,7 @@ def _handle_npu_runtime_error(
     phase: str,
     output_dir: str | Path,
     benchmark_type: str,
+    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Log a structured Mobilint NPU non-alloc runtime skip record.
 
@@ -423,6 +447,7 @@ def _handle_npu_runtime_error(
             "skipped_reason": reason,
             "detail": _format_exception(exc),
         },
+        fresh_failure_labels,
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -1742,6 +1767,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
     skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "sweep")
     successful_labels: set[str] = set()
+    fresh_failure_labels: set[str] = set()
     for (
         model_id,
         revision_candidates,
@@ -1835,6 +1861,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="sweep",
+                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except _NPU_RUNTIME_ERROR_TYPE as e:
@@ -1848,6 +1875,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="sweep",
+                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except Exception as e:
@@ -1862,6 +1890,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         phase="load",
                         output_dir=output_dir,
                         benchmark_type="sweep",
+                        fresh_failure_labels=fresh_failure_labels,
                     )
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
@@ -1932,6 +1961,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="sweep",
+                fresh_failure_labels=fresh_failure_labels,
             )
             _release_pipeline(pipeline, target_args.device)
             continue
@@ -1946,6 +1976,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="sweep",
+                fresh_failure_labels=fresh_failure_labels,
             )
             _release_pipeline(pipeline, target_args.device)
             continue
@@ -1961,6 +1992,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     phase="measure",
                     output_dir=output_dir,
                     benchmark_type="sweep",
+                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
@@ -2174,7 +2206,11 @@ def _run_sweep(args: argparse.Namespace) -> int:
         _release_pipeline(pipeline, target_args.device)
 
     _drop_stale_skips_for_successful_targets(
-        skipped_records, successful_labels, output_dir=output_dir, benchmark_type="sweep"
+        skipped_records,
+        successful_labels,
+        output_dir=output_dir,
+        benchmark_type="sweep",
+        fresh_failure_labels=fresh_failure_labels,
     )
     _rebuild_combined_outputs(output_dir, skipped_records=skipped_records)
 
@@ -2493,6 +2529,7 @@ def _run_measure(args: argparse.Namespace) -> int:
     _collect_host_pc_info(output_dir)
     skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "measure")
     successful_labels: set[str] = set()
+    fresh_failure_labels: set[str] = set()
     for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
     ):
@@ -2548,6 +2585,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="measure",
+                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except _NPU_RUNTIME_ERROR_TYPE as e:
@@ -2561,6 +2599,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="measure",
+                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except Exception as e:
@@ -2575,6 +2614,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                         phase="load",
                         output_dir=output_dir,
                         benchmark_type="measure",
+                        fresh_failure_labels=fresh_failure_labels,
                     )
                     continue
                 raise
@@ -2721,6 +2761,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="measure",
+                fresh_failure_labels=fresh_failure_labels,
             )
         except _NPU_RUNTIME_ERROR_TYPE as e:
             _handle_npu_runtime_error(
@@ -2733,6 +2774,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="measure",
+                fresh_failure_labels=fresh_failure_labels,
             )
         except Exception as e:
             if _is_cuda_oom_error(e):
@@ -2746,13 +2788,18 @@ def _run_measure(args: argparse.Namespace) -> int:
                     phase="measure",
                     output_dir=output_dir,
                     benchmark_type="measure",
+                    fresh_failure_labels=fresh_failure_labels,
                 )
             else:
                 print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, target_args.device)
     _drop_stale_skips_for_successful_targets(
-        skipped_records, successful_labels, output_dir=output_dir, benchmark_type="measure"
+        skipped_records,
+        successful_labels,
+        output_dir=output_dir,
+        benchmark_type="measure",
+        fresh_failure_labels=fresh_failure_labels,
     )
     _rebuild_measure_outputs(output_dir, skipped_records=skipped_records)
     return 0

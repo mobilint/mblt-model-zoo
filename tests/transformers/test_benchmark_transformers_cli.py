@@ -1697,6 +1697,127 @@ def test_text_rebuild_sweep_charts_drops_stale_skip(tmp_path) -> None:
     assert not [row for row in rows if row.get("skipped_reason") == "npu_alloc"]
 
 
+def test_text_drop_stale_skips_fresh_failure_supersedes_existing_json(tmp_path) -> None:
+    """Fresh failure for X + existing ``X_measure.json`` keeps the fresh skip row.
+
+    Scenario: an earlier run wrote ``X_measure.json`` at one batch size; the
+    current run reruns X at a different batch size and it OOMs. The on-disk
+    success is stale relative to the current attempt, so the fresh skip
+    record must survive reconciliation instead of being dropped by the
+    on-disk union.
+    """
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+    text_bench._drop_stale_skips_for_successful_targets(
+        skipped_records,
+        set(),
+        output_dir=tmp_path,
+        benchmark_type="measure",
+        fresh_failure_labels={"model-x"},
+    )
+
+    assert skipped_records == [
+        {"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+
+def test_text_drop_stale_skips_fresh_failure_preserved_across_other_success(tmp_path) -> None:
+    """Fresh failure for X survives even when an unrelated Y has an existing JSON.
+
+    Regression guard: on-disk union must not sweep away a fresh skip for X
+    just because a different target Y has a valid result JSON on disk.
+    """
+    _write_measure_result_json(tmp_path / "model-y_measure.json", "model-y")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-x", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+
+    text_bench._drop_stale_skips_for_successful_targets(
+        skipped_records,
+        set(),
+        output_dir=tmp_path,
+        benchmark_type="measure",
+        fresh_failure_labels={"model-x"},
+    )
+
+    assert skipped_records == [
+        {"model": "model-x", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+
+
+def test_text_drop_stale_skips_fresh_success_drops_prior_skip(tmp_path) -> None:
+    """Fresh success for X still drops any stale skip row for X.
+
+    Regression guard for task ``1e113``: a target that succeeded THIS run
+    must reconcile its stale sidecar row, even when its result JSON already
+    existed on disk (the disk union would include it too).
+    """
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+    text_bench._drop_stale_skips_for_successful_targets(
+        skipped_records,
+        {"model-x"},
+        output_dir=tmp_path,
+        benchmark_type="measure",
+        fresh_failure_labels=set(),
+    )
+
+    assert skipped_records == []
+
+
+def test_text_replace_skip_record_populates_fresh_failure_labels() -> None:
+    """Verify _replace_skip_record adds the label to fresh_failure_labels when supplied."""
+    skipped_records: list[dict[str, Any]] = []
+    fresh_failure_labels: set[str] = set()
+
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+        fresh_failure_labels,
+    )
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-b", "batch_size": 8, "phase": "measure", "skipped_reason": "npu_alloc"},
+        fresh_failure_labels,
+    )
+
+    assert fresh_failure_labels == {"model-a", "model-b"}
+
+
+def test_text_drop_stale_skips_fresh_success_and_failure_mix(tmp_path) -> None:
+    """Mixed reconcile: X succeeded (fresh), Y failed fresh (was on disk before), Z stale from prior sidecar.
+
+    Verifies the three routes interact correctly in one call:
+    - fresh success for X → X's stale skip is dropped.
+    - fresh failure for Y with existing Y JSON → Y's fresh skip is preserved.
+    - preloaded stale skip for Z with existing Z JSON but no fresh action → Z's stale skip is dropped.
+    """
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    _write_measure_result_json(tmp_path / "model-y_measure.json", "model-y")
+    _write_measure_result_json(tmp_path / "model-z_measure.json", "model-z")
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
+        {"model": "model-y", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
+        {"model": "model-z", "batch_size": 16, "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+    text_bench._drop_stale_skips_for_successful_targets(
+        skipped_records,
+        {"model-x"},
+        output_dir=tmp_path,
+        benchmark_type="measure",
+        fresh_failure_labels={"model-y"},
+    )
+
+    assert [record["model"] for record in skipped_records] == ["model-y"]
+
+
 def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
     """Verify old text sweep JSON without latency arrays still produces rows."""
     payload = {
