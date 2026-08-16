@@ -239,6 +239,22 @@ def _drop_stale_skips_for_successful_targets(
     skipped_records[:] = [record for record in skipped_records if record.get("model") not in labels]
 
 
+def _replace_skip_record(
+    skipped_records: list[dict[str, Any]],
+    new_record: dict[str, Any],
+) -> None:
+    """Insert ``new_record`` replacing any prior entry with the same target identity.
+
+    Target identity is the model label; a later failure for the same model
+    replaces the earlier record so retries do not accumulate duplicate rows in
+    the sidecar or rebuilt combined outputs. The list is mutated in place.
+    """
+    label = new_record.get("model")
+    if label:
+        skipped_records[:] = [record for record in skipped_records if record.get("model") != label]
+    skipped_records.append(new_record)
+
+
 def _handle_cuda_oom(
     exc: BaseException,
     *,
@@ -256,7 +272,8 @@ def _handle_cuda_oom(
     print(f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase}: {exc}")
     _release_pipeline(pipeline, device)
     _clear_cuda_memory(device)
-    skipped_records.append(
+    _replace_skip_record(
+        skipped_records,
         {
             "model": label,
             "device": device,
@@ -264,7 +281,7 @@ def _handle_cuda_oom(
             "phase": phase,
             "skipped_reason": reason,
             "detail": _format_exception(exc),
-        }
+        },
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -298,7 +315,8 @@ def _handle_npu_alloc_error(
     )
     if debug_errors:
         traceback.print_exception(type(exc), exc, exc.__traceback__)
-    skipped_records.append(
+    _replace_skip_record(
+        skipped_records,
         {
             "model": label,
             "device": device,
@@ -307,7 +325,7 @@ def _handle_npu_alloc_error(
             "skipped_reason": reason,
             "detail": _format_exception(exc),
             **{f"npu_{k}": v for k, v in context.items() if v is not None},
-        }
+        },
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -338,7 +356,8 @@ def _handle_npu_runtime_error(
     print(f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase}: {exc}")
     if debug_errors:
         traceback.print_exception(type(exc), exc, exc.__traceback__)
-    skipped_records.append(
+    _replace_skip_record(
+        skipped_records,
         {
             "model": label,
             "device": device,
@@ -346,7 +365,7 @@ def _handle_npu_runtime_error(
             "phase": phase,
             "skipped_reason": reason,
             "detail": _format_exception(exc),
-        }
+        },
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 

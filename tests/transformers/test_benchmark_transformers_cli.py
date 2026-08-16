@@ -1427,6 +1427,74 @@ def test_text_preload_missing_sidecar_is_empty_backward_compat(tmp_path) -> None
     assert text_bench._read_skipped_sidecar(tmp_path, "measure") == []
 
 
+def test_text_replace_skip_record_dedups_same_target_retry() -> None:
+    """Verify a retried failure for the same target replaces the earlier row instead of duplicating it."""
+    skipped_records: list[dict[str, Any]] = []
+
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    )
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    )
+
+    assert skipped_records == [
+        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+
+def test_text_replace_skip_record_later_attempt_wins() -> None:
+    """Verify the LATER failure record wins when a target retries at a different batch size."""
+    skipped_records: list[dict[str, Any]] = []
+
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    )
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-a", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
+    )
+
+    assert skipped_records == [
+        {"model": "model-a", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+
+
+def test_text_replace_skip_record_preserves_other_targets() -> None:
+    """Verify replacing one target's row does not disturb rows for other targets."""
+    skipped_records: list[dict[str, Any]] = [
+        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+        {"model": "model-b", "batch_size": 8, "phase": "measure", "skipped_reason": "npu_alloc"},
+    ]
+
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-a", "batch_size": 32, "phase": "load", "skipped_reason": "cuda_oom"},
+    )
+
+    assert skipped_records == [
+        {"model": "model-b", "batch_size": 8, "phase": "measure", "skipped_reason": "npu_alloc"},
+        {"model": "model-a", "batch_size": 32, "phase": "load", "skipped_reason": "cuda_oom"},
+    ]
+
+
+def test_text_replace_skip_record_then_success_reconciles_to_empty() -> None:
+    """Verify a target that failed then succeeded on retry leaves no row after reconciliation."""
+    skipped_records: list[dict[str, Any]] = []
+
+    text_bench._replace_skip_record(
+        skipped_records,
+        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+    )
+    # Retry succeeded — reconcile via successful_labels drops the stale skip.
+    text_bench._drop_stale_skips_for_successful_targets(skipped_records, {"model-a"})
+
+    assert skipped_records == []
+
+
 def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
     """Verify old text sweep JSON without latency arrays still produces rows."""
     payload = {
