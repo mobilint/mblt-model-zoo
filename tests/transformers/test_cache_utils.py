@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
+
 import pytest
 import torch
 
@@ -538,3 +542,51 @@ def test_mobilint_beam_cache_accepts_single_element_list() -> None:
 
     assert cache.n_models == 1
     assert cache.batch_size == 2
+
+
+def test_cache_utils_imports_when_cache_layer_mixin_is_missing() -> None:
+    """cache_utils should import cleanly when transformers<4.54 (no CacheLayerMixin).
+
+    Simulates the transformers<4.54 environment by removing ``CacheLayerMixin``
+    from ``transformers.cache_utils`` in a fresh subprocess before importing the
+    Mobilint cache module. The subprocess isolates the module-reload dance so
+    downstream tests keep their cached references to the real transformers class.
+    Also verifies :mod:`mblt_model_zoo.hf_transformers.utils.benchmark_utils`
+    imports cleanly under the stub because it participates in the same top-level
+    import chain that GPU-only benchmark runs traverse.
+    """
+    script = textwrap.dedent(
+        """
+        import transformers.cache_utils as tf_cache_utils
+
+        if hasattr(tf_cache_utils, "CacheLayerMixin"):
+            del tf_cache_utils.CacheLayerMixin
+
+        from mblt_model_zoo.hf_transformers.utils import cache_utils as mblt_cache_utils
+
+        assert mblt_cache_utils.CacheLayerMixin.__module__ == mblt_cache_utils.__name__, (
+            "Compat stub should be defined inside mblt cache_utils, not imported from transformers"
+        )
+        assert mblt_cache_utils.CacheLayerMixin in mblt_cache_utils.MobilintLayer.__mro__, (
+            "MobilintLayer must subclass the compat stub when transformers<4.54"
+        )
+
+        from mblt_model_zoo.hf_transformers.utils import benchmark_utils
+
+        assert benchmark_utils.MobilintCache is mblt_cache_utils.MobilintCache, (
+            "benchmark_utils must resolve MobilintCache against the shim-based cache_utils"
+        )
+
+        print("OK")
+        """
+    ).strip()
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"subprocess exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+    assert "OK" in result.stdout, f"unexpected stdout: {result.stdout!r}"

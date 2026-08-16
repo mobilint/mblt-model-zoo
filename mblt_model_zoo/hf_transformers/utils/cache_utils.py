@@ -7,7 +7,22 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Type, U
 
 import qbruntime
 import torch
-from transformers.cache_utils import Cache, CacheLayerMixin
+from transformers.cache_utils import Cache
+
+try:
+    from transformers.cache_utils import CacheLayerMixin
+except ImportError:
+    # transformers < 4.54 compat shim: CacheLayerMixin was introduced in transformers 4.54.0.
+    # This stub only satisfies subclassing at class-definition time so this module can import
+    # cleanly for GPU-only workflows (e.g. running text-generation benchmarks on transformers
+    # 4.53.x, which is required by some third-party custom modeling code such as EXAONE-3.5).
+    # Any actual MobilintCache/MobilintLayer runtime path relies on the real CacheLayerMixin
+    # contract and requires transformers>=4.54; instantiating those on the stub will fail
+    # downstream. That is intentional — the stub must not silently masquerade as the real class.
+    class CacheLayerMixin:  # type: ignore[no-redef]
+        """Compat stub for transformers<4.54; MobilintCache paths require the real class."""
+
+        pass
 
 
 def is_whisper_beam_debug_trace_enabled() -> bool:

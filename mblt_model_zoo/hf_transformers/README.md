@@ -22,6 +22,20 @@ cd mblt-model-zoo
 pip install -e .[transformers]
 ```
 
+### Transformers version support
+
+- NPU execution (`MobilintCache`, `MobilintLayer`, and all Mobilint LLM/VLM backends) requires
+  `transformers>=4.54.0`, which introduced `transformers.cache_utils.CacheLayerMixin` — the class
+  `MobilintLayer` subclasses.
+- GPU-only benchmark workflows (for example
+  `benchmark/transformers/benchmark_text_generation_models.py sweep --original-models --device cuda:0`)
+  can run against `transformers>=4.53,<4.54` via a compat shim in
+  `mblt_model_zoo/hf_transformers/utils/cache_utils.py` that supplies an empty
+  `CacheLayerMixin` stub when the symbol is missing. The stub is import-time only:
+  instantiating `MobilintCache`/`MobilintLayer` under it is not supported and will fail at
+  runtime, so keep the older-transformers path constrained to non-NPU comparisons (for example,
+  loading `mobilint/EXAONE-3.5-*` original modeling code that broke on transformers 4.54+).
+
 ## Quick Start Guide
 
 **mblt-model-zoo** provides quantized models based on Transformers with the same interfaces. If `mblt-model-zoo` package is installed, you can use auto classes from `transformers` such as `pipeline`, `AutoModel`, and `AutoTokenizer` with our models' ids. The following code snippet shows how to use the pre-trained model for inference with `pipeline`. Our models include proxy python codes to import needed config and model classes, so `trust_remote_code=True` must be passed to every `transformers` auto loader that touches the Hub (for example, `AutoTokenizer.from_pretrained(...)`, `AutoProcessor.from_pretrained(...)`, `AutoModel.from_pretrained(...)`, and `pipeline(...)`).
