@@ -536,3 +536,39 @@ def test_transformer_default_compare_output_dir_uses_comparison(tmp_path: Path) 
     output_dir = default_charts_dir(tmp_path, [Path("linux_asr"), Path("windows_asr")])
 
     assert output_dir == tmp_path / "results" / "comparison" / "linux_asr_windows_asr"
+
+
+def test_collect_folder_metrics_skips_non_model_sidecars(tmp_path: Path, capsys) -> None:
+    """Verify collect_folder_metrics silently skips sidecar JSON files.
+
+    ``skipped_records_measure.json`` and ``skipped_records_sweep.json`` are
+    top-level JSON lists written alongside per-model payloads; ``host_pc_info.json``
+    is a dict but not a per-model payload. Globbing them into the collector used
+    to log noisy "failed to parse" warnings on every rebuild.
+    """
+
+    from benchmark.transformers.chart_utils import collect_folder_metrics
+
+    model_payload = {
+        "model": "repo/model-a",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+        "device": {"avg_power_w": 1.0},
+    }
+    (tmp_path / "model-a.json").write_text(json.dumps(model_payload), encoding="utf-8")
+    (tmp_path / "skipped_records_measure.json").write_text(
+        json.dumps([{"model": "repo/skipped", "reason": "oom"}]), encoding="utf-8"
+    )
+    (tmp_path / "skipped_records_sweep.json").write_text(
+        json.dumps([{"model": "repo/skipped", "reason": "oom"}]), encoding="utf-8"
+    )
+    (tmp_path / "host_pc_info.json").write_text(json.dumps({"cpu": {"name": "Test CPU"}}), encoding="utf-8")
+
+    metrics = collect_folder_metrics(tmp_path)
+    captured = capsys.readouterr()
+
+    assert list(metrics.keys()) == ["repo/model-a"]
+    assert "failed to parse" not in captured.out
+    assert "failed to parse" not in captured.err

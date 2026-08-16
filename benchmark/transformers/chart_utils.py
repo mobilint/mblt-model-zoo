@@ -154,9 +154,26 @@ def load_model_metrics(path: Path) -> Optional[tuple[str, ModelMetrics]]:
     )
 
 
+# Sidecar JSON files that share the results directory with per-model payloads.
+# These are top-level lists (skipped_records_*) or non-model dicts (host_pc_info)
+# and must be skipped so :func:`collect_folder_metrics` does not emit spurious
+# "failed to parse" warnings when it globs the folder. Kept as a local literal to
+# avoid a circular import with ``benchmark_text_generation_models`` (which imports
+# from this module).
+_NON_MODEL_JSON_FILENAMES: frozenset[str] = frozenset(
+    {
+        "skipped_records_measure.json",
+        "skipped_records_sweep.json",
+        "host_pc_info.json",
+    }
+)
+
+
 def collect_folder_metrics(folder: Path) -> dict[str, ModelMetrics]:
     metrics: dict[str, ModelMetrics] = {}
     for path in sorted(folder.glob("*.json")):
+        if path.name in _NON_MODEL_JSON_FILENAMES:
+            continue
         try:
             loaded = load_model_metrics(path)
         except Exception as e:
