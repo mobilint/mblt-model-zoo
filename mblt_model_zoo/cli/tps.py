@@ -842,6 +842,22 @@ def _resolve_effective_llm_core_mode(
     return getattr(args, "core_mode", None), "--core-mode", "core_mode"
 
 
+@dataclass(frozen=True)
+class _BatchedMxqGuardContext:
+    """Deferred-guard payload stashed on ``args`` for post-launch verification.
+
+    Populated by :func:`_enforce_batched_mxq_core_mode_constraint` when no
+    local ``--mxq-path`` override was available to probe pre-launch, and
+    consumed by :func:`_verify_batched_mxq_core_mode_post_launch` after the
+    backend has probed the authoritative ``k_per_model``.
+    """
+
+    effective_core_mode: str | None
+    flag_label: str
+    args_attr: str
+    model: str
+
+
 def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     """Reject ``--core-mode global4/global8/multi`` on a batched MXQ.
 
@@ -866,8 +882,20 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     misclassifications the config-only probe used to make: a Batch-N release
     overridden with a ``K == 1`` MXQ is no longer rejected for ``global4``,
     and a batch-1 release overridden with a ``K > 1`` MXQ is now caught here
-    instead of reaching an unsupported runtime configuration. Non-local
-    overrides and probe failures fall through to the config-declared value.
+    instead of reaching an unsupported runtime configuration.
+
+    When no local artifact probe succeeds (no override, non-local override, or
+    ``qbruntime`` unavailable), the guard defers to
+    :func:`_verify_batched_mxq_core_mode_post_launch`. Under the sw-batch
+    contract ``config.max_batch_size`` is the aggregate ``N * K`` capacity,
+    so a pre-launch classification based on that alone would misclassify a
+    ``K == 1`` release with ``N > 1`` sw-batch as batched and reject
+    ``global4`` unnecessarily, while a ``K > 1`` release with a batch-1
+    config would slip through the pre-launch check entirely.
+    :meth:`MobilintNPUBackend._probe_k_per_model` reads the authoritative K
+    from ``qbruntime.Model.get_cache_infos()[0].num_batches`` after launch,
+    so the post-launch verifier can apply the same rejection logic against
+    the true value.
 
     Non-batch MXQ (effective batch axis ``== 1``) with ``--batch-size B > 1``
     is a separate sw-batch feature and stays unrestricted — sw-batch across
@@ -885,27 +913,26 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     if effective_core_mode == "single":
         return
     override_path = _select_llm_mxq_override(args)
-    max_batch_size: int | None = None
-    size_source = "config"
+    probed_k: int | None = None
     if override_path:
-        probed = _probe_mxq_artifact_k(override_path)
-        if probed is not None:
-            max_batch_size = probed
-            size_source = "artifact"
-    if max_batch_size is None:
-        max_batch_size = _probe_config_max_batch_size(
-            model,
-            trust_remote_code=trust_remote_code,
-            revision=revision,
-            task=args.task,
+        probed_k = _probe_mxq_artifact_k(override_path)
+    if probed_k is None:
+        # No local artifact probe available: defer to post-launch, where
+        # ``k_per_model`` is authoritative. ``config.max_batch_size`` is the
+        # aggregate ``N * K`` under sw-batch and cannot classify K alone.
+        args._batched_mxq_guard_ctx = _BatchedMxqGuardContext(
+            effective_core_mode=effective_core_mode,
+            flag_label=flag_label,
+            args_attr=args_attr,
+            model=str(args.model),
         )
-    if max_batch_size <= 1:
+        return
+    if probed_k <= 1:
         return
     if effective_core_mode is not None and effective_core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
-        size_label = "artifact K" if size_source == "artifact" else "config max_batch_size"
         raise SystemExit(
             f"tps: batched MXQ only supports --core-mode single "
-            f"(model={args.model!r}, {size_label}={max_batch_size}, "
+            f"(model={args.model!r}, artifact K={probed_k}, "
             f"{flag_label}={effective_core_mode!r})"
         )
     # Match the benchmark-script convention: pin the resolved role-specific
@@ -914,6 +941,93 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     # keeps :func:`_apply_vlm_core_mode_model_kwargs` and the EAGLE-3 prefix
     # apply-path from later escalating the LLM MXQ back to a non-single mode.
     setattr(args, args_attr, "single")
+
+
+def _resolve_llm_npu_backend(model: Any) -> Any | None:
+    """Locate the LLM MXQ ``MobilintNPUBackend`` on a loaded Mobilint model.
+
+    The LLM MXQ is the one whose compiled ``K`` governs the batched-MXQ
+    core-mode constraint. Attribute-path priority mirrors the LLM-role
+    resolution in :func:`_resolve_effective_llm_core_mode`:
+
+    * EAGLE-3 releases expose the base LLM at ``eagle3_base_model``.
+    * VLM releases keep the text LLM under ``model.language_model``
+      (Qwen3-VL) or ``text_decoder.bert`` (BLIP).
+    * Plain LLM releases carry ``npu_backend`` on the top-level model.
+
+    Returns ``None`` when the pipeline is non-Mobilint or the LLM backend
+    cannot be located; callers should treat that as "unknown" and skip the
+    check rather than false-positive.
+    """
+    if model is None:
+        return None
+    base = getattr(model, "eagle3_base_model", None)
+    if base is not None:
+        backend = getattr(base, "npu_backend", None)
+        if backend is not None:
+            return backend
+    inner = getattr(model, "model", None)
+    if inner is not None:
+        for name in ("language_model", "text_model"):
+            child = getattr(inner, name, None)
+            if child is not None:
+                backend = getattr(child, "npu_backend", None)
+                if backend is not None:
+                    return backend
+    text_decoder = getattr(model, "text_decoder", None)
+    if text_decoder is not None:
+        bert = getattr(text_decoder, "bert", None)
+        if bert is not None:
+            backend = getattr(bert, "npu_backend", None)
+            if backend is not None:
+                return backend
+        backend = getattr(text_decoder, "npu_backend", None)
+        if backend is not None:
+            return backend
+    for name in ("language_model", "text_model"):
+        child = getattr(model, name, None)
+        if child is not None:
+            backend = getattr(child, "npu_backend", None)
+            if backend is not None:
+                return backend
+    return getattr(model, "npu_backend", None)
+
+
+def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Namespace) -> None:
+    """Post-launch counterpart to :func:`_enforce_batched_mxq_core_mode_constraint`.
+
+    Runs after :func:`_build_pipeline` when the pre-launch guard could not
+    probe a local artifact and stashed a
+    :class:`_BatchedMxqGuardContext` on ``args`` instead of using the
+    aggregate ``config.max_batch_size`` (which under the sw-batch contract
+    mixes ``K`` with the slot count ``N`` and cannot classify batched
+    execution on its own).
+
+    Reads ``k_per_model`` — probed by
+    :meth:`MobilintNPUBackend._probe_k_per_model` from
+    ``qbruntime.Model.get_cache_infos()[0].num_batches`` — and raises the
+    same friendly :class:`SystemExit` as the pre-launch guard when the
+    caller explicitly requested a non-``single`` LLM core mode against a
+    batched (``K > 1``) MXQ. Non-Mobilint pipelines, unknown model
+    structures, or missing ``k_per_model`` state fall through silently.
+    """
+    ctx = getattr(args, "_batched_mxq_guard_ctx", None)
+    if ctx is None:
+        return
+    if ctx.effective_core_mode is None or ctx.effective_core_mode not in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
+        return
+    model = getattr(pipeline, "model", None)
+    backend = _resolve_llm_npu_backend(model)
+    if backend is None:
+        return
+    k = getattr(backend, "k_per_model", None)
+    if not isinstance(k, int) or k <= 1:
+        return
+    raise SystemExit(
+        f"tps: batched MXQ only supports --core-mode single "
+        f"(model={ctx.model!r}, artifact K={k}, "
+        f"{ctx.flag_label}={ctx.effective_core_mode!r})"
+    )
 
 
 def _reject_qwen3_vl_batched_non_batch_text_mxq(
@@ -2255,6 +2369,7 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         max_batch_size=args.batch_size,
         dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -2598,6 +2713,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         max_batch_size=args.batch_size,
         dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
@@ -3161,6 +3277,7 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         max_batch_size=args.batch_size,
         dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
 
@@ -3649,6 +3766,7 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         max_batch_size=args.batch_size,
         dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
 

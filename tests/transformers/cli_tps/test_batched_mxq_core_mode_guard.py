@@ -7,6 +7,22 @@ in ``benchmark/transformers/benchmark_text_generation_models.py`` and
 MXQ receives the same friendly ``SystemExit`` instead of a low-level
 backend error mid-launch (or silently wrong throughput).
 
+Two paths keep the guard honest:
+
+* **Pre-launch fast path** — a locally-resolvable ``--mxq-path`` (or
+  ``--base-mxq-path`` / ``--text-mxq-path``) is probed via
+  :func:`_probe_mxq_artifact_k` and rejected before pipeline construction.
+
+* **Post-launch verification** — when no local artifact probe is available
+  the pre-launch guard defers, and
+  :func:`_verify_batched_mxq_core_mode_post_launch` reads the true
+  ``k_per_model`` off the launched NPU backend and applies the same
+  rejection logic. Under the sw-batch contract ``config.max_batch_size``
+  is the aggregate ``N * K`` capacity and cannot classify ``K`` on its own,
+  so a pre-launch config-only fallback used to misclassify both a ``K == 1``
+  release with ``N > 1`` sw-batch (falsely rejected) and a ``K > 1`` release
+  with a batch-1 config (silently allowed through).
+
 Config resolution is stubbed via ``AutoConfig.from_pretrained`` so no real
 MXQ or hardware is required.
 """
@@ -15,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,22 +84,25 @@ def _parse_tps_sweep(*extra: str) -> argparse.Namespace:
     )
 
 
-@pytest.mark.parametrize("core_mode", ["global4", "global8"])
-def test_measure_rejects_non_single_core_mode_on_batched_mxq(monkeypatch, core_mode):
-    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
+def _stub_artifact_probe(monkeypatch, k_by_path: dict[str, int | None] | None = None) -> None:
+    """Patch :func:`_probe_mxq_artifact_k` to return ``k`` for the given path.
 
-    args = _parse_tps_measure("--core-mode", core_mode, "--batch-size", "16")
+    Bypasses ``qbruntime.Model`` entirely so no hardware or MXQ file is
+    required. ``k_by_path=None`` (or an unknown path) returns ``None``,
+    forcing the guard to defer to post-launch verification.
+    """
+    mapping = dict(k_by_path or {})
+    monkeypatch.setattr(tps_cli, "_probe_mxq_artifact_k", lambda path: mapping.get(path))
 
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._cmd_measure(args)
 
-    message = str(excinfo.value)
-    assert "batched MXQ only supports --core-mode single" in message
-    assert "config max_batch_size=16" in message
-    assert core_mode in message
+# ---------------------------------------------------------------------------
+# Pre-launch fast path: a locally resolvable ``--mxq-path`` override rejects
+# (or auto-pins single) based on the artifact's compiled ``K``.
+# ---------------------------------------------------------------------------
 
 
 def test_measure_accepts_single_core_mode_on_batched_mxq(monkeypatch):
+    """``--core-mode single`` short-circuits before any probe."""
     _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
 
     args = _parse_tps_measure("--core-mode", "single", "--batch-size", "16")
@@ -90,112 +110,7 @@ def test_measure_accepts_single_core_mode_on_batched_mxq(monkeypatch):
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
     assert args.core_mode == "single"
-
-
-def test_measure_forces_single_when_core_mode_unspecified_on_batched_mxq(monkeypatch):
-    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
-
-    args = _parse_tps_measure("--batch-size", "16")
-    assert args.core_mode is None
-
-    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
-
-    assert args.core_mode == "single"
-
-
-def test_measure_allows_non_single_core_mode_on_non_batch_mxq(monkeypatch):
-    """Non-batch MXQ (config max_batch_size == 1) keeps every core_mode; sw-batch across N slots is orthogonal."""
-    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=1))
-
-    args = _parse_tps_measure("--core-mode", "global8", "--batch-size", "4")
-
-    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
-
-    assert args.core_mode == "global8"
-
-
-def test_measure_allows_non_single_core_mode_when_config_missing_max_batch_size(monkeypatch):
-    """A config without ``max_batch_size`` behaves as a non-batch target — no rejection, no forcing."""
-    _stub_autoconfig(monkeypatch, _StubConfig())
-
-    args = _parse_tps_measure("--core-mode", "global4")
-
-    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
-
-    assert args.core_mode == "global4"
-
-
-def test_measure_allows_non_single_when_autoconfig_fails(monkeypatch):
-    """AutoConfig failures fall through as non-batch — the pipeline path surfaces the real error."""
-    auto_config = importlib.import_module("transformers").AutoConfig
-
-    def _fail(*a, **kw):
-        raise OSError("simulated network failure")
-
-    monkeypatch.setattr(auto_config, "from_pretrained", _fail)
-
-    args = _parse_tps_measure("--core-mode", "global4")
-
-    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
-
-    assert args.core_mode == "global4"
-
-
-def test_sweep_rejects_non_single_core_mode_on_batched_mxq(monkeypatch):
-    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
-
-    args = _parse_tps_sweep("--core-mode", "global8", "--batch-size", "16")
-
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._cmd_sweep(args)
-
-    assert "batched MXQ only supports --core-mode single" in str(excinfo.value)
-
-
-def test_measure_vlm_probes_text_config_max_batch_size(monkeypatch):
-    """VLM releases carry ``max_batch_size`` on ``text_config``; the probe follows the same candidate order."""
-    config = _StubConfig(text_config=_StubConfig(max_batch_size=4))
-    _stub_autoconfig(monkeypatch, config)
-
-    args = _parse_tps_measure("--task", "image-text-to-text", "--core-mode", "global4", "--batch-size", "4")
-
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._cmd_measure(args)
-
-    assert "batched MXQ only supports --core-mode single" in str(excinfo.value)
-
-
-def test_probe_config_max_batch_size_uses_task_specific_vlm_vision_config(monkeypatch):
-    """The probe forwards ``task`` to :func:`_candidate_max_batch_sizes`, exposing vision_config on VLM."""
-    config = _StubConfig(vision_config=_StubConfig(max_batch_size=2))
-    _stub_autoconfig(monkeypatch, config)
-
-    assert (
-        tps_cli._probe_config_max_batch_size(
-            "mobilint/Qwen3-VL-Batch2",
-            trust_remote_code=True,
-            revision=None,
-            task="image-text-to-text",
-        )
-        == 2
-    )
-
-
-# ---------------------------------------------------------------------------
-# --mxq-path override: the guard must classify batching from the selected
-# artifact's compiled ``K``, not the config's ``max_batch_size`` declaration.
-# ---------------------------------------------------------------------------
-
-
-def _stub_artifact_probe(monkeypatch, k_by_path: dict[str, int | None] | None = None) -> None:
-    """Patch :func:`_probe_mxq_artifact_k` to return ``k`` for the given path.
-
-    Bypasses ``qbruntime.Model`` entirely so no hardware or MXQ file is
-    required. ``k_by_path=None`` (or an unknown path) returns ``None``,
-    forcing the guard to fall through to the config-based probe.
-    """
-    mapping = dict(k_by_path or {})
-    monkeypatch.setattr(tps_cli, "_probe_mxq_artifact_k", lambda path: mapping.get(path))
+    assert not hasattr(args, "_batched_mxq_guard_ctx")
 
 
 def test_measure_overrides_config_batch_when_mxq_path_probes_k1(monkeypatch):
@@ -208,6 +123,7 @@ def test_measure_overrides_config_batch_when_mxq_path_probes_k1(monkeypatch):
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
     assert args.core_mode == "global4"
+    assert not hasattr(args, "_batched_mxq_guard_ctx")
 
 
 def test_measure_rejects_when_mxq_path_probes_k_gt_1_on_batch1_config(monkeypatch):
@@ -226,21 +142,6 @@ def test_measure_rejects_when_mxq_path_probes_k_gt_1_on_batch1_config(monkeypatc
     assert "global4" in message
 
 
-def test_measure_falls_back_to_config_when_artifact_probe_returns_none(monkeypatch):
-    """A non-local or unprobeable override falls back to the config-declared batch size."""
-    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
-    _stub_artifact_probe(monkeypatch, {})  # every path returns None
-
-    args = _parse_tps_measure("--core-mode", "global4", "--mxq-path", "hf://mobilint/Some-Non-Local")
-
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
-
-    message = str(excinfo.value)
-    assert "config max_batch_size=16" in message
-    assert "global4" in message
-
-
 def test_measure_forces_single_when_unspecified_core_mode_on_probed_batched_artifact(monkeypatch):
     """Even without --core-mode, a probed K>1 override pins core_mode=single."""
     _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=1))
@@ -252,6 +153,7 @@ def test_measure_forces_single_when_unspecified_core_mode_on_probed_batched_arti
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
     assert args.core_mode == "single"
+    assert not hasattr(args, "_batched_mxq_guard_ctx")
 
 
 def test_measure_prefers_base_mxq_path_for_eagle3_over_bare_mxq_path(monkeypatch):
@@ -299,6 +201,7 @@ def test_measure_vlm_prefers_text_mxq_path_over_bare_mxq_path(monkeypatch):
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
     assert args.core_mode == "global4"
+    assert not hasattr(args, "_batched_mxq_guard_ctx")
 
 
 def test_select_llm_mxq_override_precedence():
@@ -343,10 +246,131 @@ def test_probe_mxq_artifact_k_returns_none_for_non_local_path(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Role-specific core-mode override: --text-core-mode (VLM) and
-# --base-core-mode (EAGLE-3) should be caught here even when the shared
-# --core-mode is unset, because :func:`_apply_vlm_core_mode_model_kwargs`
-# and the EAGLE-3 prefix apply-path later let the role-specific value win.
+# Deferral: without a locally-resolvable artifact probe, the pre-launch
+# guard must NOT reject on config alone. It stashes a
+# :class:`_BatchedMxqGuardContext` for the post-launch verifier to consume.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("core_mode", ["global4", "global8"])
+def test_measure_defers_non_single_core_mode_when_no_local_override(monkeypatch, core_mode):
+    """No --mxq-path override + batched config no longer rejects at CLI time (defers)."""
+    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
+
+    args = _parse_tps_measure("--core-mode", core_mode, "--batch-size", "16")
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    assert args.core_mode == core_mode
+    ctx = getattr(args, "_batched_mxq_guard_ctx", None)
+    assert ctx is not None
+    assert ctx.effective_core_mode == core_mode
+    assert ctx.flag_label == "--core-mode"
+    assert ctx.args_attr == "core_mode"
+
+
+def test_measure_defers_when_core_mode_unspecified_on_batched_mxq(monkeypatch):
+    """Config-only knowledge cannot classify K under sw-batch — no auto-pin, defer instead."""
+    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
+
+    args = _parse_tps_measure("--batch-size", "16")
+    assert args.core_mode is None
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    # Effective mode is None, so post-launch verifier will short-circuit; no auto-pin.
+    assert args.core_mode is None
+
+
+def test_measure_defers_on_non_batch_config(monkeypatch):
+    """Non-batch config (max_batch_size == 1) with --core-mode global8 defers cleanly.
+
+    Post-launch will observe ``k_per_model == 1`` and accept the mode — this is
+    the sw-batch regression the pre-launch config fallback used to mishandle.
+    """
+    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=1))
+
+    args = _parse_tps_measure("--core-mode", "global8", "--batch-size", "4")
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    assert args.core_mode == "global8"
+
+
+def test_measure_defers_when_config_missing_max_batch_size(monkeypatch):
+    """A config without ``max_batch_size`` behaves like the deferral path — no CLI-time rejection."""
+    _stub_autoconfig(monkeypatch, _StubConfig())
+
+    args = _parse_tps_measure("--core-mode", "global4")
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    assert args.core_mode == "global4"
+
+
+def test_measure_defers_when_autoconfig_fails(monkeypatch):
+    """AutoConfig failures still fall through — pipeline construction surfaces any real error."""
+    auto_config = importlib.import_module("transformers").AutoConfig
+
+    def _fail(*a, **kw):
+        raise OSError("simulated network failure")
+
+    monkeypatch.setattr(auto_config, "from_pretrained", _fail)
+
+    args = _parse_tps_measure("--core-mode", "global4")
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    assert args.core_mode == "global4"
+
+
+def test_measure_defers_when_artifact_probe_returns_none(monkeypatch):
+    """A non-local override falls through to post-launch verification, not the config fallback."""
+    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
+    _stub_artifact_probe(monkeypatch, {})  # every path returns None
+
+    args = _parse_tps_measure("--core-mode", "global4", "--mxq-path", "hf://mobilint/Some-Non-Local")
+
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    ctx = getattr(args, "_batched_mxq_guard_ctx", None)
+    assert ctx is not None
+    assert ctx.effective_core_mode == "global4"
+
+
+def test_sweep_defers_non_single_core_mode_when_no_local_override(monkeypatch):
+    """``tps sweep`` uses the same guard; deferral applies to the sweep command as well."""
+    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
+
+    args = _parse_tps_sweep("--core-mode", "global8", "--batch-size", "16")
+
+    # Do not run the full sweep; call the guard directly, matching how ``tps measure`` deferral is asserted.
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+
+    assert args.core_mode == "global8"
+    assert getattr(args, "_batched_mxq_guard_ctx", None) is not None
+
+
+def test_probe_config_max_batch_size_uses_task_specific_vlm_vision_config(monkeypatch):
+    """The probe helper still forwards ``task`` to the candidate resolver (used by Qwen3-VL guard)."""
+    config = _StubConfig(vision_config=_StubConfig(max_batch_size=2))
+    _stub_autoconfig(monkeypatch, config)
+
+    assert (
+        tps_cli._probe_config_max_batch_size(
+            "mobilint/Qwen3-VL-Batch2",
+            trust_remote_code=True,
+            revision=None,
+            task="image-text-to-text",
+        )
+        == 2
+    )
+
+
+# ---------------------------------------------------------------------------
+# Role-specific core-mode overrides: --text-core-mode (VLM) and
+# --base-core-mode (EAGLE-3) get resolved to the appropriate LLM-role flag
+# so the deferred guard context names the flag the user actually passed.
 # ---------------------------------------------------------------------------
 
 
@@ -356,8 +380,8 @@ class _StubEagle3Config(_StubConfig):
     model_type = "eagle3-qwen3"
 
 
-def test_measure_vlm_rejects_text_core_mode_when_bare_core_mode_unset(monkeypatch):
-    """A batched text MXQ under --text-core-mode global4 with no --core-mode must be rejected."""
+def test_measure_vlm_defers_text_core_mode_when_bare_core_mode_unset(monkeypatch):
+    """A batched text MXQ under --text-core-mode global4 defers with the role-specific flag label."""
     _stub_autoconfig(monkeypatch, _StubConfig(text_config=_StubConfig(max_batch_size=4)))
 
     args = _parse_tps_measure(
@@ -370,40 +394,43 @@ def test_measure_vlm_rejects_text_core_mode_when_bare_core_mode_unset(monkeypatc
     )
     assert args.core_mode is None
 
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    message = str(excinfo.value)
-    assert "batched MXQ only supports --core-mode single" in message
-    assert "--text-core-mode='global4'" in message
-    assert "config max_batch_size=4" in message
+    ctx = getattr(args, "_batched_mxq_guard_ctx", None)
+    assert ctx is not None
+    assert ctx.effective_core_mode == "global4"
+    assert ctx.flag_label == "--text-core-mode"
+    assert ctx.args_attr == "text_core_mode"
 
 
-def test_measure_eagle3_rejects_base_core_mode_when_bare_core_mode_unset(monkeypatch):
-    """A batched base MXQ under --base-core-mode global4 with no --core-mode must be rejected."""
+def test_measure_eagle3_defers_base_core_mode_when_bare_core_mode_unset(monkeypatch):
+    """A batched base MXQ under --base-core-mode global4 defers with the base flag label."""
     _stub_autoconfig(monkeypatch, _StubEagle3Config(max_batch_size=16))
 
     args = _parse_tps_measure("--base-core-mode", "global4", "--batch-size", "16")
     assert args.core_mode is None
 
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    message = str(excinfo.value)
-    assert "batched MXQ only supports --core-mode single" in message
-    assert "--base-core-mode='global4'" in message
-    assert "config max_batch_size=16" in message
+    ctx = getattr(args, "_batched_mxq_guard_ctx", None)
+    assert ctx is not None
+    assert ctx.effective_core_mode == "global4"
+    assert ctx.flag_label == "--base-core-mode"
+    assert ctx.args_attr == "base_core_mode"
 
 
-def test_measure_vlm_allows_text_core_mode_on_non_batch_text_mxq(monkeypatch):
-    """VLM text MXQ with K==1 keeps its --text-core-mode global4 (regression: no accidental rejection)."""
+def test_measure_vlm_allows_text_core_mode_on_non_batch_text_mxq_via_artifact_probe(monkeypatch):
+    """VLM text MXQ probed to K==1 keeps its --text-core-mode global4 (fast-path regression)."""
     _stub_autoconfig(monkeypatch, _StubConfig(text_config=_StubConfig(max_batch_size=1)))
+    _stub_artifact_probe(monkeypatch, {"/tmp/text-k1.mxq": 1})
 
     args = _parse_tps_measure(
         "--task",
         "image-text-to-text",
         "--text-core-mode",
         "global4",
+        "--text-mxq-path",
+        "/tmp/text-k1.mxq",
     )
 
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
@@ -411,36 +438,8 @@ def test_measure_vlm_allows_text_core_mode_on_non_batch_text_mxq(monkeypatch):
     assert args.text_core_mode == "global4"
 
 
-def test_measure_vlm_pins_text_core_mode_single_when_batched_and_unspecified(monkeypatch):
-    """Auto-single pin lands on --text-core-mode for VLM so the apply-path stays consistent."""
-    _stub_autoconfig(monkeypatch, _StubConfig(text_config=_StubConfig(max_batch_size=4)))
-
-    args = _parse_tps_measure("--task", "image-text-to-text", "--batch-size", "4")
-    assert args.core_mode is None
-    assert args.text_core_mode is None
-
-    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
-
-    # The shared flag is what the resolver defaults to when the role-specific one is not set.
-    assert args.core_mode == "single"
-
-
-def test_measure_eagle3_pins_base_core_mode_single_when_batched_and_role_specific_unset(monkeypatch):
-    """Auto-single pin lands on --base-core-mode when EAGLE-3 caller passes only that flag override."""
-    _stub_autoconfig(monkeypatch, _StubEagle3Config(max_batch_size=16))
-
-    args = _parse_tps_measure("--batch-size", "16")
-    assert args.base_core_mode is None
-    assert args.core_mode is None
-
-    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
-
-    # No role-specific override set, so the resolver picked plain --core-mode.
-    assert args.core_mode == "single"
-
-
-def test_measure_eagle3_prefers_base_core_mode_over_shared_core_mode(monkeypatch):
-    """When both --core-mode and --base-core-mode are set, the guard reports the role-specific flag."""
+def test_measure_eagle3_prefers_base_core_mode_over_shared_core_mode_via_artifact(monkeypatch):
+    """When both --core-mode and --base-core-mode are set, the deferred ctx names --base-core-mode."""
     _stub_autoconfig(monkeypatch, _StubEagle3Config(max_batch_size=16))
 
     args = _parse_tps_measure(
@@ -452,23 +451,187 @@ def test_measure_eagle3_prefers_base_core_mode_over_shared_core_mode(monkeypatch
         "16",
     )
 
-    with pytest.raises(SystemExit) as excinfo:
-        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    message = str(excinfo.value)
-    assert "--base-core-mode='global4'" in message
+    ctx = getattr(args, "_batched_mxq_guard_ctx", None)
+    assert ctx is not None
+    assert ctx.flag_label == "--base-core-mode"
+    assert ctx.effective_core_mode == "global4"
 
 
-def test_measure_plain_llm_core_mode_flag_label_unchanged(monkeypatch):
-    """Non-VLM, non-EAGLE-3 rejection message still names --core-mode (regression)."""
+# ---------------------------------------------------------------------------
+# Post-launch verification: reads ``k_per_model`` off the LLM backend and
+# hard-fails when the caller explicitly requested a non-single core mode.
+# ---------------------------------------------------------------------------
+
+
+class _FakeBackend:
+    """Minimal ``MobilintNPUBackend`` stand-in exposing ``k_per_model``."""
+
+    def __init__(self, k: int) -> None:
+        self.k_per_model = k
+
+
+def _fake_pipeline_with_llm_backend(k: int) -> SimpleNamespace:
+    """Return a pipeline whose top-level ``.model.npu_backend`` mimics a plain LLM release."""
+    model = SimpleNamespace(npu_backend=_FakeBackend(k))
+    return SimpleNamespace(model=model)
+
+
+def _fake_vlm_pipeline_with_text_backend(k: int) -> SimpleNamespace:
+    """Return a pipeline whose ``.model.model.language_model.npu_backend`` mimics Qwen3-VL."""
+    language_model = SimpleNamespace(npu_backend=_FakeBackend(k))
+    inner = SimpleNamespace(language_model=language_model)
+    return SimpleNamespace(model=SimpleNamespace(model=inner))
+
+
+def _fake_eagle3_pipeline_with_base_backend(k: int) -> SimpleNamespace:
+    """Return a pipeline whose ``.model.eagle3_base_model.npu_backend`` mimics an EAGLE-3 release."""
+    eagle3_base_model = SimpleNamespace(npu_backend=_FakeBackend(k))
+    return SimpleNamespace(model=SimpleNamespace(eagle3_base_model=eagle3_base_model))
+
+
+def _fake_blip_pipeline_with_bert_backend(k: int) -> SimpleNamespace:
+    """Return a pipeline whose ``.model.text_decoder.bert.npu_backend`` mimics a BLIP release."""
+    bert = SimpleNamespace(npu_backend=_FakeBackend(k))
+    text_decoder = SimpleNamespace(bert=bert)
+    return SimpleNamespace(model=SimpleNamespace(text_decoder=text_decoder))
+
+
+def test_post_launch_rejects_k_gt_1_on_non_single_core_mode(monkeypatch):
+    """K=4 backend under --core-mode global4 (deferred) raises the same friendly SystemExit."""
     _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
 
     args = _parse_tps_measure("--core-mode", "global4", "--batch-size", "16")
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+    assert getattr(args, "_batched_mxq_guard_ctx", None) is not None
 
+    pipeline = _fake_pipeline_with_llm_backend(k=4)
     with pytest.raises(SystemExit) as excinfo:
-        tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+        tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
 
     message = str(excinfo.value)
+    assert "batched MXQ only supports --core-mode single" in message
+    assert "artifact K=4" in message
     assert "--core-mode='global4'" in message
-    assert "--text-core-mode" not in message
-    assert "--base-core-mode" not in message
+
+
+def test_post_launch_accepts_k_eq_1_under_non_single_core_mode_regression(monkeypatch):
+    """K=1 (non-batch sw-batch release) under --core-mode global4 must NOT raise post-launch.
+
+    This is the sw-batch regression the pre-launch config fallback used to
+    mishandle: a ``K == 1`` release with ``config.max_batch_size = 8`` was
+    treated as batched and rejected for ``global4``. Post-launch the true
+    ``k_per_model = 1`` classifies the artifact correctly.
+    """
+    _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=8))
+
+    args = _parse_tps_measure("--core-mode", "global4", "--batch-size", "8")
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+    assert getattr(args, "_batched_mxq_guard_ctx", None) is not None
+
+    pipeline = _fake_pipeline_with_llm_backend(k=1)
+    tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+
+def test_post_launch_skips_when_no_deferred_context():
+    """No ctx (single mode short-circuited or override probe already ran) => noop."""
+    args = argparse.Namespace()
+    pipeline = _fake_pipeline_with_llm_backend(k=4)
+
+    tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+
+def test_post_launch_skips_when_effective_core_mode_is_none():
+    """Deferred ctx with ``effective_core_mode=None`` (no explicit LLM-role mode) is a noop."""
+    args = argparse.Namespace()
+    args._batched_mxq_guard_ctx = tps_cli._BatchedMxqGuardContext(
+        effective_core_mode=None,
+        flag_label="--core-mode",
+        args_attr="core_mode",
+        model="mobilint/example",
+    )
+    pipeline = _fake_pipeline_with_llm_backend(k=4)
+
+    tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+
+def test_post_launch_skips_when_backend_missing():
+    """A non-Mobilint pipeline (no ``npu_backend`` found) skips silently."""
+    args = argparse.Namespace()
+    args._batched_mxq_guard_ctx = tps_cli._BatchedMxqGuardContext(
+        effective_core_mode="global4",
+        flag_label="--core-mode",
+        args_attr="core_mode",
+        model="mobilint/example",
+    )
+    pipeline = SimpleNamespace(model=SimpleNamespace())  # no npu_backend anywhere
+
+    tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+
+def test_post_launch_reads_vlm_language_model_backend(monkeypatch):
+    """VLM ctx resolves to ``pipeline.model.model.language_model.npu_backend`` (Qwen3-VL layout)."""
+    _stub_autoconfig(monkeypatch, _StubConfig(text_config=_StubConfig(max_batch_size=1)))
+
+    args = _parse_tps_measure(
+        "--task",
+        "image-text-to-text",
+        "--text-core-mode",
+        "global4",
+        "--batch-size",
+        "4",
+    )
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+    assert getattr(args, "_batched_mxq_guard_ctx", None) is not None
+
+    pipeline = _fake_vlm_pipeline_with_text_backend(k=4)
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+    message = str(excinfo.value)
+    assert "artifact K=4" in message
+    assert "--text-core-mode='global4'" in message
+
+
+def test_post_launch_reads_eagle3_base_backend(monkeypatch):
+    """EAGLE-3 ctx resolves to ``pipeline.model.eagle3_base_model.npu_backend``."""
+    _stub_autoconfig(monkeypatch, _StubEagle3Config(max_batch_size=16))
+
+    args = _parse_tps_measure("--base-core-mode", "global4", "--batch-size", "16")
+    tps_cli._enforce_batched_mxq_core_mode_constraint(args)
+    assert getattr(args, "_batched_mxq_guard_ctx", None) is not None
+
+    pipeline = _fake_eagle3_pipeline_with_base_backend(k=4)
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+    message = str(excinfo.value)
+    assert "artifact K=4" in message
+    assert "--base-core-mode='global4'" in message
+
+
+def test_resolve_llm_npu_backend_finds_blip_bert_backend():
+    """BLIP's LLM lives at ``pipeline.model.text_decoder.bert.npu_backend``."""
+    pipeline = _fake_blip_pipeline_with_bert_backend(k=2)
+
+    backend = tps_cli._resolve_llm_npu_backend(pipeline.model)
+
+    assert backend is not None
+    assert backend.k_per_model == 2
+
+
+def test_resolve_llm_npu_backend_prefers_eagle3_base_over_top_level():
+    """When both ``eagle3_base_model.npu_backend`` and ``npu_backend`` exist, prefer the base."""
+    top_level = _FakeBackend(k=1)
+    base_backend = _FakeBackend(k=4)
+    eagle3_base_model = SimpleNamespace(npu_backend=base_backend)
+    model = SimpleNamespace(eagle3_base_model=eagle3_base_model, npu_backend=top_level)
+
+    backend = tps_cli._resolve_llm_npu_backend(model)
+
+    assert backend is base_backend
+
+
+def test_resolve_llm_npu_backend_none_when_model_is_none():
+    assert tps_cli._resolve_llm_npu_backend(None) is None
