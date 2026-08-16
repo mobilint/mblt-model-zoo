@@ -65,12 +65,14 @@ def _is_qbruntime_bad_alloc(exc: BaseException) -> bool:
 class MobilintBackendAllocError(RuntimeError):
     """Raised when a multi-slot backend fails to create or launch a slot.
 
-    Only fires for ``qbruntime`` device-memory ``BadAlloc`` failures. Any
-    other :class:`~qbruntime.QbRuntimeError` (invalid MXQ, bad target
-    configuration, corrupted artifact, missing runtime dependency, ...) is
-    re-raised unchanged from :meth:`MobilintNPUBackend.create` and
-    :meth:`MobilintNPUBackend.launch` so callers can distinguish a memory
-    ceiling from a user-config or artifact bug.
+    Fires for ``qbruntime`` device-memory ``BadAlloc`` failures during
+    :meth:`MobilintNPUBackend.create` / :meth:`~MobilintNPUBackend.launch`,
+    and for :meth:`~MobilintNPUBackend._probe_k_per_model` runtime errors
+    on slot 0 (which prevent :meth:`~MobilintNPUBackend.create` from
+    computing ``N`` safely). Any other :class:`~qbruntime.QbRuntimeError`
+    (invalid MXQ, bad target configuration, corrupted artifact, missing
+    runtime dependency, ...) is re-raised unchanged so callers can
+    distinguish a memory ceiling from a user-config or artifact bug.
 
     Carries enough context (phase, slot index, device, how many slots had
     already succeeded, current sizing knobs) to help the caller locate the
@@ -78,12 +80,16 @@ class MobilintBackendAllocError(RuntimeError):
 
     Attributes:
         phase: ``"create"`` when :func:`~qbruntime.Model` construction failed,
-            ``"launch"`` when :meth:`~qbruntime.Model.launch` failed.
+            ``"launch"`` when :meth:`~qbruntime.Model.launch` failed,
+            ``"probe_k_per_model"`` when the slot 0 K probe raised.
         slot: Zero-indexed slot at which the failure happened.
         dev: Device number that the failing slot was assigned to.
         succeeded_so_far: Number of slots that completed the same phase
-            before the failure.
-        n_total: Planned total slot count for this backend.
+            before the failure. For ``"probe_k_per_model"`` this is ``1``
+            (slot 0 was loaded before the probe fired).
+        n_total: Planned total slot count for this backend. For
+            ``"probe_k_per_model"`` this is ``0`` because ``N`` could
+            not be computed.
         max_batch_size: The ``max_batch_size`` requested by the caller.
         k_per_model: The compiled batch axis ``K`` probed from slot 0. May
             be ``1`` when the slot 0 probe itself failed.
@@ -109,12 +115,18 @@ class MobilintBackendAllocError(RuntimeError):
         self.max_batch_size = max_batch_size
         self.k_per_model = k_per_model
         self.original = original
+        if phase == "probe_k_per_model":
+            tail = (
+                "The K probe failed before N could be computed; investigate the underlying "
+                "qbruntime error rather than treating this as a memory ceiling."
+            )
+        else:
+            tail = "If this is a BadAlloc, lower max_batch_size or spread the workload across more devices."
         message = (
             f"[Mobilint] NPU backend {phase} failed at slot {slot} on device {dev} "
             f"(succeeded {succeeded_so_far}/{n_total}). "
             f"max_batch_size={max_batch_size}, k_per_model={k_per_model}. "
-            f"Original qbruntime error: {original}. "
-            "If this is a BadAlloc, lower max_batch_size or spread the workload across more devices."
+            f"Original qbruntime error: {original}. " + tail
         )
         super().__init__(message)
 
@@ -674,14 +686,32 @@ class MobilintNPUBackend:
         :meth:`~qbruntime.Model.get_cache_infos` returns an empty list and
         the fallback of ``1`` is correct because there is no compiled
         batch axis to fan out along.
+
+        Exception policy distinguishes API-availability from runtime-signal:
+        :class:`AttributeError` (old ``qbruntime`` releases missing the API)
+        falls back to ``K=1`` because the artifact classification is unknown
+        but the missing API is a version signal, not an artifact signal. A
+        :class:`~qbruntime.QbRuntimeError` from a live API is a genuine
+        runtime unknown and propagates — silently classifying a batched LLM
+        artifact as non-batch would trick :meth:`create` into launching
+        ``N = max_batch_size`` slots and hitting a device-memory ``BadAlloc``,
+        surfacing a misleading root cause. :meth:`create` catches the
+        propagated error, disposes slot 0, and re-raises as
+        :class:`MobilintBackendAllocError` with ``phase="probe_k_per_model"``.
+
+        Raises:
+            QbRuntimeError: If :meth:`~qbruntime.Model.get_cache_infos` fires
+                a runtime error. Callers must handle rollback.
         """
         try:
             infos = mxq_model.get_cache_infos()
-        except (AttributeError, QbRuntimeError) as exc:
-            # Best-effort probe: any qbruntime failure here (BadAlloc or not)
-            # is non-fatal — we fall back to K=1 rather than propagate,
-            # because the caller can still run with a conservative slot count.
-            logger.warning("Failed to probe k_per_model from get_cache_infos: %s", exc)
+        except AttributeError as exc:
+            # Old ``qbruntime`` releases predating :meth:`get_cache_infos`.
+            # The missing API is a version signal, not an artifact signal,
+            # so falling back to ``K=1`` is safe: the compiled batch axis
+            # is unknown but the caller cannot ask the runtime any better
+            # question. On newer runtimes this branch is unreachable.
+            logger.warning("qbruntime.Model.get_cache_infos not available; assuming K=1: %s", exc)
             return 1
         if not infos:
             return 1
@@ -726,9 +756,18 @@ class MobilintNPUBackend:
         rollback but is re-raised unchanged so the caller can distinguish
         a memory ceiling from a user-config or artifact bug.
 
+        If the slot 0 K probe (:meth:`_probe_k_per_model`) itself raises a
+        :class:`~qbruntime.QbRuntimeError`, ``N`` cannot be computed safely
+        — silently defaulting to ``K=1`` would over-provision slots on a
+        batched LLM artifact and later surface as a misleading ``BadAlloc``.
+        Slot 0 is disposed and the failure is rethrown as
+        :class:`MobilintBackendAllocError` with ``phase="probe_k_per_model"``
+        so the caller sees the true root cause.
+
         Raises:
             MobilintBackendAllocError: If any slot hits a device-memory
-                ``BadAlloc``.
+                ``BadAlloc`` or the slot 0 K probe raises a
+                :class:`~qbruntime.QbRuntimeError`.
             QbRuntimeError: If any slot fails for a non-alloc reason (after
                 partial-state rollback).
             ValueError: If ``self.core_mode`` is not one of the supported
@@ -791,7 +830,26 @@ class MobilintNPUBackend:
         # remaining slots.
         first_dev = int(unique_devs[0])
         first_model = _spawn_slot(0, first_dev)
-        self.k_per_model = self._probe_k_per_model(first_model)
+        try:
+            self.k_per_model = self._probe_k_per_model(first_model)
+        except QbRuntimeError as exc:
+            # K probe failure means we cannot compute ``n_models`` safely.
+            # Silently defaulting to ``K=1`` would over-provision slots on a
+            # batched LLM artifact and surface later as a misleading
+            # ``BadAlloc``. Dispose slot 0 and re-raise with actionable
+            # context so the caller sees the true root cause.
+            self._dispose_all_slots()
+            self.accs = {}
+            raise MobilintBackendAllocError(
+                phase="probe_k_per_model",
+                slot=0,
+                dev=int(first_dev),
+                succeeded_so_far=1,
+                n_total=0,
+                max_batch_size=self.max_batch_size,
+                k_per_model=1,
+                original=exc,
+            ) from exc
         self.n_models = max(1, math.ceil(self.max_batch_size / max(1, self.k_per_model)))
 
         for slot_idx in range(1, self.n_models):

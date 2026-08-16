@@ -367,15 +367,78 @@ def test_probe_k_per_model_falls_back_to_one_for_empty_cache_infos(tmp_path, stu
     assert k == 1
 
 
-def test_probe_k_per_model_falls_back_on_driver_error(tmp_path, stub_qbruntime) -> None:
-    """A qbruntime error while probing must fall back to K=1 rather than propagate."""
+def test_probe_k_per_model_falls_back_on_missing_api(tmp_path, stub_qbruntime) -> None:
+    """Old qbruntime releases without ``get_cache_infos`` must safely default to K=1.
+
+    :class:`AttributeError` is a version signal (the API is missing), not an
+    artifact signal, so falling back to ``K=1`` is safe. The caller cannot
+    ask the runtime any better question on that release.
+    """
+
+    class _NoApiModel(_FakeModel):
+        def get_cache_infos(self):
+            raise AttributeError("get_cache_infos")
+
+    k = MobilintNPUBackend._probe_k_per_model(_NoApiModel("stub", _FakeModelConfig()))
+    assert k == 1
+
+
+def test_probe_k_per_model_propagates_qbruntime_error(tmp_path, stub_qbruntime) -> None:
+    """A qbruntime runtime error while probing must propagate rather than silently return K=1.
+
+    Regression: the probe previously swallowed :class:`QbRuntimeError` and
+    returned ``K=1``, so :meth:`create` misclassified a batched LLM MXQ as
+    non-batch and launched ``N = max_batch_size`` slots, hitting a misleading
+    ``BadAlloc``. The probe must instead surface the real runtime signal.
+    """
 
     class _BrokenModel(_FakeModel):
         def get_cache_infos(self):
             raise QbRuntimeError("driver unhappy")
 
-    k = MobilintNPUBackend._probe_k_per_model(_BrokenModel("stub", _FakeModelConfig()))
-    assert k == 1
+    with pytest.raises(QbRuntimeError) as excinfo:
+        MobilintNPUBackend._probe_k_per_model(_BrokenModel("stub", _FakeModelConfig()))
+    assert "driver unhappy" in str(excinfo.value)
+
+
+def test_backend_create_probe_failure_disposes_slot0_and_raises(tmp_path, stub_qbruntime, monkeypatch) -> None:
+    """A K-probe failure on slot 0 must dispose the slot and raise as ``probe_k_per_model``.
+
+    Regression: the probe used to swallow :class:`QbRuntimeError`, so
+    :meth:`create` computed ``N = ceil(max_batch_size / 1)`` and later hit a
+    misleading ``BadAlloc``. The correct contract is to propagate the probe
+    failure through :meth:`create` as :class:`MobilintBackendAllocError` with
+    ``phase="probe_k_per_model"`` after rolling back slot 0.
+    """
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+
+    def _raising_probe(_mxq_model):
+        raise QbRuntimeError("driver unhappy during K probe")
+
+    monkeypatch.setattr(MobilintNPUBackend, "_probe_k_per_model", staticmethod(_raising_probe))
+
+    with pytest.raises(MobilintBackendAllocError) as excinfo:
+        backend.create()
+
+    err = excinfo.value
+    assert err.phase == "probe_k_per_model"
+    assert err.slot == 0
+    assert err.dev == 0
+    assert err.succeeded_so_far == 1
+    assert err.n_total == 0
+    assert err.max_batch_size == 16
+    assert err.k_per_model == 1
+    assert isinstance(err.original, QbRuntimeError)
+    assert "driver unhappy" in str(err.original)
+    # Slot 0 must have been disposed on rollback so a retry does not double-load.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert stub_qbruntime.models[0].disposed is True
 
 
 def test_output_layout_probe_returns_n_items_for_static_token_axis(tmp_path, stub_qbruntime) -> None:
