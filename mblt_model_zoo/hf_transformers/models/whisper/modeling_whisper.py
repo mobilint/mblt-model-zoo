@@ -206,6 +206,27 @@ class MobilintWhisperDecoder(MobilintModelMixin, MobilintWhisperPreTrainedModel)
         to honor ``npu_prefill_chunk_size`` on the ``use_cache=False`` path
         instead of silently ignoring the requested limit.
         """
+        # Guard both cacheless branches at a single entry point: the short-input
+        # branch falls through to ``super().decoder_forward`` (which re-runs the
+        # base guard — idempotent), and the chunked branch dispatches
+        # ``mxq_model.infer`` directly against slot 0 without ever reaching the
+        # base guard. Keep the wording aligned with the base guard at
+        # ``modeling_utils.py`` so multi-slot rejection messaging stays uniform.
+        # ``MobilintBeamCache`` covers the ``past_key_values is not None`` beam
+        # decoder path via its backend-topology N==1 check.
+        self.npu_backend.dispatcher.assert_single_slot(
+            caller="Whisper decoder_forward (use_cache=False)",
+            remediation=(
+                "Whisper decoder MXQ dispatch runs one blocking mxq_model.infer "
+                "per chunk on slot 0; multi-slot routing across N>1 is not "
+                "implemented for the cacheless chunked prefill path. Either "
+                "rerun with the aggregate decoder batch capped at K (drop "
+                "software-batching or set decoder_max_batch_size<=K) or compile "
+                "a batched (K>1) decoder MXQ so slot-0 hardware batching serves "
+                "the request."
+            ),
+        )
+
         resolved_chunk_size = self.resolve_npu_prefill_chunk_size(npu_prefill_chunk_size)
         # Whisper wraps hidden_states as ``(batch, 1, seq, dim)``; the sequence
         # axis is second-to-last regardless of the exact rank.
