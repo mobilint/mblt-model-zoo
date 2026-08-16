@@ -1364,6 +1364,30 @@ def _build_pipeline(
             "drop --batch-size or use a non-EAGLE-3 release."
         )
     subconfig_options = subconfig_options or SubconfigPipelineOptions()
+    # Backend-only kwargs (``dev_no`` sugar and its prefixed variants, plus
+    # ``max_batch_size`` / ``text_max_batch_size`` / ``base_max_batch_size``) are
+    # consumed only by Mobilint config mixins; stock upstream configs reject
+    # unknown kwargs before measurement starts. Resolve the target class once
+    # here (``AutoConfig.from_pretrained`` is not free) and share the answer
+    # with every gate below. Skip the probe entirely when nothing that flows
+    # through the gate is set, so callers that never touch ``--dev-no`` /
+    # ``--batch-size`` do not pay the download. For non-Mobilint targets
+    # ``--dev-no`` is a silent no-op and ``--batch-size`` stays a
+    # measurement-only knob applied later via ``_resolve_cli_batch_size``.
+    _gate_input_present = (
+        dev_no is not None
+        or max_batch_size is not None
+        or subconfig_options.vision_dev_no is not None
+        or subconfig_options.text_dev_no is not None
+        or eagle3_options.base_dev_no is not None
+        or eagle3_options.draft_dev_no is not None
+        or eagle3_options.fc_dev_no is not None
+    )
+    is_mobilint = _gate_input_present and _is_mobilint_model_target(
+        model,
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+    )
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
             model_kwargs,
@@ -1386,14 +1410,17 @@ def _build_pipeline(
         if subconfig_options.text_mxq_path:
             model_kwargs["text_mxq_path"] = subconfig_options.text_mxq_path
         # VLM sub-configs pop only their prefixed dev_no; expand bare --dev-no
-        # into both prefixes, honoring any per-prefix override.
-        for prefix, prefix_dev_no in (
-            ("vision", subconfig_options.vision_dev_no),
-            ("text", subconfig_options.text_dev_no),
-        ):
-            effective_dev_no = prefix_dev_no if prefix_dev_no is not None else dev_no
-            if effective_dev_no is not None:
-                model_kwargs[f"{prefix}_dev_no"] = effective_dev_no
+        # into both prefixes, honoring any per-prefix override. Only Mobilint
+        # VLM mixins consume ``vision_dev_no`` / ``text_dev_no``; skip injection
+        # on non-Mobilint targets to keep ``--dev-no`` a silent no-op there.
+        if is_mobilint:
+            for prefix, prefix_dev_no in (
+                ("vision", subconfig_options.vision_dev_no),
+                ("text", subconfig_options.text_dev_no),
+            ):
+                effective_dev_no = prefix_dev_no if prefix_dev_no is not None else dev_no
+                if effective_dev_no is not None:
+                    model_kwargs[f"{prefix}_dev_no"] = effective_dev_no
     elif eagle3_prefix_requested or eagle3_broadcast_dev_no:
         _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
         _warn_eagle3_override("--core-mode", "--draft-core-mode", core_mode, eagle3_options.draft_core_mode)
@@ -1461,7 +1488,7 @@ def _build_pipeline(
                 prefix=prefix,
                 dev_no=prefix_dev_no,
             )
-            if prefix_dev_no is not None:
+            if prefix_dev_no is not None and is_mobilint:
                 model_kwargs[f"{prefix}_dev_no"] = prefix_dev_no
         _warn_eagle3_applied_options_summary(model_kwargs)
     else:
@@ -1473,17 +1500,13 @@ def _build_pipeline(
             default_single_target_cores=default_single_target_cores,
             dev_no=dev_no,
         )
-        if dev_no is not None:
+        if dev_no is not None and is_mobilint:
             model_kwargs["dev_no"] = dev_no
-    if max_batch_size is not None and _is_mobilint_model_target(
-        model,
-        trust_remote_code=trust_remote_code,
-        revision=revision,
-    ):
-        # Only Mobilint config mixins consume these backend-only fields; stock
-        # upstream configs reject unknown kwargs before measurement starts. For
-        # non-Mobilint targets ``--batch-size`` stays a measurement-only knob
-        # (synthetic batch around ``generate``) and is applied later via
+    if max_batch_size is not None and is_mobilint:
+        # ``dev_no`` and ``max_batch_size`` share the Mobilint gate hoisted above the
+        # dispatch: stock upstream configs reject unknown kwargs before measurement
+        # starts, so on non-Mobilint targets ``--batch-size`` stays a measurement-only
+        # knob (synthetic batch around ``generate``) applied later via
         # ``_resolve_cli_batch_size``.
         # Propagate to the config layer so the backend launches N = ceil(B / K) slots at construction
         # time. EAGLE-3 releases only accept base_/draft_/fc_-prefixed max_batch_size; broadcast the

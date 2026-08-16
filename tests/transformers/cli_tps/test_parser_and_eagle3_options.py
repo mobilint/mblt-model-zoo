@@ -585,6 +585,13 @@ def test_build_pipeline_plain_sets_dev_no_when_scalar(monkeypatch) -> None:
     monkeypatch.setattr(
         importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
     )
+    # Forcing the Mobilint gate to True isolates this test to dev_no forwarding
+    # so it does not incidentally depend on ``AutoConfig`` resolving ``dummy/model``.
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
 
     pipe = tps_cli._build_pipeline(
         task="text-generation",
@@ -612,6 +619,11 @@ def test_build_pipeline_plain_sets_dev_no_when_list(monkeypatch) -> None:
     monkeypatch.setattr(
         importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
     )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
 
     pipe = tps_cli._build_pipeline(
         task="text-generation",
@@ -634,10 +646,54 @@ def test_build_pipeline_plain_sets_dev_no_when_list(monkeypatch) -> None:
     assert pipe.model_kwargs == {"dev_no": [0, 1]}
 
 
+def test_build_pipeline_plain_skips_dev_no_for_non_mobilint(monkeypatch) -> None:
+    """A non-Mobilint model target must not receive backend-only ``dev_no``.
+
+    Regression guard for PR #109 review: stock upstream configs reject unknown
+    kwargs before measurement starts, so ``--dev-no`` on ``Qwen/Qwen2.5-1.5B-Instruct``
+    (or any non-Mobilint target) must be a silent no-op — matching how
+    ``--batch-size`` behaves under the same gate.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="Qwen/Qwen2.5-1.5B-Instruct",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=0,
+    )
+    assert "model_kwargs" not in vars(pipe) or "dev_no" not in pipe.model_kwargs
+
+
 def test_build_pipeline_vlm_expands_dev_no_to_both_subconfigs(monkeypatch) -> None:
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
     monkeypatch.setattr(
         importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
     )
 
     pipe = tps_cli._build_pipeline(
@@ -662,10 +718,51 @@ def test_build_pipeline_vlm_expands_dev_no_to_both_subconfigs(monkeypatch) -> No
     assert pipe.model_kwargs == {"vision_dev_no": 2, "text_dev_no": 2}
 
 
+def test_build_pipeline_vlm_skips_dev_no_for_non_mobilint(monkeypatch) -> None:
+    """A non-Mobilint VLM target must not receive prefixed ``vision_dev_no`` / ``text_dev_no``."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="Qwen/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=0,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+    )
+    model_kwargs = getattr(pipe, "model_kwargs", {})
+    assert "vision_dev_no" not in model_kwargs
+    assert "text_dev_no" not in model_kwargs
+
+
 def test_build_pipeline_vlm_text_dev_no_override_takes_precedence(monkeypatch) -> None:
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
     monkeypatch.setattr(
         importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
     )
 
     pipe = tps_cli._build_pipeline(
@@ -695,6 +792,11 @@ def test_build_pipeline_eagle3_dev_no_prefix_warns_and_coalesces(monkeypatch) ->
     monkeypatch.setattr(
         importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
     )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
 
     with pytest.warns(UserWarning, match="Conflicting options detected"):
         pipe = tps_cli._build_pipeline(
@@ -719,6 +821,46 @@ def test_build_pipeline_eagle3_dev_no_prefix_warns_and_coalesces(monkeypatch) ->
     assert pipe.model_kwargs["base_dev_no"] == 5
     assert pipe.model_kwargs["draft_dev_no"] == 1
     assert pipe.model_kwargs["fc_dev_no"] == 1
+
+
+def test_build_pipeline_eagle3_skips_prefixed_dev_no_for_non_mobilint(monkeypatch) -> None:
+    """Non-Mobilint EAGLE-3-shaped targets do not exist in practice, but the gate is symmetric."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pipe = tps_cli._build_pipeline(
+            task="text-generation",
+            model="upstream/eagle3-shaped",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(base_dev_no=5),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            dev_no=1,
+        )
+
+    model_kwargs = getattr(pipe, "model_kwargs", {})
+    assert "base_dev_no" not in model_kwargs
+    assert "draft_dev_no" not in model_kwargs
+    assert "fc_dev_no" not in model_kwargs
+    assert "dev_no" not in model_kwargs
 
 
 def test_is_mobilint_model_target_fast_path_repo_prefix(monkeypatch) -> None:
@@ -979,6 +1121,11 @@ def test_build_pipeline_eagle3_broadcasts_bare_dev_no(monkeypatch) -> None:
         "_detect_eagle3_model",
         lambda model, *, trust_remote_code, revision: True,
     )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
 
     pipe = tps_cli._build_pipeline(
         task="text-generation",
@@ -1017,6 +1164,11 @@ def test_build_pipeline_eagle3_bare_dev_no_respects_explicit_prefix(monkeypatch)
         "_detect_eagle3_model",
         lambda *args, **kwargs: pytest.fail("_detect_eagle3_model should not run when prefixed options are set"),
     )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
 
     with pytest.warns(UserWarning, match="Conflicting options detected"):
         pipe = tps_cli._build_pipeline(
@@ -1045,7 +1197,7 @@ def test_build_pipeline_eagle3_bare_dev_no_respects_explicit_prefix(monkeypatch)
 
 
 def test_build_pipeline_non_eagle3_keeps_unprefixed_dev_no(monkeypatch) -> None:
-    """A non-EAGLE-3 model must continue to receive an unprefixed ``dev_no`` model kwarg."""
+    """A non-EAGLE-3 Mobilint model must continue to receive an unprefixed ``dev_no`` model kwarg."""
     monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
     monkeypatch.setattr(
         importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
@@ -1054,6 +1206,11 @@ def test_build_pipeline_non_eagle3_keeps_unprefixed_dev_no(monkeypatch) -> None:
         tps_cli,
         "_detect_eagle3_model",
         lambda model, *, trust_remote_code, revision: False,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
     )
 
     pipe = tps_cli._build_pipeline(
