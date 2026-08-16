@@ -760,16 +760,19 @@ class MobilintNPUBackend:
         :class:`~qbruntime.QbRuntimeError`, ``N`` cannot be computed safely
         — silently defaulting to ``K=1`` would over-provision slots on a
         batched LLM artifact and later surface as a misleading ``BadAlloc``.
-        Slot 0 is disposed and the failure is rethrown as
-        :class:`MobilintBackendAllocError` with ``phase="probe_k_per_model"``
-        so the caller sees the true root cause.
+        Slot 0 is disposed unconditionally; a device-memory ``BadAlloc``
+        during the probe is rethrown as :class:`MobilintBackendAllocError`
+        with ``phase="probe_k_per_model"``, while any other qbruntime
+        failure (invalid MXQ, incompatible target configuration, corrupted
+        artifact, missing runtime dependency, ...) is re-raised unchanged
+        so the caller can distinguish a real allocation ceiling from a
+        user-config or artifact bug.
 
         Raises:
             MobilintBackendAllocError: If any slot hits a device-memory
-                ``BadAlloc`` or the slot 0 K probe raises a
-                :class:`~qbruntime.QbRuntimeError`.
-            QbRuntimeError: If any slot fails for a non-alloc reason (after
-                partial-state rollback).
+                ``BadAlloc`` or the slot 0 K probe hits a ``BadAlloc``.
+            QbRuntimeError: If any slot or the slot 0 K probe fails for a
+                non-alloc reason (after partial-state rollback).
             ValueError: If ``self.core_mode`` is not one of the supported
                 values.
             AssertionError: If ``"global8"`` mode is requested but a device
@@ -836,20 +839,36 @@ class MobilintNPUBackend:
             # K probe failure means we cannot compute ``n_models`` safely.
             # Silently defaulting to ``K=1`` would over-provision slots on a
             # batched LLM artifact and surface later as a misleading
-            # ``BadAlloc``. Dispose slot 0 and re-raise with actionable
-            # context so the caller sees the true root cause.
+            # ``BadAlloc``. Dispose slot 0 unconditionally so a retry does not
+            # double-load. A device-memory ``BadAlloc`` at this point is a
+            # real allocation ceiling and must be wrapped as
+            # :class:`MobilintBackendAllocError` (``phase="probe_k_per_model"``)
+            # so the benchmark records ``skipped_reason=npu_alloc`` and asks
+            # the user to lower ``max_batch_size``. Any other qbruntime error
+            # (invalid MXQ, incompatible target configuration, corrupted
+            # artifact, missing runtime dependency, ...) is re-raised
+            # unchanged so the benchmark records ``skipped_reason=npu_runtime``
+            # with the actionable detail instead of hiding it behind an
+            # allocation-sounding hint.
             self._dispose_all_slots()
             self.accs = {}
-            raise MobilintBackendAllocError(
-                phase="probe_k_per_model",
-                slot=0,
-                dev=int(first_dev),
-                succeeded_so_far=1,
-                n_total=0,
-                max_batch_size=self.max_batch_size,
-                k_per_model=1,
-                original=exc,
-            ) from exc
+            if _is_qbruntime_bad_alloc(exc):
+                raise MobilintBackendAllocError(
+                    phase="probe_k_per_model",
+                    slot=0,
+                    dev=int(first_dev),
+                    succeeded_so_far=1,
+                    n_total=0,
+                    max_batch_size=self.max_batch_size,
+                    k_per_model=1,
+                    original=exc,
+                ) from exc
+            print(
+                f"[Mobilint] NPU backend K probe failed on device {first_dev} "
+                f"during slot 0 setup; re-raising qbruntime error unchanged.",
+                file=sys.stderr,
+            )
+            raise
         self.n_models = max(1, math.ceil(self.max_batch_size / max(1, self.k_per_model)))
 
         for slot_idx in range(1, self.n_models):

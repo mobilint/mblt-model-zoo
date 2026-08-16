@@ -401,14 +401,13 @@ def test_probe_k_per_model_propagates_qbruntime_error(tmp_path, stub_qbruntime) 
     assert "driver unhappy" in str(excinfo.value)
 
 
-def test_backend_create_probe_failure_disposes_slot0_and_raises(tmp_path, stub_qbruntime, monkeypatch) -> None:
-    """A K-probe failure on slot 0 must dispose the slot and raise as ``probe_k_per_model``.
+def test_backend_create_probe_bad_alloc_disposes_slot0_and_wraps(tmp_path, stub_qbruntime, monkeypatch) -> None:
+    """A device-memory ``BadAlloc`` during the K probe must wrap as ``probe_k_per_model``.
 
-    Regression: the probe used to swallow :class:`QbRuntimeError`, so
-    :meth:`create` computed ``N = ceil(max_batch_size / 1)`` and later hit a
-    misleading ``BadAlloc``. The correct contract is to propagate the probe
-    failure through :meth:`create` as :class:`MobilintBackendAllocError` with
-    ``phase="probe_k_per_model"`` after rolling back slot 0.
+    A ``BadAlloc`` at probe time is a real allocation ceiling: the compiled
+    MXQ signals that slot 0 cannot fit within the caller's target budget.
+    Wrapping as :class:`MobilintBackendAllocError` lets the benchmark record
+    ``skipped_reason=npu_alloc`` and suggest lowering ``max_batch_size``.
     """
     backend = _make_backend_at(
         tmp_path,
@@ -418,7 +417,7 @@ def test_backend_create_probe_failure_disposes_slot0_and_raises(tmp_path, stub_q
     )
 
     def _raising_probe(_mxq_model):
-        raise QbRuntimeError("driver unhappy during K probe")
+        raise QbRuntimeError("BadAlloc: device out of memory during K probe")
 
     monkeypatch.setattr(MobilintNPUBackend, "_probe_k_per_model", staticmethod(_raising_probe))
 
@@ -434,8 +433,42 @@ def test_backend_create_probe_failure_disposes_slot0_and_raises(tmp_path, stub_q
     assert err.max_batch_size == 16
     assert err.k_per_model == 1
     assert isinstance(err.original, QbRuntimeError)
-    assert "driver unhappy" in str(err.original)
+    assert "BadAlloc" in str(err.original)
     # Slot 0 must have been disposed on rollback so a retry does not double-load.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert stub_qbruntime.models[0].disposed is True
+
+
+def test_backend_create_probe_non_alloc_error_reraises_unchanged(tmp_path, stub_qbruntime, monkeypatch) -> None:
+    """A non-``BadAlloc`` K-probe failure must propagate raw and clean up state.
+
+    Regression: a prior revision unconditionally wrapped every K-probe
+    :class:`QbRuntimeError` as :class:`MobilintBackendAllocError`, so an
+    invalid MXQ / corrupted artifact / incompatible target configuration
+    surfaced with ``skipped_reason=npu_alloc`` and told the user to lower
+    ``max_batch_size`` — misleading. Non-alloc probe errors must instead be
+    re-raised unchanged so the benchmark records ``skipped_reason=npu_runtime``
+    with the actionable detail.
+    """
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+
+    def _raising_probe(_mxq_model):
+        raise QbRuntimeError("invalid mxq artifact: cannot read cache infos")
+
+    monkeypatch.setattr(MobilintNPUBackend, "_probe_k_per_model", staticmethod(_raising_probe))
+
+    with pytest.raises(QbRuntimeError) as excinfo:
+        backend.create()
+
+    assert not isinstance(excinfo.value, MobilintBackendAllocError)
+    assert "invalid mxq artifact" in str(excinfo.value)
+    # Partial state must still be cleaned up so a retry does not double-load.
     assert backend.mxq_models == []
     assert backend.accs == {}
     assert stub_qbruntime.models[0].disposed is True
