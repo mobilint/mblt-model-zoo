@@ -508,9 +508,40 @@ def _handle_npu_runtime_error(
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
 
+_ROLE_MOBILINT = "mobilint"
+_ROLE_CALLER_MOBILINT_RETAINED = "caller_mobilint_retained"
+_ROLE_RESOLVED_UPSTREAM = "resolved_upstream"
+_ROLE_CALLER_UPSTREAM = "caller_upstream"
+
+# The sibling image-text-to-text and automatic-speech-recognition benchmarks do not currently
+# retain Mobilint siblings alongside their resolved upstream parents under ``--original-models``
+# (both call ``_resolve_original_model_ids`` and use the returned list verbatim), so the mixed-run
+# bug that motivated this refactor does not reproduce there. If either sibling grows the same
+# retention semantics, mirror the refactor: extend their target dataclass with ``is_mobilint`` /
+# ``role`` / ``disable_npu_specific_args``, populate them from caller-listed ids and mxq_dir at
+# collection time, and switch the measurement loop to per-target reads.
+
+
 @dataclass(frozen=True)
 class TextBenchmarkTarget:
-    """Resolved text-generation benchmark target with batch metadata."""
+    """Resolved text-generation benchmark target with batch and provenance metadata.
+
+    The ``is_mobilint``, ``role``, and ``disable_npu_specific_args`` fields are populated
+    once at target collection time. Downstream helpers must read these fields instead of
+    re-checking ``args.original_models``; that flag is a global run-mode selector, and per-target
+    behavior in ``--original-models`` mixed runs (where Mobilint siblings are retained alongside
+    their upstream parents) requires per-target provenance the flag alone cannot express.
+
+    Roles:
+        ``mobilint``: A caller-listed or ``--mxq-dir``-discovered Mobilint target in a run without
+            ``--original-models``.
+        ``caller_mobilint_retained``: A caller-listed ``mobilint/*`` target that survived a
+            ``--original-models`` mixed run alongside its resolved upstream parent.
+        ``resolved_upstream``: A parent id produced by ``_resolve_original_model_ids`` from a
+            Mobilint sibling under ``--original-models``.
+        ``caller_upstream``: A caller-listed non-Mobilint target, with or without
+            ``--original-models``.
+    """
 
     model_id: str
     revision_candidates: list[str | None]
@@ -519,6 +550,32 @@ class TextBenchmarkTarget:
     mxq_path: str | None
     max_batch_size: int
     batch_mode: str
+    is_mobilint: bool = False
+    role: str = _ROLE_CALLER_UPSTREAM
+    disable_npu_specific_args: bool = False
+
+
+def _classify_target_role(
+    *,
+    model_id: str,
+    is_mobilint: bool,
+    caller_model_ids: set[str],
+    caller_mobilint_ids: set[str],
+    original_models: bool,
+) -> str:
+    """Return the collection-time role string for one benchmark target.
+
+    ``caller_model_ids`` is the raw ``--model`` list (post-normalization) and lets the classifier
+    tell a caller-listed upstream apart from a parent that resolved out of a Mobilint sibling.
+    ``caller_mobilint_ids`` is the caller-listed Mobilint subset retained under ``--original-models``.
+    """
+    if is_mobilint:
+        if original_models and model_id in caller_mobilint_ids:
+            return _ROLE_CALLER_MOBILINT_RETAINED
+        return _ROLE_MOBILINT
+    if original_models and model_id not in caller_model_ids:
+        return _ROLE_RESOLVED_UPSTREAM
+    return _ROLE_CALLER_UPSTREAM
 
 
 def _safe_filename(model_id: str) -> str:
@@ -650,8 +707,11 @@ def _filter_text_targets_by_batch_mode(
     task: str = "text-generation",
     override_batch_size: int | None = None,
     original_models: bool = False,
+    caller_model_ids: Iterable[str] | None = None,
+    caller_mobilint_ids: Iterable[str] | None = None,
+    mxq_dir: str | None = None,
 ) -> list[TextBenchmarkTarget]:
-    """Filter unsupported targets and annotate each supported target with batch metadata.
+    """Filter unsupported targets and annotate each supported target with batch + role metadata.
 
     When ``original_models`` is set and ``override_batch_size`` is greater than one,
     upstream/original targets that report ``config.max_batch_size == 1`` are still
@@ -661,7 +721,15 @@ def _filter_text_targets_by_batch_mode(
     slots and exhaust device memory. In all cases ``override_batch_size`` becomes the
     effective input batch dim for admitted targets, and it is later gated to Mobilint
     targets when it is forwarded as a backend ``max_batch_size`` kwarg.
+
+    Populates per-target provenance (``is_mobilint``, ``role``, ``disable_npu_specific_args``)
+    here so downstream helpers never re-read ``args.original_models``. ``caller_model_ids`` is
+    the raw ``--model`` list and lets the classifier distinguish caller-listed upstream targets
+    from parents that resolved out of Mobilint siblings; ``caller_mobilint_ids`` is the caller
+    subset retained under ``--original-models`` mixed runs.
     """
+    caller_model_ids_set: set[str] = set(caller_model_ids or ())
+    caller_mobilint_ids_set: set[str] = set(caller_mobilint_ids or ())
     filtered: list[TextBenchmarkTarget] = []
     relax_original = (
         original_models
@@ -682,11 +750,20 @@ def _filter_text_targets_by_batch_mode(
         else:
             effective_max_batch_size = cfg_max_batch_size
         resolved_batch_mode = _batch_mode_from_max_batch_size(cfg_max_batch_size)
-        forced_batch = relax_original and not _is_mobilint_target_common(model_id, mxq_path=mxq_path)
+        is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path, mxq_dir=mxq_dir)
+        forced_batch = relax_original and not is_mobilint
         if forced_batch and cfg_max_batch_size == 1:
             resolved_batch_mode = _BATCH_MODE_BATCH
         if batch_mode is not None and resolved_batch_mode != batch_mode:
             continue
+        role = _classify_target_role(
+            model_id=model_id,
+            is_mobilint=is_mobilint,
+            caller_model_ids=caller_model_ids_set,
+            caller_mobilint_ids=caller_mobilint_ids_set,
+            original_models=original_models,
+        )
+        disable_npu_specific_args = bool(original_models) and not mxq_dir and not is_mobilint
         filtered.append(
             TextBenchmarkTarget(
                 model_id=model_id,
@@ -696,6 +773,9 @@ def _filter_text_targets_by_batch_mode(
                 mxq_path=mxq_path,
                 max_batch_size=effective_max_batch_size,
                 batch_mode=resolved_batch_mode,
+                is_mobilint=is_mobilint,
+                role=role,
+                disable_npu_specific_args=disable_npu_specific_args,
             )
         )
     return filtered
@@ -1703,17 +1783,20 @@ def _args_for_target_device_backend(
     *,
     model_id: str,
     mxq_path: str | None = None,
+    is_mobilint: bool | None = None,
 ) -> argparse.Namespace:
     """Return an args copy with a device backend resolved for one benchmark target.
 
     ``--original-models`` mixed runs retain the caller's Mobilint IDs alongside the resolved
-    upstream parents. The retained Mobilint target keeps its NPU/CPU defaults by treating
-    ``args.original_models`` as ``False`` for that specific row, so the resolver does not
-    short-circuit to ``cuda``/``gpu`` and colocate the Mobilint sibling on the same device as
-    its parent.
+    upstream parents. The retained Mobilint target keeps its NPU/CPU defaults via
+    ``original_models_override=False``, so the resolver does not short-circuit to ``cuda``/``gpu``
+    and colocate the Mobilint sibling on the same device as its parent. Callers should pass the
+    ``is_mobilint`` flag computed at collection time (``TextBenchmarkTarget.is_mobilint``); when
+    omitted, it is derived from the target identity for legacy call sites.
     """
-    is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path, mxq_dir=args.mxq_dir)
-    original_models_override = False if (args.original_models and is_mobilint) else None
+    if is_mobilint is None:
+        is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path, mxq_dir=args.mxq_dir)
+    original_models_override = False if is_mobilint else None
     return _args_for_target_device_backend_shared(
         args,
         model_id=model_id,
@@ -1753,12 +1836,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
         _rebuild_combined_outputs(output_dir)
         return 0
 
-    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
-    if disable_npu_specific_args:
-        print(
-            "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
-        )
-
     available_model_ids: list[str] | None = None
     if args.mxq_dir or not args.models:
         available_model_ids = list_default_model_ids(
@@ -1771,10 +1848,14 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
     _collect_host_pc_info(output_dir)
 
+    caller_model_ids: list[str] = []
+    caller_mobilint_ids: list[str] = []
+    resolved_mxq_dir_str: str | None = None
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
+        resolved_mxq_dir_str = str(mxq_dir)
         if args.models or args.original_models or args.all or args.revision or args.mxq_path:
             print(
                 "Note: --mxq-dir is set, so --model/--original-models/--all/--revision/--mxq-path are ignored "
@@ -1789,6 +1870,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         print(f"Using local mxq targets from {mxq_dir}: {len(targets)} files")
     else:
         model_ids = [str(item) for item in args.models] if args.models else (available_model_ids or [])
+        caller_model_ids = list(model_ids)
         if args.original_models:
             original_count = len(model_ids)
             caller_mobilint_ids = _caller_mobilint_model_ids(args.models)
@@ -1820,9 +1902,31 @@ def _run_sweep(args: argparse.Namespace) -> int:
         batch_mode=args.batch_mode,
         override_batch_size=getattr(args, "batch_size", None),
         original_models=bool(getattr(args, "original_models", False)),
+        caller_model_ids=caller_model_ids,
+        caller_mobilint_ids=caller_mobilint_ids,
+        mxq_dir=resolved_mxq_dir_str,
     )
+    disabled_count = sum(1 for target in filtered_targets if target.disable_npu_specific_args)
+    if disabled_count:
+        print(
+            f"Note: --original-models mixed run; {disabled_count} upstream target(s) will skip NPU-specific "
+            "parameters (core_mode/npu_prefill_chunk_size); Mobilint sibling targets keep them."
+        )
     run_targets: list[
-        tuple[str, list[str | None], str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
+        tuple[
+            str,
+            list[str | None],
+            str,
+            str,
+            str | None,
+            str | None,
+            int,
+            str,
+            tuple[int, int, int],
+            list[int],
+            bool,
+            bool,
+        ]
     ] = []
     for target in filtered_targets:
         target_prefill_range, target_cache_lengths = _target_sweep_lengths(
@@ -1833,7 +1937,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
-            disable_npu_specific_args=disable_npu_specific_args,
+            disable_npu_specific_args=target.disable_npu_specific_args,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
@@ -1848,6 +1952,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     target.batch_mode,
                     target_prefill_range,
                     target_cache_lengths,
+                    target.disable_npu_specific_args,
+                    target.is_mobilint,
                 )
             )
 
@@ -1865,13 +1971,20 @@ def _run_sweep(args: argparse.Namespace) -> int:
         batch_mode,
         prefill_range,
         cache_lengths,
+        target_disable_npu_specific_args,
+        target_is_mobilint,
     ) in tqdm(
         run_targets,
         desc="Benchmarking models",
         total=len(run_targets),
         unit="model-mode",
     ):
-        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
+        target_args = _args_for_target_device_backend(
+            args,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            is_mobilint=target_is_mobilint,
+        )
         # Ensure pre-check sees memory state after releasing previous model.
         if _is_cuda_device(target_args.device):
             _clear_cuda_memory(target_args.device)
@@ -1890,13 +2003,14 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if args.skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
+        run_npu_prefill_chunk_size = None if target_disable_npu_specific_args else args.npu_prefill_chunk_size
         print(
             "Run config: "
             f"batch_mode={batch_mode} batch_size={batch_size} core_mode={core_mode or 'default'} "
             f"revision={revision or 'main'} "
             f"device={target_args.device} device_backend={target_args.device_backend} "
             "npu_prefill_chunk_size="
-            f"{args.npu_prefill_chunk_size if args.npu_prefill_chunk_size is not None else 'auto'}"
+            f"{run_npu_prefill_chunk_size if run_npu_prefill_chunk_size is not None else 'auto'}"
         )
         print(
             "Sweep config: "
@@ -1999,7 +2113,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             measurer = TPSMeasurer(pipeline)
             tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
             _print_device_status(target_args, tracker_prefill)
-            resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
+            resolved_npu_prefill_chunk_size = run_npu_prefill_chunk_size
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=_SWEEP_WARMUP_PREFILL,
@@ -2570,32 +2684,43 @@ def _rebuild_measure_outputs(
 
 def _collect_text_run_targets(
     args: argparse.Namespace,
-) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]]]:
-    """Resolve text-generation benchmark targets and core-mode expansion."""
+) -> tuple[
+    str,
+    list[tuple[str, list[str | None], str, str, str | None, str | None, int, str, bool, bool]],
+]:
+    """Resolve text-generation benchmark targets and core-mode expansion.
+
+    Returns per-target run tuples carrying ``disable_npu_specific_args`` and ``is_mobilint``
+    provenance so downstream loops never re-derive them from ``args.original_models``.
+    """
     available_model_ids = list_default_model_ids(
         "text-generation",
         include_private=bool(getattr(args, "include_private", False)),
     )
     if not available_model_ids:
         print("No text-generation models found.")
-        return "", False, []
+        return "", []
     output_dir = str(
         Path(args.output_dir).resolve()
         if args.output_dir
         else Path(__file__).resolve().parent / "results" / "text_generation"
     )
     os.makedirs(output_dir, exist_ok=True)
-    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    caller_model_ids: list[str] = []
+    caller_mobilint_ids: list[str] = []
+    resolved_mxq_dir_str: str | None = None
     targets: list[tuple[str, list[str | None], str, str, str | None]]
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
+        resolved_mxq_dir_str = str(mxq_dir)
         targets = _iter_targets_from_mxq_dir(mxq_dir=mxq_dir, available_model_ids=available_model_ids)
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
         model_ids = [str(item) for item in args.models] if args.models else available_model_ids
+        caller_model_ids = list(model_ids)
         if args.original_models:
             caller_mobilint_ids = _caller_mobilint_model_ids(args.models)
             resolved_parents = _resolve_original_model_ids(model_ids)
@@ -2610,13 +2735,16 @@ def _collect_text_run_targets(
         batch_mode=args.batch_mode,
         override_batch_size=getattr(args, "batch_size", None),
         original_models=bool(getattr(args, "original_models", False)),
+        caller_model_ids=caller_model_ids,
+        caller_mobilint_ids=caller_mobilint_ids,
+        mxq_dir=resolved_mxq_dir_str,
     )
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]] = []
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str, bool, bool]] = []
     for target in filtered_targets:
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
-            disable_npu_specific_args=disable_npu_specific_args,
+            disable_npu_specific_args=target.disable_npu_specific_args,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
@@ -2629,9 +2757,11 @@ def _collect_text_run_targets(
                     core_mode,
                     target.max_batch_size,
                     target.batch_mode,
+                    target.disable_npu_specific_args,
+                    target.is_mobilint,
                 )
             )
-    return output_dir, disable_npu_specific_args, run_targets
+    return output_dir, run_targets
 
 
 def _run_measure(args: argparse.Namespace) -> int:
@@ -2640,21 +2770,37 @@ def _run_measure(args: argparse.Namespace) -> int:
     if args.rebuild_charts:
         _rebuild_measure_outputs(_resolve_text_generation_output_dir(args))
         return 0
-    output_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
+    output_dir, run_targets = _collect_text_run_targets(args)
     if not run_targets:
         return 0
-    if disable_npu_specific_args:
+    disabled_count = sum(1 for entry in run_targets if entry[8])
+    if disabled_count:
         print(
-            "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
+            f"Note: --original-models mixed run; {disabled_count} upstream target(s) will skip NPU-specific "
+            "parameters (core_mode/npu_prefill_chunk_size); Mobilint sibling targets keep them."
         )
     _collect_host_pc_info(output_dir)
     skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "measure")
     successful_labels: set[str] = set()
     fresh_failure_labels: set[str] = set()
-    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
-        run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
-    ):
-        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
+    for (
+        model_id,
+        revision_candidates,
+        label,
+        base,
+        mxq_path,
+        core_mode,
+        batch_size,
+        batch_mode,
+        target_disable_npu_specific_args,
+        target_is_mobilint,
+    ) in tqdm(run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"):
+        target_args = _args_for_target_device_backend(
+            args,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            is_mobilint=target_is_mobilint,
+        )
         if _is_cuda_device(target_args.device):
             _clear_cuda_memory(target_args.device)
         revision = revision_candidates[0] if mxq_path else _select_revision(model_id, revision_candidates)
@@ -2748,7 +2894,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                     continue
                 raise
             measurer = TPSMeasurer(pipeline)
-            resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
+            resolved_npu_prefill_chunk_size = None if target_disable_npu_specific_args else args.npu_prefill_chunk_size
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=args.prefill,

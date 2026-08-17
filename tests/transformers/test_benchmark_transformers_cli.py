@@ -2307,14 +2307,23 @@ def test_collect_text_run_targets_original_models_preserves_mobilint(monkeypatch
         ]
     )
 
-    _, disable_npu_specific_args, run_targets = text_bench._collect_text_run_targets(args)
+    _, run_targets = text_bench._collect_text_run_targets(args)
 
     model_ids = [entry[0] for entry in run_targets]
     assert set(model_ids) == {
         "mobilint/Llama-3.1-8B-Instruct-Batch16",
         "meta-llama/Llama-3.1-8B-Instruct",
     }
-    assert disable_npu_specific_args is True
+    per_target_disable = {entry[0]: entry[8] for entry in run_targets}
+    per_target_is_mobilint = {entry[0]: entry[9] for entry in run_targets}
+    assert per_target_disable == {
+        "mobilint/Llama-3.1-8B-Instruct-Batch16": False,
+        "meta-llama/Llama-3.1-8B-Instruct": True,
+    }
+    assert per_target_is_mobilint == {
+        "mobilint/Llama-3.1-8B-Instruct-Batch16": True,
+        "meta-llama/Llama-3.1-8B-Instruct": False,
+    }
 
 
 def test_collect_text_run_targets_original_models_non_mobilint_only_still_drops(monkeypatch, tmp_path) -> None:
@@ -2340,11 +2349,13 @@ def test_collect_text_run_targets_original_models_non_mobilint_only_still_drops(
         ]
     )
 
-    _, _, run_targets = text_bench._collect_text_run_targets(args)
+    _, run_targets = text_bench._collect_text_run_targets(args)
 
     model_ids = [entry[0] for entry in run_targets]
     assert model_ids == ["meta-llama/Llama-3.1-8B-Instruct"]
     assert not any(mid.startswith("mobilint/") for mid in model_ids)
+    assert run_targets[0][8] is True
+    assert run_targets[0][9] is False
 
 
 def test_collect_text_run_targets_mxq_dir_still_ignores_original_models(monkeypatch, tmp_path) -> None:
@@ -2387,11 +2398,12 @@ def test_collect_text_run_targets_mxq_dir_still_ignores_original_models(monkeypa
         ]
     )
 
-    _, disable_npu_specific_args, run_targets = text_bench._collect_text_run_targets(args)
+    _, run_targets = text_bench._collect_text_run_targets(args)
 
     assert resolve_calls == []
     assert [entry[0] for entry in run_targets] == ["mobilint/local-model"]
-    assert disable_npu_specific_args is False
+    assert run_targets[0][8] is False
+    assert run_targets[0][9] is True
 
 
 def test_build_pipeline_forwards_dev_no_only_for_mobilint(monkeypatch) -> None:
@@ -2448,10 +2460,31 @@ def test_text_measure_continues_on_cuda_oom(monkeypatch, tmp_path) -> None:
         "_collect_text_run_targets",
         lambda args: (
             str(tmp_path),
-            True,
             [
-                ("upstream/model-a", [None], "upstream/model-a", "upstream_model-a", None, None, 64, "batch"),
-                ("upstream/model-b", [None], "upstream/model-b", "upstream_model-b", None, None, 64, "batch"),
+                (
+                    "upstream/model-a",
+                    [None],
+                    "upstream/model-a",
+                    "upstream_model-a",
+                    None,
+                    None,
+                    64,
+                    "batch",
+                    True,
+                    False,
+                ),
+                (
+                    "upstream/model-b",
+                    [None],
+                    "upstream/model-b",
+                    "upstream_model-b",
+                    None,
+                    None,
+                    64,
+                    "batch",
+                    True,
+                    False,
+                ),
             ],
         ),
     )
@@ -2550,10 +2583,31 @@ def test_text_measure_continues_on_npu_alloc_error(monkeypatch, tmp_path) -> Non
         "_collect_text_run_targets",
         lambda args: (
             str(tmp_path),
-            False,
             [
-                ("mobilint/model-a", [None], "mobilint/model-a", "mobilint_model-a", None, "single", 64, "batch"),
-                ("mobilint/model-b", [None], "mobilint/model-b", "mobilint_model-b", None, "single", 64, "batch"),
+                (
+                    "mobilint/model-a",
+                    [None],
+                    "mobilint/model-a",
+                    "mobilint_model-a",
+                    None,
+                    "single",
+                    64,
+                    "batch",
+                    False,
+                    True,
+                ),
+                (
+                    "mobilint/model-b",
+                    [None],
+                    "mobilint/model-b",
+                    "mobilint_model-b",
+                    None,
+                    "single",
+                    64,
+                    "batch",
+                    False,
+                    True,
+                ),
             ],
         ),
     )
@@ -2691,10 +2745,31 @@ def test_text_measure_continues_on_cuda_precheck(monkeypatch, tmp_path) -> None:
         "_collect_text_run_targets",
         lambda args: (
             str(tmp_path),
-            True,
             [
-                ("upstream/model-a", [None], "upstream/model-a", "upstream_model-a", None, None, 64, "batch"),
-                ("upstream/model-b", [None], "upstream/model-b", "upstream_model-b", None, None, 64, "batch"),
+                (
+                    "upstream/model-a",
+                    [None],
+                    "upstream/model-a",
+                    "upstream_model-a",
+                    None,
+                    None,
+                    64,
+                    "batch",
+                    True,
+                    False,
+                ),
+                (
+                    "upstream/model-b",
+                    [None],
+                    "upstream/model-b",
+                    "upstream_model-b",
+                    None,
+                    None,
+                    64,
+                    "batch",
+                    True,
+                    False,
+                ),
             ],
         ),
     )
@@ -2836,3 +2911,194 @@ def test_text_rebuild_sweep_charts_preserves_cuda_precheck_skip(tmp_path) -> Non
         row for row in rows if row.get("model") == "upstream/sweep-a" and row.get("skipped_reason") == "cuda_precheck"
     ]
     assert len(skipped_rows) == 1
+
+
+def test_text_target_filter_classifies_caller_mobilint_retained_role(monkeypatch) -> None:
+    """Verify --original-models mixed run classifies retained Mobilint sibling role and preserves NPU args."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("mobilint/Model-A", [None], "mobilint/Model-A", "mobilint_Model-A", None),
+        ("meta-llama/Model-A", [None], "meta-llama/Model-A", "meta-llama_Model-A", None),
+    ]
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(
+        text_bench,
+        "_resolve_config_max_batch_size",
+        lambda model_id, revision, *, task: 16 if model_id.startswith("mobilint/") else 1,
+    )
+
+    admitted = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="batch",
+        override_batch_size=64,
+        original_models=True,
+        caller_model_ids=["mobilint/Model-A"],
+        caller_mobilint_ids=["mobilint/Model-A"],
+        mxq_dir=None,
+    )
+
+    by_id = {target.model_id: target for target in admitted}
+    assert by_id["mobilint/Model-A"].is_mobilint is True
+    assert by_id["mobilint/Model-A"].role == "caller_mobilint_retained"
+    assert by_id["mobilint/Model-A"].disable_npu_specific_args is False
+    assert by_id["meta-llama/Model-A"].is_mobilint is False
+    assert by_id["meta-llama/Model-A"].role == "resolved_upstream"
+    assert by_id["meta-llama/Model-A"].disable_npu_specific_args is True
+
+
+def test_text_target_filter_classifies_plain_mobilint_role(monkeypatch) -> None:
+    """Verify a Mobilint target outside --original-models keeps role=mobilint and disable=False."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("mobilint/Model-B", [None], "mobilint/Model-B", "mobilint_Model-B", None),
+    ]
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: 8)
+
+    admitted = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="batch",
+        override_batch_size=None,
+        original_models=False,
+        caller_model_ids=["mobilint/Model-B"],
+        caller_mobilint_ids=[],
+        mxq_dir=None,
+    )
+
+    assert len(admitted) == 1
+    assert admitted[0].is_mobilint is True
+    assert admitted[0].role == "mobilint"
+    assert admitted[0].disable_npu_specific_args is False
+
+
+def test_text_target_filter_classifies_caller_upstream_role(monkeypatch) -> None:
+    """Verify a caller-listed non-Mobilint target is caller_upstream, and disable follows --original-models."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("meta-llama/Solo", [None], "meta-llama/Solo", "meta-llama_Solo", None),
+    ]
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: 1)
+
+    without_original = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="non_batch",
+        original_models=False,
+        caller_model_ids=["meta-llama/Solo"],
+        caller_mobilint_ids=[],
+        mxq_dir=None,
+    )
+    with_original = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="non_batch",
+        original_models=True,
+        caller_model_ids=["meta-llama/Solo"],
+        caller_mobilint_ids=[],
+        mxq_dir=None,
+    )
+
+    assert without_original[0].role == "caller_upstream"
+    assert without_original[0].disable_npu_specific_args is False
+    assert with_original[0].role == "caller_upstream"
+    assert with_original[0].disable_npu_specific_args is True
+
+
+def test_text_target_filter_mxq_dir_keeps_disable_false(monkeypatch) -> None:
+    """Verify --mxq-dir short-circuits disable_npu_specific_args regardless of --original-models."""
+    raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
+        ("mobilint/local", [None], "mobilint/local", "mobilint_local", "/tmp/mxq/mobilint__local-W8.mxq"),
+    ]
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_has_gguf_artifact", lambda model_id, revision: False)
+    monkeypatch.setattr(text_bench, "_resolve_config_max_batch_size", lambda model_id, revision, *, task: 4)
+
+    admitted = text_bench._filter_text_targets_by_batch_mode(
+        raw_targets,
+        batch_mode="batch",
+        original_models=True,
+        caller_model_ids=[],
+        caller_mobilint_ids=[],
+        mxq_dir="/tmp/mxq",
+    )
+
+    assert admitted[0].is_mobilint is True
+    assert admitted[0].disable_npu_specific_args is False
+
+
+def test_text_iter_core_modes_for_target_reads_target_disable(monkeypatch) -> None:
+    """Verify _iter_core_modes_for_target honors the per-target disable flag, not args.original_models."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--core-mode", "all"])
+
+    disabled = text_bench._iter_core_modes_for_target(args, "non_batch", disable_npu_specific_args=True)
+    enabled = text_bench._iter_core_modes_for_target(args, "non_batch", disable_npu_specific_args=False)
+
+    assert disabled == [None]
+    assert enabled and None not in enabled
+
+
+def test_text_args_for_target_device_backend_dev_no_retained_for_mobilint(monkeypatch) -> None:
+    """Verify --dev-no is retained on retained Mobilint targets under --original-models mixed runs.
+
+    Regression for the PR-3796045969 review discussion: prior to this refactor, the retained
+    Mobilint sibling would still see NPU-specific args disabled at the run-wide level even after
+    task 16e4f wired dev_no through per-target. The is_mobilint field now carries the provenance
+    without a re-read of ``args.original_models``.
+    """
+    argv = ["measure", "--original-models", "--model", "mobilint/Model-Z", "--dev-no", "0,1,2,3"]
+    args = text_bench._build_arg_parser().parse_args(argv)
+    text_bench._resolve_runtime_defaults(args, argv)
+
+    mobilint_args = text_bench._args_for_target_device_backend(
+        args,
+        model_id="mobilint/Model-Z",
+        mxq_path=None,
+        is_mobilint=True,
+    )
+    parent_args = text_bench._args_for_target_device_backend(
+        args,
+        model_id="meta-llama/Model-Z",
+        mxq_path=None,
+        is_mobilint=False,
+    )
+
+    assert mobilint_args.device == "cpu"
+    assert mobilint_args.device_backend == "npu"
+    assert mobilint_args.dev_no == [0, 1, 2, 3]
+    assert parent_args.device == "cuda"
+    assert parent_args.device_backend == "gpu"
+
+
+def test_benchmark_text_generation_forbids_downstream_original_models_reads() -> None:
+    """Static guard: no benchmark_text_generation_models.py code outside the collection/parse
+    sites reads ``args.original_models``.
+
+    This is the anti-regression contract for the refactor: every downstream helper (measurement
+    loop, sweep loop, device-backend resolver, chunk-size resolver, core-mode iterator) reads
+    per-target ``TextBenchmarkTarget`` metadata via the run tuple instead of re-checking the
+    global ``--original-models`` flag. If a future review adds another consumer, this guard
+    catches it before it lands.
+    """
+    src = Path(text_bench.__file__).read_text(encoding="utf-8")
+    # Whitelist: legitimate reads at the arg-parse/collection layer where the flag is a global
+    # run-mode selector, not a per-target policy. Downstream helpers must read TextBenchmarkTarget
+    # fields instead.
+    allowed_line_prefixes = (
+        "        original_models=args.original_models,",  # _resolve_default_device/_backend
+        "        if args.models or args.original_models or args.all",  # advisory print
+        "        if args.original_models:",  # top-level collection branch
+    )
+    hits: list[tuple[int, str]] = []
+    for lineno, raw in enumerate(src.splitlines(), start=1):
+        if "args.original_models" not in raw:
+            continue
+        stripped = raw.rstrip()
+        # Docstring/comment references are safe.
+        if stripped.lstrip().startswith("#") or "``args.original_models``" in stripped:
+            continue
+        if any(stripped.startswith(prefix) for prefix in allowed_line_prefixes):
+            continue
+        hits.append((lineno, stripped))
+    assert not hits, (
+        "Downstream args.original_models reads leaked outside the collection/parse sites: "
+        f"{hits}. Read TextBenchmarkTarget.is_mobilint / .disable_npu_specific_args instead."
+    )

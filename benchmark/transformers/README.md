@@ -528,6 +528,17 @@ and, on Mobilint targets, forwards the same value as the backend `max_batch_size
 upstream Hugging Face targets with `config.max_batch_size == 1`, passing `--batch --batch-size N>1`
 admits the target under `--batch` so a mixed sweep works with the same filter.
 
+Under `--original-models`, a caller-listed `mobilint/*` id is retained alongside its resolved
+upstream parent so both rows run in one pass. Per-target provenance is classified once at target
+collection time (see `TextBenchmarkTarget.role` in
+[`benchmark_text_generation_models.py`](benchmark_text_generation_models.py)) and drives the
+per-target policy: the retained Mobilint sibling keeps NPU/CPU device defaults, its
+`--core-mode` expansion, `--npu-prefill-chunk-size`, and `--dev-no`, while the resolved upstream
+parent routes to `--device cuda` and `--device-backend gpu` with NPU-specific parameters
+suppressed. The `Note: --original-models mixed run;` line printed before the loop reports how
+many upstream targets will skip NPU-specific parameters so the Mobilint sibling row and the
+upstream row are easy to tell apart in a mixed sweep.
+
 ```bash
 python benchmark/transformers/benchmark_text_generation_models.py measure \
   --batch --original-models \
