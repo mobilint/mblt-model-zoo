@@ -97,6 +97,14 @@ def _as_float(v) -> Optional[float]:
 def load_model_metrics(path: Path) -> Optional[tuple[str, ModelMetrics]]:
     with path.open("r", encoding="utf-8") as f:
         payload = json.load(f)
+    # Measure payloads share the sweep output directory in the documented mixed
+    # workflow (see ``benchmark/transformers/README.md``); their top-level
+    # ``model`` field passes the type-agnostic model-id check but they lack the
+    # ``prefill_sweep`` / ``decode_sweep`` blocks and would leak measure-only
+    # device scalars into sweep charts. Mirrors the sibling filter in
+    # ``benchmark_text_generation_models._rebuild_combined_outputs``.
+    if isinstance(payload, dict) and payload.get("benchmark_type") == "measure":
+        return None
     model_id = _extract_model_id(path, payload)
     if not model_id:
         return None
@@ -170,6 +178,15 @@ _NON_MODEL_JSON_FILENAMES: frozenset[str] = frozenset(
 
 
 def collect_folder_metrics(folder: Path) -> dict[str, ModelMetrics]:
+    """Aggregate per-model sweep metrics from a benchmark output folder.
+
+    Sidecar JSONs listed in :data:`_NON_MODEL_JSON_FILENAMES` are skipped by
+    filename. Measure payloads that share the folder in the documented mixed
+    ``measure`` + ``sweep`` workflow are silently dropped by
+    :func:`load_model_metrics` (via its ``benchmark_type == "measure"`` guard)
+    so mixed-mode folders can rebuild sweep views without measure-only targets
+    appearing with empty token-sweep series.
+    """
     metrics: dict[str, ModelMetrics] = {}
     for path in sorted(folder.glob("*.json")):
         if path.name in _NON_MODEL_JSON_FILENAMES:
