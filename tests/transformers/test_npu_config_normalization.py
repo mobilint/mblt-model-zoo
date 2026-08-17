@@ -726,7 +726,13 @@ def test_atomic_replace_dev_no_and_target_both_overridden_consistently_passes() 
 
 
 def test_atomic_replace_dev_no_and_target_both_overridden_inconsistently_raises() -> None:
-    """When both are overridden but disagree, the consistency check raises on the second setter."""
+    """When both are overridden but disagree, the consistency check raises on the next canonical read.
+
+    The per-field setters record their raw overrides on the pending
+    accumulator without validating; the mismatch surfaces the first time a
+    caller (e.g. :meth:`MobilintNPUBackend.create` or a ``_spec``-backed
+    property) materializes the canonical spec.
+    """
     backend = _load_backend(
         {
             "mxq_path": "model.mxq",
@@ -735,13 +741,17 @@ def test_atomic_replace_dev_no_and_target_both_overridden_inconsistently_raises(
             "target_cores": ["0:0:0"],
         }
     )
-    # The first setter clears stale targets and re-expands under the new dev_no.
+    # Both setters run without raising; the accumulator captures the raw
+    # overrides but does not normalize between them. This is the whole
+    # point of deferred finalization — a follow-up setter can still
+    # override the mismatched grain before the caller materializes the
+    # spec, so per-setter raises are undesirable.
     backend.dev_no = 1
-    # The second setter marks targets as caller-overridden while dev_no is
-    # still marked overridden from the previous call; the atomic replace
-    # runs the device-set consistency check and rejects the mismatch.
+    backend.target_cores = ["2:0:0"]
+    # The mismatch surfaces on the next canonical read (any accessor that
+    # triggers :meth:`NPUTargetSpecPending.finalize`).
     with pytest.raises(ValueError, match="target device set"):
-        backend.target_cores = ["2:0:0"]
+        _ = backend._target_cores_serialized
 
 
 def test_atomic_replace_prefix_scoped_kwargs_work_independently() -> None:
@@ -1281,3 +1291,138 @@ def test_log_model_details_omits_per_device_breakdown_on_single_device_backend(
     out = capsys.readouterr().out
     assert "Target Cores:" in out
     assert "Device 0 Cores:" not in out
+
+
+# ---------------------------------------------------------------------------
+# Setter-order-independence — the whole point of the deferred-finalize refactor.
+# The four HF-driven setters (``dev_no`` / ``core_mode`` / ``target_cores`` /
+# ``target_clusters``) fire in an order HF chooses, not one we control. The
+# resolved canonical spec must depend only on the *set* of accumulated
+# overrides, not on the sequence the caller used to build them.
+# ---------------------------------------------------------------------------
+
+
+def test_setter_order_independence_core_mode_then_target_clusters() -> None:
+    """``core_mode='global8'`` followed by ``target_clusters=['0:0','0:1']`` converges cleanly."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"],
+        }
+    )
+    updated = spec._with(core_mode="global8")._with(target_clusters=["0:0", "0:1"])
+    assert updated.dev_no == 0
+    assert updated.core_mode == "global8"
+    assert updated.clusters == ("0:0", "0:1")
+    assert updated.cores == ()
+
+
+def test_setter_order_independence_target_clusters_then_core_mode() -> None:
+    """Reversing the chain converges on the same canonical spec."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"],
+        }
+    )
+    updated = spec._with(target_clusters=["0:0", "0:1"])._with(core_mode="global8")
+    assert updated.dev_no == 0
+    assert updated.core_mode == "global8"
+    assert updated.clusters == ("0:0", "0:1")
+    assert updated.cores == ()
+
+
+def test_setter_order_independence_dev_no_then_target_cores() -> None:
+    """``dev_no`` before ``target_cores`` synchronizes on the caller-explicit target device."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    updated = spec._with(dev_no=1)._with(target_cores=["1:0:0"])
+    assert updated.dev_no == 1
+    assert updated.cores == ("1:0:0",)
+
+
+def test_setter_order_independence_target_cores_then_dev_no() -> None:
+    """Reversing the chain still validates the caller-explicit dev_no / target device pair."""
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    updated = spec._with(target_cores=["1:0:0"])._with(dev_no=1)
+    assert updated.dev_no == 1
+    assert updated.cores == ("1:0:0",)
+
+
+def test_setter_order_independence_all_three_orders_converge() -> None:
+    """Every permutation of a three-way setter chain lands on the same canonical spec."""
+    import itertools
+
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    baseline_kwargs = {
+        "core_mode": "single",
+        "dev_no": 0,
+        "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"],
+    }
+    overrides = [
+        ("dev_no", 1),
+        ("core_mode", "global8"),
+        ("target_clusters", ["1:0", "1:1"]),
+    ]
+
+    results = []
+    for perm in itertools.permutations(overrides):
+        spec = NPUTargetSpec.from_kwargs(dict(baseline_kwargs))
+        current = spec
+        for name, value in perm:
+            current = current._with(**{name: value})
+        results.append(current)
+
+    reference = results[0]
+    for other in results[1:]:
+        assert other == reference, f"setter-order divergence: {other} != {reference}"
+
+    # And the reference itself is the expected canonical form.
+    assert reference.dev_no == 1
+    assert reference.core_mode == "global8"
+    assert reference.clusters == ("1:0", "1:1")
+    assert reference.cores == ()
+
+
+def test_setter_order_independence_partial_global8_still_raises_after_dev_no_override() -> None:
+    """A caller-authored incomplete ``global8`` grain surfaces the coverage failure regardless of order.
+
+    Sanity check: setter-order independence must not silently swallow a
+    caller-explicit incomplete ``global8`` grain. The failure is deferred
+    to finalize (not the setter itself), but the raise still happens on
+    the first canonical read.
+    """
+    from mblt_model_zoo.utils.npu_target import NPUTargetSpec
+
+    spec = NPUTargetSpec.from_kwargs(
+        {"core_mode": "single", "dev_no": 0, "target_cores": ["0:0:0", "0:0:1", "0:0:2", "0:0:3"]}
+    )
+    with pytest.raises(ValueError, match="global8"):
+        # Both orders end at ``core_mode="global8"`` with caller-explicit
+        # ``target_clusters=["0:0"]`` — a single-cluster global8 request.
+        # finalize catches the coverage failure.
+        spec._with(target_clusters=["0:0"])._with(core_mode="global8")
+    with pytest.raises(ValueError, match="global8"):
+        spec._with(core_mode="global8")._with(target_clusters=["0:0"])

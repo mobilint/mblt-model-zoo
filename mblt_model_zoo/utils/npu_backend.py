@@ -13,10 +13,13 @@ callers that want concurrent NPU utilization thread their dispatches across
 :meth:`MobilintNPUBackend.infer_slot` calls.
 
 Target-topology fields (``dev_no`` / ``core_mode`` / ``target_cores`` /
-``target_clusters``) live inside a single immutable :class:`NPUTargetSpec` on
-``self._spec``. Every per-field setter atomically replaces ``_spec`` via
-:meth:`NPUTargetSpec._with`, so no partial-state moment can exist between HF
-``setattr`` calls in ``from_pretrained``.
+``target_clusters``) are accumulated on a :class:`NPUTargetSpecPending`
+override log at ``self._pending``. Every per-field setter records its raw
+value on the pending log without normalizing; the canonical
+:class:`NPUTargetSpec` is materialized lazily on read of :attr:`_spec` (and
+cached on ``self._finalized`` until the next setter). This deferral
+eliminates both the partial-state race between fields AND the setter-order
+race that eager per-setter renormalization forced on the previous design.
 
 Backwards compatibility: for callers written against a single ``Model`` /
 ``Accelerator`` handle, :attr:`~MobilintNPUBackend.mxq_model` and
@@ -38,6 +41,7 @@ from .core_mode import CoreMode, normalize_core_mode
 from .logging import log_model_details
 from .npu_target import (
     NPUTargetSpec,
+    NPUTargetSpecPending,
     cluster_map,
     core_map,
 )
@@ -221,12 +225,13 @@ class MobilintNPUBackend:
         # path.
         self._dispatcher: Optional[Any] = None
 
-        # Collapse the four target-topology fields into a single frozen
-        # :class:`NPUTargetSpec`. Every per-field setter below rebuilds
-        # ``_spec`` via :meth:`NPUTargetSpec._with`, which forwards to
-        # :meth:`NPUTargetSpec.from_kwargs` for full canonical
-        # renormalization. This eliminates the partial-state race that
-        # per-field setattr chains used to expose.
+        # Build the initial canonical :class:`NPUTargetSpec` from the ctor
+        # payload (the config layer already has the whole picture at once,
+        # so eager normalization is unambiguous), then wrap it in a
+        # :class:`NPUTargetSpecPending` so subsequent per-field setter
+        # chains can accumulate raw overrides *without* renormalizing
+        # between fields. ``self._finalized`` caches the resolved canonical
+        # spec until a setter invalidates it.
         #
         # ``dev_no=None`` means "not given by the caller" — the sentinel
         # keeps :meth:`NPUTargetSpec.from_kwargs` from running its
@@ -239,15 +244,34 @@ class MobilintNPUBackend:
             spec_kwargs["target_cores"] = list(target_cores)
         if target_clusters is not None:
             spec_kwargs["target_clusters"] = list(target_clusters)
-        self._spec: NPUTargetSpec = NPUTargetSpec.from_kwargs(spec_kwargs)
+        initial_spec = NPUTargetSpec.from_kwargs(spec_kwargs)
+        self._pending: NPUTargetSpecPending = NPUTargetSpecPending(baseline=initial_spec)
+        self._finalized: Optional[NPUTargetSpec] = initial_spec
+
+    # ---- Lazy canonical spec accessor ---------------------------------------
+    #
+    # ``self._spec`` reads the lazily-finalized canonical :class:`NPUTargetSpec`.
+    # First read after a setter (or after init) materializes it from the
+    # accumulated :class:`NPUTargetSpecPending`; subsequent reads hit the
+    # cached copy on ``self._finalized`` until the next setter.
+
+    @property
+    def _spec(self) -> NPUTargetSpec:
+        """Lazily-finalized canonical view of the accumulated target overrides."""
+        if self._finalized is None:
+            self._finalized = self._pending.finalize()
+        return self._finalized
 
     # ---- Target-topology accessors ------------------------------------------
     #
-    # Every setter atomically replaces ``self._spec`` through
-    # :meth:`NPUTargetSpec._with`. HF ``from_pretrained`` fires these setters
-    # one field at a time via ``model_kwargs`` application; the atomic replace
-    # guarantees every intermediate state remains fully canonical, so no
-    # snapshot-diff reconciliation pass is required.
+    # Every setter records its raw override on ``self._pending`` and
+    # invalidates ``self._finalized`` so the next :attr:`_spec` read
+    # materializes the canonical spec once every accumulated override is
+    # visible. HF ``from_pretrained`` fires these setters one field at a
+    # time via ``model_kwargs`` application; the deferred finalize
+    # guarantees the setter order does not matter — the resolved canonical
+    # spec depends only on the *set* of accumulated overrides, not the
+    # sequence.
 
     @property
     def dev_no(self) -> Union[int, List[int]]:
@@ -256,7 +280,8 @@ class MobilintNPUBackend:
 
     @dev_no.setter
     def dev_no(self, value: Union[int, List[int]]) -> None:
-        self._spec = self._spec._with(dev_no=value)
+        self._pending = self._pending._with(dev_no=value)
+        self._finalized = None
 
     @property
     def core_mode(self) -> CoreMode:
@@ -264,7 +289,8 @@ class MobilintNPUBackend:
 
     @core_mode.setter
     def core_mode(self, value: str) -> None:
-        self._spec = self._spec._with(core_mode=normalize_core_mode(value))
+        self._pending = self._pending._with(core_mode=normalize_core_mode(value))
+        self._finalized = None
 
     @property
     def _target_cores_serialized(self) -> List[str]:
@@ -1121,16 +1147,17 @@ class MobilintNPUBackend:
 
     @target_cores.setter
     def target_cores(self, values: List[Union[str, "CoreId"]]) -> None:
-        """Atomically replace the target-cores component of ``self._spec``.
+        """Record a raw ``target_cores`` override on the pending accumulator.
 
-        Values pass through :meth:`NPUTargetSpec._with`, which forwards to
-        :meth:`NPUTargetSpec.from_kwargs`. That path handles legacy
-        migration (``CoreId`` / ``"c:k"``), grain fold/unfold, and the
-        device-set consistency check in one atomic operation. Callers
-        never observe the partial state where ``self._spec.cores`` has
-        changed but ``self._spec.dev_no`` has not.
+        Normalization (legacy migration, grain fold/unfold, device-set
+        consistency, ``global8`` coverage) is deferred to
+        :meth:`NPUTargetSpecPending.finalize`, which runs once every
+        accumulated setter override is visible. Callers never observe a
+        moment where the four target fields disagree; the finalized
+        spec is materialized on the next :attr:`_spec` read.
         """
-        self._spec = self._spec._with(target_cores=list(values))
+        self._pending = self._pending._with(target_cores=list(values))
+        self._finalized = None
 
     @property
     def target_clusters(self) -> List["Cluster"]:
@@ -1198,15 +1225,15 @@ class MobilintNPUBackend:
 
     @target_clusters.setter
     def target_clusters(self, values: List[Union[int, str, "Cluster"]]) -> None:
-        """Atomically replace the target-clusters component of ``self._spec``.
+        """Record a raw ``target_clusters`` override on the pending accumulator.
 
-        Values pass through :meth:`NPUTargetSpec._with`, which forwards to
-        :meth:`NPUTargetSpec.from_kwargs`. That path handles legacy
-        migration (``Cluster`` / ``int`` / bare ``"c"``), grain
-        fold/unfold, and the device-set consistency check in one atomic
-        operation.
+        Normalization (legacy migration, grain fold/unfold, device-set
+        consistency, ``global8`` coverage) is deferred to
+        :meth:`NPUTargetSpecPending.finalize`, which runs once every
+        accumulated setter override is visible.
         """
-        self._spec = self._spec._with(target_clusters=list(values))
+        self._pending = self._pending._with(target_clusters=list(values))
+        self._finalized = None
 
     def to_dict(self, prefix="") -> Dict[str, Any]:
         """Serializes the backend configuration to a flat dictionary.

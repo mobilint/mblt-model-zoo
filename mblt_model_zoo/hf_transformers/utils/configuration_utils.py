@@ -388,9 +388,11 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
         # top-level ``text_*`` / ``vision_*`` keys, and HF's ``from_pretrained``
         # model-kwargs application. Both routes reach here as unprefixed keys
         # (``dev_no`` etc.) that we route through the sub-config's own
-        # setters. Each setter atomically replaces the sub-config backend's
-        # :class:`NPUTargetSpec` via :meth:`NPUTargetSpec._with`, so no
-        # separate reconciliation pass is required after the loop.
+        # setters. Each setter records its raw override on the sub-config
+        # backend's :class:`NPUTargetSpecPending` accumulator without
+        # normalizing between fields; the canonical spec is materialized once
+        # on the next :attr:`MobilintNPUBackend._spec` read, so setter order
+        # inside this loop is irrelevant.
         text_config = getattr(self, "text_config", None)
         if text_config is not None:
             for key, value in text_kwargs.items():

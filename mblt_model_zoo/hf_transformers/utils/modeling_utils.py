@@ -88,10 +88,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         # HF ``from_pretrained`` applies ``model_kwargs`` (e.g. ``--dev-no 1``,
         # ``--core-mode global4``, ``--text-dev-no 0``) via setter chains after
         # the config layer built the initial ``NPUTargetSpec`` from the JSON
-        # payload. Each per-field setter atomically replaces the backend's
-        # ``_spec`` through :meth:`NPUTargetSpec._with`, so no separate
-        # reconciliation pass is required before :meth:`create` — every
-        # intermediate state is already fully canonical.
+        # payload. Each per-field setter records its raw override on the
+        # backend's :class:`NPUTargetSpecPending` accumulator without
+        # normalizing between fields; the canonical spec is materialized once
+        # on the next :attr:`_spec` read (triggered by :meth:`create`). This
+        # deferred finalize eliminates the setter-order dependency that the
+        # older eager-renormalize path exposed.
         self.npu_backend.create()
         if not no_launch:
             self.launch()

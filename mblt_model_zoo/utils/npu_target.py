@@ -1,4 +1,4 @@
-"""Frozen NPU target-topology spec used by :class:`MobilintNPUBackend`.
+"""NPU target-topology spec used by :class:`MobilintNPUBackend`.
 
 The backend previously represented its target topology as four independent
 mutable fields (``dev_no``, ``core_mode``, ``target_cores``, ``target_clusters``).
@@ -7,10 +7,25 @@ the config layer has already normalized the JSON payload, and each per-field
 setter only updated the field it was named after. Reconciliation heuristics
 that ran at the end of the setattr chain kept failing at new edge cases.
 
-This module collapses those four fields into a single frozen dataclass —
-:class:`NPUTargetSpec` — so no partial-state moment can exist. Every setter
-on the backend re-derives the whole spec through :meth:`NPUTargetSpec._with`,
-which forwards to the canonical :meth:`NPUTargetSpec.from_kwargs` normalizer.
+An intermediate refactor collapsed those four fields into a single frozen
+:class:`NPUTargetSpec` and had every per-field setter atomically re-normalize
+through :meth:`NPUTargetSpec.from_kwargs`. That eliminated the partial-state
+race between fields but did not eliminate the *setter-order* race: each setter
+ran full canonical normalization eagerly, so an intermediate spec built from
+"only one field overridden so far" had to be a legal canonical form. Every
+newly-discovered order interaction (dev_no-only, target-only,
+core_mode-only, legacy-mixed-with-canonical, ...) landed as another
+special-case branch in :meth:`_with` to compensate for the eager normalization.
+
+This module ends that cycle by introducing :class:`NPUTargetSpecPending` — an
+accumulator that captures caller intent *without* normalizing. Every per-field
+override records its raw slot; nothing is validated. Normalization runs once,
+in :meth:`NPUTargetSpecPending.finalize`, with the entire override picture in
+hand. The four order-dependent branches of the old :meth:`_with` collapse into
+a single pipeline: legacy migration → sibling drop → dev_no derive → grain
+unification → off-mode drop → ``global8`` coverage validation. Setter order
+becomes irrelevant because finalize sees the same accumulated state regardless
+of the sequence the caller used to build it.
 """
 
 from __future__ import annotations
@@ -18,7 +33,7 @@ from __future__ import annotations
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from qbruntime import Cluster, Core, CoreId
 
@@ -27,8 +42,10 @@ from .core_mode import CoreMode, normalize_core_mode
 # Default device index for ``dev_no`` when the caller does not pin one.
 _DEFAULT_DEV_NO: int = 0
 
-# Sentinel used by :meth:`NPUTargetSpec._with` to distinguish "field not
-# provided" from "field explicitly set to None/empty". Kept module-private.
+# Sentinel used to distinguish "field not overridden this session" from
+# "field explicitly set to None/empty". Kept module-private and reused by
+# both :class:`NPUTargetSpec` (single-call ``_with`` shim) and
+# :class:`NPUTargetSpecPending` (accumulator).
 _UNSET: Any = object()
 
 
@@ -260,9 +277,11 @@ class NPUTargetSpec:
 
     The four fields (``dev_no``, ``core_mode``, ``cores``, ``clusters``) are
     stored as one immutable value so :class:`MobilintNPUBackend` cannot
-    observe a partial-state moment where they disagree. Every per-field
-    setter on the backend replaces the spec whole via :meth:`_with`, which
-    forwards to :meth:`from_kwargs` for full canonical renormalization.
+    observe a partial-state moment where they disagree. Fresh specs come from
+    :meth:`from_kwargs` (config-layer load, where the whole picture is present
+    at once); the backend's per-field setter chain routes through
+    :class:`NPUTargetSpecPending` so normalization is deferred until every
+    override has been recorded.
 
     Attributes:
         dev_no: Canonical device index (``int``) or list of device indices
@@ -280,13 +299,33 @@ class NPUTargetSpec:
     core_mode: CoreMode
     cores: tuple = field(default_factory=tuple)
     clusters: tuple = field(default_factory=tuple)
-    # Caller-intent tracking: ``True`` after any :meth:`_with` call that
-    # explicitly overrode the corresponding field. Flags accumulate across
-    # the HF ``setattr`` chain so a follow-up sibling override can decide
-    # between "sync sibling to me" (implicit intent) and "enforce
-    # consistency check" (both fields caller-explicit).
-    _dev_no_overridden: bool = False
-    _targets_overridden: bool = False
+    # Accumulated override history from a per-field setter chain. Excluded
+    # from equality/hash/repr so two specs with the same canonical fields
+    # compare equal regardless of how the caller built them. ``None`` on a
+    # spec produced by :meth:`from_kwargs` (a "root" spec); populated on a
+    # spec produced by :meth:`_with` so subsequent chained ``_with`` calls
+    # can accumulate the raw overrides.
+    _pending: Optional["NPUTargetSpecPending"] = field(default=None, compare=False, hash=False, repr=False)
+
+    @property
+    def _dev_no_overridden(self) -> bool:
+        """Return ``True`` when any prior :meth:`_with` call touched ``dev_no``.
+
+        Computed from the accumulated :class:`NPUTargetSpecPending` history.
+        Root specs (no override history) return ``False``.
+        """
+        return self._pending is not None and self._pending.raw_dev_no is not _UNSET
+
+    @property
+    def _targets_overridden(self) -> bool:
+        """Return ``True`` when any prior :meth:`_with` call touched a target grain.
+
+        Computed from the accumulated :class:`NPUTargetSpecPending` history.
+        Root specs (no override history) return ``False``.
+        """
+        if self._pending is None:
+            return False
+        return self._pending.raw_cores is not _UNSET or self._pending.raw_clusters is not _UNSET
 
     @classmethod
     def from_kwargs(cls, kwargs: Dict[str, Any], prefix: str = "") -> "NPUTargetSpec":
@@ -296,9 +335,15 @@ class NPUTargetSpec:
         ``{prefix}target_cores`` / ``{prefix}target_clusters`` from
         ``kwargs`` and mutates them in place: legacy inputs are rewritten to
         canonical form, off-mode grain is dropped, and ``dev_no`` sugar is
-        expanded when both target lists are absent. See
-        ``AGENTS.md`` and ``CLAUDE.md`` "Transformers and MeloTTS" notes for
-        the full behavioral contract.
+        expanded when both target lists are absent. See ``AGENTS.md`` and
+        ``CLAUDE.md`` "Transformers and MeloTTS" notes for the full
+        behavioral contract.
+
+        This is the config-layer entry point (JSON load), where every field is
+        present at once and eager normalization is unambiguous. The per-field
+        setter chain uses :class:`NPUTargetSpecPending` instead so that
+        intermediate states between setters do not have to be independently
+        legal canonical forms.
 
         Args:
             kwargs: Keyword-argument dict handed to a config mixin's
@@ -334,55 +379,26 @@ class NPUTargetSpec:
         raw_cores = kwargs.get(cores_key)
         raw_clusters = kwargs.get(clusters_key)
 
-        cores = _migrate_target_cores(list(raw_cores), fallback_dev, dev_no_is_list) if raw_cores else []
-        clusters = _migrate_target_clusters(list(raw_clusters), fallback_dev, dev_no_is_list) if raw_clusters else []
+        cores, clusters = _resolve_targets(
+            core_mode=core_mode,
+            dev_list=dev_list,
+            fallback_dev=fallback_dev,
+            dev_no_is_list=dev_no_is_list,
+            dev_no_given=dev_no_given,
+            raw_cores=list(raw_cores) if raw_cores else [],
+            raw_clusters=list(raw_clusters) if raw_clusters else [],
+        )
 
-        if not cores and not clusters:
-            # ``dev_no`` sugar expansion when both target lists are absent.
-            if core_mode == "single":
-                cores = [f"{d}:{c}:{k}" for d in dev_list for c in (0, 1) for k in range(4)]
-            else:
-                clusters = [f"{d}:{c}" for d in dev_list for c in (0, 1)]
-        else:
-            # Grain unification per core_mode.
-            if core_mode == "single":
-                if not cores and clusters:
-                    cores = _expand_clusters_to_cores(clusters)
-            else:
-                if not clusters and cores:
-                    clusters = _fold_cores_to_clusters(cores, stacklevel=4)
-
-            # Drop the grain that does not match core_mode. When both raw
-            # fields were provided, only the mode-appropriate one is
-            # authoritative (matching the legacy ``from_dict`` warning);
-            # leaving the stale field in place would pollute the device-set
-            # check and the backend's per-slot dispatch.
-            if core_mode == "single":
-                clusters = []
-                kwargs.pop(clusters_key, None)
-            else:
-                cores = []
-                kwargs.pop(cores_key, None)
-
-            # Device-set consistency check when the caller explicitly set
-            # dev_no. When the caller-explicit target set disagrees with the
-            # caller-explicit dev_no, the mismatch is genuine and must
-            # surface as a hard error rather than a silent re-target.
-            if dev_no_given:
-                target_devs = _devices_from_targets(cores, clusters)
-                explicit_devs = set(dev_list)
-                if target_devs != explicit_devs:
-                    raise ValueError(
-                        f"target device set {sorted(target_devs)} does not match {dev_no_key} {sorted(explicit_devs)}."
-                    )
-
-        if core_mode == "global8":
-            _validate_global8_coverage(clusters)
-
+        # Mutate the caller's ``kwargs`` dict in place for downstream code
+        # that reads back the canonicalized values.
         if cores:
             kwargs[cores_key] = cores
+        else:
+            kwargs.pop(cores_key, None)
         if clusters:
             kwargs[clusters_key] = clusters
+        else:
+            kwargs.pop(clusters_key, None)
 
         # When the caller supplied canonical targets but no explicit ``dev_no``,
         # derive ``dev_no`` from the target device prefixes so the in-memory
@@ -410,168 +426,46 @@ class NPUTargetSpec:
         target_cores: Any = _UNSET,
         target_clusters: Any = _UNSET,
     ) -> "NPUTargetSpec":
-        """Return a new spec with one or more explicit overrides.
+        """Return a new spec that applies one or more explicit overrides.
 
-        Atomic replace: every partial mutation triggers a full
-        renormalization through :meth:`from_kwargs`, so callers never
-        observe a moment where the four target fields disagree.
-
-        Intent resolution when only one of ``{dev_no, targets, core_mode}``
-        is overridden in this call and any target sibling was never
-        previously overridden (i.e., still reflects the initial
-        :meth:`from_kwargs` load):
-
-        - **Target-only override**: sync ``dev_no`` to the target device
-          set. This is the ``--vision-target-cores 1:0:0`` path where the
-          JSON's stale ``dev_no=0`` should not override the caller's
-          explicit target.
-        - **``dev_no``-only override**: clear the stale target lists so
-          :meth:`from_kwargs` re-expands them from the new ``dev_no``
-          sugar. This is the ``--dev-no 1`` path where the JSON's stale
-          dev0 cores must not pin the new backend to the old device.
-        - **``core_mode``-only override**: clear the stale target lists
-          so :meth:`from_kwargs` re-expands them from ``dev_no`` sugar
-          under the new mode. This is the ``--core-mode global8`` path
-          where a JSON's stale single-cluster ``target_cores`` cannot
-          satisfy global8's dual-cluster coverage requirement, so
-          preserving them would raise before any sibling target setter
-          gets a chance to run.
-
-        When both fields have been overridden at any point in the
-        ``setattr`` chain, both are treated as caller-authoritative and the
-        device-set consistency check inside :meth:`from_kwargs` catches
-        genuine mismatches.
+        Routes through :class:`NPUTargetSpecPending`: overrides accumulate as
+        raw slots on a pending value derived from ``self``, and
+        :meth:`NPUTargetSpecPending.finalize` runs the single normalization
+        pipeline once every recorded override is visible. Chained calls
+        (``spec._with(a=x)._with(b=y)``) extend the same pending instead of
+        collapsing to two independent normalizations, so setter order
+        becomes irrelevant.
 
         Args:
-            dev_no: New ``dev_no`` value, or :data:`_UNSET` to inherit.
+            dev_no: New ``dev_no`` value, or :data:`_UNSET` to leave the
+                current pending slot alone.
             core_mode: New ``core_mode`` value, or :data:`_UNSET`.
             target_cores: New ``target_cores`` list, or :data:`_UNSET`.
             target_clusters: New ``target_clusters`` list, or :data:`_UNSET`.
 
         Returns:
             A new canonical :class:`NPUTargetSpec` reflecting the overrides.
+            The returned spec carries the accumulated :class:`NPUTargetSpecPending`
+            so a subsequent :meth:`_with` call sees the full override history.
 
         Raises:
-            ValueError: When ``dev_no`` and target device sets have both
-                been caller-overridden and disagree, or when other
-                canonical-form invariants fail (mixed legacy items,
-                incomplete global8 coverage, etc.).
+            ValueError: When the accumulated overrides violate a canonical
+                invariant (mixed legacy items, incomplete global8 coverage,
+                caller-explicit dev_no disagreeing with caller-explicit
+                target device set, ...). Raises originate from
+                :meth:`NPUTargetSpecPending.finalize`.
         """
-        dev_no_changed = dev_no is not _UNSET
-        core_mode_changed = core_mode is not _UNSET
-        cores_changed = target_cores is not _UNSET
-        clusters_changed = target_clusters is not _UNSET
-        targets_changed = cores_changed or clusters_changed
-
-        new_dev_no: Any = dev_no if dev_no_changed else self.dev_no
-        new_core_mode = core_mode if core_mode_changed else self.core_mode
-        new_cores: list = list(target_cores) if cores_changed else list(self.cores)
-        new_clusters: list = list(target_clusters) if clusters_changed else list(self.clusters)
-
-        # When exactly one target grain is explicitly overridden, discard the
-        # sibling grain carried over from ``self`` before renormalization. The
-        # sibling reflects the previous ``core_mode`` epoch and is only stale
-        # intent once the caller re-authoritatively names one grain; keeping
-        # it would (a) pollute the target-only ``dev_no`` sync below by
-        # unioning stale device prefixes with the new grain, and (b) surface
-        # as a spurious device-set mismatch inside :meth:`from_kwargs` when
-        # its off-mode-grain drop then reduces the target device set. This
-        # makes the setter order symmetric: applying ``target_clusters``
-        # before ``core_mode`` converges on the same spec as the reverse.
-        if cores_changed and not clusters_changed:
-            new_clusters = []
-        elif clusters_changed and not cores_changed:
-            new_cores = []
-
-        if targets_changed and not dev_no_changed and not self._dev_no_overridden:
-            # Target-only override with un-overridden ``dev_no``: the
-            # canonical target strings unambiguously carry the device prefix,
-            # so sync ``dev_no`` to match rather than clobbering the caller's
-            # explicit target.
-            #
-            # Migrate any legacy items (``CoreId`` / ``Cluster`` objects, 2-part
-            # ``"c:k"`` strings, bare ``int`` clusters) to canonical form before
-            # asking :func:`_devices_from_targets` for the device set. That
-            # helper reads ``split(":", 1)[0]`` and would either raise
-            # ``AttributeError`` on non-string items or silently mis-read a
-            # legacy ``"c:k"`` string's cluster component as the device index.
-            # Use ``self.dev_no`` as the fallback prefix — this branch is
-            # reached only when ``dev_no`` was not overridden, so the caller's
-            # inherited ``dev_no`` is the intended prefix, matching what
-            # :meth:`from_kwargs` will do below via the synced ``new_dev_no``.
-            inherited_dev_no = _thaw_dev_no(self.dev_no)
-            inherited_dev_no_is_list = isinstance(inherited_dev_no, list)
-            inherited_fallback_dev = inherited_dev_no[0] if inherited_dev_no_is_list else int(inherited_dev_no)
-            migrated_cores = (
-                _migrate_target_cores(list(new_cores), inherited_fallback_dev, inherited_dev_no_is_list)
-                if new_cores
-                else []
-            )
-            migrated_clusters = (
-                _migrate_target_clusters(list(new_clusters), inherited_fallback_dev, inherited_dev_no_is_list)
-                if new_clusters
-                else []
-            )
-            target_devs = _devices_from_targets(migrated_cores, migrated_clusters)
-            if target_devs:
-                sorted_devs = sorted(target_devs)
-                new_dev_no = sorted_devs if len(sorted_devs) > 1 else sorted_devs[0]
-            # Hand the migrated (canonical) lists to :meth:`from_kwargs` so its
-            # own migration is a no-op and the fallback prefix used to resolve
-            # legacy items is the same one we used above.
-            new_cores = migrated_cores
-            new_clusters = migrated_clusters
-        elif dev_no_changed and not targets_changed and not self._targets_overridden:
-            # ``dev_no``-only override with un-overridden targets: clear the
-            # stale target lists so :meth:`from_kwargs` re-expands them from
-            # the new ``dev_no`` sugar.
-            new_cores = []
-            new_clusters = []
-        elif (
-            core_mode_changed
-            and new_core_mode != self.core_mode
-            and not targets_changed
-            and not dev_no_changed
-            and not self._targets_overridden
-        ):
-            # ``core_mode``-only override that actually changes the value
-            # with un-overridden targets: the stored cores/clusters reflect
-            # the previous ``core_mode`` epoch and may not satisfy the new
-            # mode's coverage requirements — notably, a single-cluster
-            # ``target_cores`` folds to a single ``"d:c"`` cluster that
-            # fails :func:`_validate_global8_coverage` when the new mode
-            # is ``global8``. Clear both grains so :meth:`from_kwargs`
-            # re-expands from ``dev_no`` sugar under the new mode. The
-            # value-equality guard preserves noop-setter idempotence
-            # (``spec._with(core_mode=self.core_mode)`` is a true no-op).
-            # Mirrors the ``dev_no``-only branch above: whichever scalar
-            # the caller changes, the stale target lists from load time
-            # are dropped when the caller has not asserted authority over
-            # them.
-            new_cores = []
-            new_clusters = []
-        # else: both explicitly overridden at some point (or both untouched
-        # this call) — pass both through and let :meth:`from_kwargs`'s
-        # consistency check catch mismatches.
-
-        kwargs: Dict[str, Any] = {
-            "dev_no": _thaw_dev_no(new_dev_no),
-            "core_mode": new_core_mode,
-        }
-        if new_cores:
-            kwargs["target_cores"] = new_cores
-        if new_clusters:
-            kwargs["target_clusters"] = new_clusters
-
-        rebuilt = NPUTargetSpec.from_kwargs(kwargs)
-
-        # Preserve caller-intent flags so subsequent :meth:`_with` calls
-        # see the accumulated override history.
-        return replace(
-            rebuilt,
-            _dev_no_overridden=self._dev_no_overridden or dev_no_changed,
-            _targets_overridden=self._targets_overridden or targets_changed,
+        if self._pending is None:
+            base_pending = NPUTargetSpecPending(baseline=replace(self, _pending=None))
+        else:
+            base_pending = self._pending
+        new_pending = base_pending._with(
+            dev_no=dev_no,
+            core_mode=core_mode,
+            target_cores=target_cores,
+            target_clusters=target_clusters,
         )
+        return new_pending.finalize()
 
     def dev_no_public(self) -> Union[int, List[int]]:
         """Return ``dev_no`` in its user-facing shape (``int`` or ``list``)."""
@@ -608,6 +502,267 @@ class NPUTargetSpec:
                 sorted_devs = sorted(devs)
                 return sorted_devs if len(sorted_devs) > 1 else sorted_devs[0]
         return _thaw_dev_no(self.dev_no)
+
+
+def _resolve_targets(
+    *,
+    core_mode: CoreMode,
+    dev_list: List[int],
+    fallback_dev: int,
+    dev_no_is_list: bool,
+    dev_no_given: bool,
+    raw_cores: List[Any],
+    raw_clusters: List[Any],
+) -> tuple[List[str], List[str]]:
+    """Canonicalize a ``(dev_no, core_mode, cores, clusters)`` payload.
+
+    Shared by :meth:`NPUTargetSpec.from_kwargs` (config-layer load with the
+    complete picture) and :meth:`NPUTargetSpecPending.finalize` (per-field
+    setter chain with pre-migrated grain). Runs the ordered pipeline:
+
+    1. Legacy migration on both raw grain lists using ``fallback_dev``.
+    2. ``dev_no`` sugar expansion when both grain lists are empty.
+    3. Grain unification per ``core_mode`` (unfold clusters to cores under
+       ``single``; fold cores to clusters under ``multi`` / ``global4`` /
+       ``global8``).
+    4. Off-mode grain drop.
+    5. Device-set consistency check when ``dev_no_given=True``.
+    6. ``global8`` coverage validation.
+
+    Returns:
+        ``(cores, clusters)`` — canonical string lists after the pipeline.
+
+    Raises:
+        ValueError: For mixed legacy/canonical items, list-shaped ``dev_no``
+            combined with legacy items, device-set mismatch, or incomplete
+            ``global8`` coverage.
+        TypeError: When a target entry has an unsupported type.
+    """
+    cores = _migrate_target_cores(raw_cores, fallback_dev, dev_no_is_list) if raw_cores else []
+    clusters = _migrate_target_clusters(raw_clusters, fallback_dev, dev_no_is_list) if raw_clusters else []
+
+    if not cores and not clusters:
+        # ``dev_no`` sugar expansion when both target lists are absent.
+        if core_mode == "single":
+            cores = [f"{d}:{c}:{k}" for d in dev_list for c in (0, 1) for k in range(4)]
+        else:
+            clusters = [f"{d}:{c}" for d in dev_list for c in (0, 1)]
+    else:
+        # Grain unification per core_mode.
+        if core_mode == "single":
+            if not cores and clusters:
+                cores = _expand_clusters_to_cores(clusters)
+        else:
+            if not clusters and cores:
+                clusters = _fold_cores_to_clusters(cores, stacklevel=5)
+
+        # Drop the grain that does not match core_mode. When both raw
+        # fields were provided, only the mode-appropriate one is
+        # authoritative; leaving the stale field in place would pollute the
+        # device-set check and the backend's per-slot dispatch.
+        if core_mode == "single":
+            clusters = []
+        else:
+            cores = []
+
+        # Device-set consistency check when the caller explicitly set
+        # ``dev_no``. When the caller-explicit target set disagrees with the
+        # caller-explicit ``dev_no``, the mismatch is genuine and must
+        # surface as a hard error rather than a silent re-target.
+        if dev_no_given:
+            target_devs = _devices_from_targets(cores, clusters)
+            explicit_devs = set(dev_list)
+            if target_devs != explicit_devs:
+                raise ValueError(
+                    f"target device set {sorted(target_devs)} does not match dev_no {sorted(explicit_devs)}."
+                )
+
+    if core_mode == "global8":
+        _validate_global8_coverage(clusters)
+
+    return cores, clusters
+
+
+@dataclass(frozen=True)
+class NPUTargetSpecPending:
+    """Accumulator for :class:`NPUTargetSpec` overrides applied one field at a time.
+
+    HF ``from_pretrained`` fires per-field property setters (``dev_no``,
+    ``core_mode``, ``target_cores``, ``target_clusters``) in an order it
+    chooses, not one we control. Eagerly normalizing on every setter call
+    forces intermediate spec states to be legal canonical forms — but the
+    *correct* canonical form depends on future setter calls that have not
+    happened yet, so early normalization is lossy (global8 coverage checks
+    fire on partial clusters, device-set consistency fails against stale
+    prefixes, and so on).
+
+    :class:`NPUTargetSpecPending` sidesteps that by capturing each override
+    as a raw slot without validation. :meth:`finalize` runs the single
+    normalization pipeline once every accumulated override is visible.
+    Setter order becomes irrelevant because the finalize step sees the same
+    state regardless of the sequence the caller used to build it.
+
+    Attributes:
+        baseline: The canonical :class:`NPUTargetSpec` present before any
+            setter override applied — typically the config-layer load
+            result. Serves as the fallback for fields the caller never
+            overrides this session.
+        raw_dev_no: The caller's raw ``dev_no`` override in the original
+            wire form (``int``, ``list[int]``, or :class:`~qbruntime.CoreId`-
+            adjacent legacy). :data:`_UNSET` when the caller never touched
+            ``dev_no``.
+        raw_core_mode: The caller's raw ``core_mode`` override, or
+            :data:`_UNSET`.
+        raw_cores: The caller's raw ``target_cores`` override (possibly a
+            list of :class:`~qbruntime.CoreId` objects, legacy 2-part
+            strings, or canonical ``"d:c:k"`` strings), or :data:`_UNSET`.
+        raw_clusters: The caller's raw ``target_clusters`` override, or
+            :data:`_UNSET`.
+    """
+
+    baseline: NPUTargetSpec
+    raw_dev_no: Any = _UNSET
+    raw_core_mode: Any = _UNSET
+    raw_cores: Any = _UNSET
+    raw_clusters: Any = _UNSET
+
+    def _with(
+        self,
+        *,
+        dev_no: Any = _UNSET,
+        core_mode: Any = _UNSET,
+        target_cores: Any = _UNSET,
+        target_clusters: Any = _UNSET,
+    ) -> "NPUTargetSpecPending":
+        """Return a new pending with one or more raw overrides recorded.
+
+        Pure state accumulation; no normalization, no validation. The
+        finalize step consumes the entire accumulated history at once.
+
+        Args:
+            dev_no: New raw ``dev_no`` slot value, or :data:`_UNSET` to
+                leave the current slot alone.
+            core_mode: New raw ``core_mode`` slot value, or :data:`_UNSET`.
+            target_cores: New raw ``target_cores`` slot value, or
+                :data:`_UNSET`.
+            target_clusters: New raw ``target_clusters`` slot value, or
+                :data:`_UNSET`.
+
+        Returns:
+            A new :class:`NPUTargetSpecPending` reflecting the overrides.
+        """
+        return replace(
+            self,
+            raw_dev_no=dev_no if dev_no is not _UNSET else self.raw_dev_no,
+            raw_core_mode=core_mode if core_mode is not _UNSET else self.raw_core_mode,
+            raw_cores=target_cores if target_cores is not _UNSET else self.raw_cores,
+            raw_clusters=target_clusters if target_clusters is not _UNSET else self.raw_clusters,
+        )
+
+    def finalize(self) -> NPUTargetSpec:
+        """Compute the canonical :class:`NPUTargetSpec` from accumulated overrides.
+
+        Runs the ordered pipeline once with every recorded override
+        visible:
+
+        1. Resolve effective ``core_mode`` (raw override or baseline).
+        2. Determine the inherited ``dev_no`` (raw override, else baseline)
+           and use its scalar as the legacy-migration fallback prefix.
+        3. Sibling drop: if the caller overrode exactly one grain, discard
+           the baseline's other grain (it is stale wrt the new authoritative
+           grain). If the caller overrode neither grain but overrode
+           ``dev_no`` or changed ``core_mode``, clear the baseline grain so
+           :func:`_resolve_targets` re-expands from ``dev_no`` sugar.
+        4. Legacy migration on the effective raw grain using the fallback.
+        5. Hand the canonicalized payload to :func:`_resolve_targets` for
+           the shared grain-unification / off-mode drop / consistency /
+           coverage pipeline.
+        6. Derive ``dev_no`` from the canonical targets when the caller did
+           not pin one explicitly.
+
+        Returns:
+            A canonical :class:`NPUTargetSpec`. Its ``_pending`` field
+            points at ``self`` so a subsequent chained :meth:`NPUTargetSpec._with`
+            call sees the full override history.
+
+        Raises:
+            ValueError: For canonical-form invariants (mixed legacy items,
+                device-set mismatch when both ``dev_no`` and targets are
+                caller-explicit, incomplete global8 coverage).
+            TypeError: When a raw grain entry has an unsupported type.
+        """
+        baseline = self.baseline
+        core_mode_overridden = self.raw_core_mode is not _UNSET
+        dev_no_overridden = self.raw_dev_no is not _UNSET
+        cores_overridden = self.raw_cores is not _UNSET
+        clusters_overridden = self.raw_clusters is not _UNSET
+
+        core_mode: CoreMode = normalize_core_mode(self.raw_core_mode) if core_mode_overridden else baseline.core_mode
+
+        # Inherited dev_no is what a legacy 2-part grain item should adopt
+        # as its device prefix when no explicit dev_no override is in play.
+        # The caller's raw ``dev_no`` wins if set; otherwise use the
+        # baseline's canonical dev_no.
+        if dev_no_overridden:
+            inherited_dev_no = self.raw_dev_no
+        else:
+            inherited_dev_no = baseline.dev_no_public()
+        inherited_is_list = isinstance(inherited_dev_no, (list, tuple))
+        inherited_dev_list = _normalize_dev_list(inherited_dev_no)
+        fallback_dev = inherited_dev_list[0]
+
+        # Sibling-drop: pick the authoritative grain(s) with the caller's
+        # accumulated intent visible.
+        if cores_overridden or clusters_overridden:
+            # Caller named at least one grain explicitly — that grain wins,
+            # the baseline sibling is stale.
+            raw_cores = list(self.raw_cores) if cores_overridden and self.raw_cores else []
+            raw_clusters = list(self.raw_clusters) if clusters_overridden and self.raw_clusters else []
+        elif dev_no_overridden or (core_mode_overridden and core_mode != baseline.core_mode):
+            # Sugar-related override without explicit grain authority. The
+            # baseline's canonical grain reflects the previous ``dev_no`` /
+            # ``core_mode`` epoch and cannot be re-used verbatim (e.g. a
+            # single-cluster ``target_cores`` folds to a single-cluster
+            # ``target_clusters`` that fails ``global8`` coverage). Drop
+            # both grain lists so :func:`_resolve_targets` re-expands from
+            # the effective ``dev_no`` sugar under the new mode.
+            raw_cores = []
+            raw_clusters = []
+        else:
+            # Nothing forces the caller's hand; the baseline is still
+            # canonical for the effective ``(dev_no, core_mode)`` pair.
+            raw_cores = list(baseline.cores)
+            raw_clusters = list(baseline.clusters)
+
+        cores, clusters = _resolve_targets(
+            core_mode=core_mode,
+            dev_list=inherited_dev_list,
+            fallback_dev=fallback_dev,
+            dev_no_is_list=inherited_is_list,
+            dev_no_given=dev_no_overridden,
+            raw_cores=raw_cores,
+            raw_clusters=raw_clusters,
+        )
+
+        # Resolve the effective ``dev_no`` for the returned canonical spec.
+        # Caller override wins; otherwise derive from the canonical target
+        # device prefixes so the spec is self-consistent for a later
+        # setter-chain override.
+        if dev_no_overridden:
+            resolved_dev_no: Any = self.raw_dev_no
+        elif cores or clusters:
+            derived_devs = sorted(_devices_from_targets(cores, clusters))
+            resolved_dev_no = derived_devs if len(derived_devs) > 1 else derived_devs[0]
+        else:
+            resolved_dev_no = baseline.dev_no_public()
+
+        return NPUTargetSpec(
+            dev_no=_freeze_dev_no(resolved_dev_no),
+            core_mode=core_mode,
+            cores=tuple(cores),
+            clusters=tuple(clusters),
+            _pending=self,
+        )
 
 
 def _freeze_dev_no(dev_no: Any) -> Union[int, tuple]:

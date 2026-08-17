@@ -75,15 +75,17 @@
   `target_cores` / `target_clusters` accessors). The aggregate `target_cores` / `target_clusters`
   return the union across every covered device with device prefix dropped; use
   `target_cores_by_device` / `target_clusters_by_device` for per-device provenance.
-- Backend target topology lives in a single frozen `NPUTargetSpec` on
-  `MobilintNPUBackend._spec` (dev_no, core_mode, cores, clusters). The four per-field
-  setters (`dev_no` / `core_mode` / `target_cores` / `target_clusters`) each atomically replace
-  `_spec` via `NPUTargetSpec._with`, which forwards to `NPUTargetSpec.from_kwargs` for
-  canonical renormalization. HF `from_pretrained` cannot observe a partial-state moment between
-  its per-field `model_kwargs` setattr calls, and no reconciliation pass runs before `create()`.
-  Target-only override syncs `dev_no` to the target device set; `dev_no`-only override clears
-  stale targets and re-expands sugar; both overridden → device-set consistency check catches
-  mismatches.
+- Backend target topology is accumulated on `NPUTargetSpecPending` at
+  `MobilintNPUBackend._pending`. Each per-field setter records its raw override without
+  normalizing and invalidates `MobilintNPUBackend._finalized`; the canonical `NPUTargetSpec` is
+  materialized lazily on the next `_spec` read via `NPUTargetSpecPending.finalize`, which runs the
+  single ordered pipeline (legacy migration → sibling drop → grain unification → off-mode drop →
+  device-set consistency → `global8` coverage) once every accumulated override is visible.
+  Setter order is irrelevant — the resolved spec depends on the *set* of overrides, not the
+  sequence. `NPUTargetSpec.from_kwargs` remains the config-layer entry (JSON load) where eager
+  normalization is unambiguous. Target-only override syncs `dev_no` to the target device set;
+  `dev_no`-only override clears stale targets and re-expands sugar; both overridden → device-set
+  consistency check surfaces mismatches on the next canonical read (not on the setter).
 - Canonical NPU target wire form: `target_cores` items are `"d:c:k"` strings and
   `target_clusters` items are `"d:c"` strings. Legacy 2-part `c:k` cores, bare integer clusters,
   and `qbruntime.CoreId` / `Cluster` objects are silently migrated by
