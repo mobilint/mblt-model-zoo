@@ -2623,3 +2623,216 @@ def test_text_measure_continues_on_npu_alloc_error(monkeypatch, tmp_path) -> Non
     skipped_rows = [row for row in csv_rows if row.get("skipped_reason") == "npu_alloc"]
     assert len(skipped_rows) == 1
     assert skipped_rows[0]["model"] == "mobilint/model-a"
+
+
+def test_text_handle_cuda_precheck_skip_writes_structured_record(tmp_path) -> None:
+    """Verify the precheck handler records a structured cuda_precheck row and sidecar entry.
+
+    Fresh-failure precedence: the handler must add its label to
+    ``fresh_failure_labels`` so a stale on-disk success payload for the same
+    label is masked by rebuild reconciliation.
+    """
+    skipped_records: list[dict[str, Any]] = []
+    fresh_failure_labels: set[str] = set()
+
+    text_bench._handle_cuda_precheck_skip(
+        label="upstream/model-a",
+        device="cuda:0",
+        batch_size=32,
+        free_bytes=1_000_000,
+        required_bytes=8_000_000,
+        estimated_bytes=7_000_000,
+        skipped_records=skipped_records,
+        phase="load",
+        output_dir=tmp_path,
+        benchmark_type="measure",
+        fresh_failure_labels=fresh_failure_labels,
+    )
+
+    assert fresh_failure_labels == {"upstream/model-a"}
+    assert len(skipped_records) == 1
+    record = skipped_records[0]
+    assert record["model"] == "upstream/model-a"
+    assert record["skipped_reason"] == "cuda_precheck"
+    assert record["phase"] == "load"
+    assert record["device"] == "cuda:0"
+    assert record["batch_size"] == 32
+    assert record["free_bytes"] == 1_000_000
+    assert record["required_bytes"] == 8_000_000
+    assert record["estimated_weights_bytes"] == 7_000_000
+    assert "CUDA pre-check VRAM insufficient" in record["detail"]
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert persisted == skipped_records
+
+
+def test_text_measure_continues_on_cuda_precheck(monkeypatch, tmp_path) -> None:
+    """Verify a CUDA pre-check failure is logged as a skipped row and the loop continues.
+
+    Regression guard for the PR#109 review: a target that fails the pre-check
+    used to print and ``continue`` silently, disappearing from combined output
+    while the runtime-OOM path recorded a sidecar row. Both should now surface
+    a structured skip row.
+    """
+    args = text_bench._build_arg_parser().parse_args(
+        [
+            "measure",
+            "--batch",
+            "--original-models",
+            "--batch-size",
+            "64",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    monkeypatch.setattr(
+        text_bench,
+        "_collect_text_run_targets",
+        lambda args: (
+            str(tmp_path),
+            True,
+            [
+                ("upstream/model-a", [None], "upstream/model-a", "upstream_model-a", None, None, 64, "batch"),
+                ("upstream/model-b", [None], "upstream/model-b", "upstream_model-b", None, None, 64, "batch"),
+            ],
+        ),
+    )
+    monkeypatch.setattr(text_bench, "_collect_host_pc_info", lambda results_dir: None)
+    monkeypatch.setattr(text_bench, "_select_revision", lambda model_id, candidates: candidates[0])
+    monkeypatch.setattr(text_bench, "_should_precheck_cuda", lambda args: True)
+    # Only model-a exceeds available VRAM; model-b's estimate is unknown so pre-check bails cleanly.
+    monkeypatch.setattr(
+        text_bench,
+        "_estimate_model_weight_bytes",
+        lambda model_id, revision: 10 * 1024**3 if model_id == "upstream/model-a" else None,
+    )
+    monkeypatch.setattr(text_bench, "_cuda_memory_info", lambda device: (1 * 1024**3, 16 * 1024**3))
+    monkeypatch.setattr(text_bench, "_clear_cuda_memory", lambda device: None)
+    monkeypatch.setattr(text_bench, "_is_cuda_device", lambda device: False)
+
+    calls: list[str] = []
+
+    def _fake_build_pipeline(model_id, **kwargs):
+        calls.append(model_id)
+        return object()
+
+    monkeypatch.setattr(text_bench, "_build_pipeline", _fake_build_pipeline)
+
+    class _FakeTPSMeasurer:
+        def __init__(self, pipeline) -> None:
+            pass
+
+        def measure(self, **kwargs):
+            class _Row:
+                prefill_latency = 0.1
+                decode_duration = 0.1
+                total_time = 0.2
+                prefill_tps = 10.0
+                decode_tps = 20.0
+                prefill_npu_latency_pct = None
+                decode_npu_latency_pct = None
+                ttft_ms = None
+
+            return _Row()
+
+    def _fake_asdict(run):
+        return {
+            "prefill_latency": 0.1,
+            "decode_duration": 0.1,
+            "total_time": 0.2,
+            "prefill_tps": 10.0,
+            "decode_tps": 20.0,
+            "prefill_npu_latency_pct": None,
+            "decode_npu_latency_pct": None,
+        }
+
+    monkeypatch.setattr(text_bench, "TPSMeasurer", _FakeTPSMeasurer)
+    monkeypatch.setattr(text_bench, "asdict", _fake_asdict)
+    monkeypatch.setattr(text_bench, "_build_phase_trackers", lambda args, pipeline: (None, None))
+    monkeypatch.setattr(text_bench, "start_qbruntime_trace", lambda path: None)
+    monkeypatch.setattr(text_bench, "stop_qbruntime_trace", lambda handle: None)
+    monkeypatch.setattr(text_bench, "_release_pipeline", lambda pipeline, device: None)
+
+    assert text_bench._run_measure(args) == 0
+    # Pre-check must short-circuit model-a before it reaches _build_pipeline.
+    assert calls == ["upstream/model-b"]
+
+    csv_rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open(encoding="utf-8")))
+    skipped_rows = [row for row in csv_rows if row.get("skipped_reason") == "cuda_precheck"]
+    assert len(skipped_rows) == 1
+    assert skipped_rows[0]["model"] == "upstream/model-a"
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert [record["model"] for record in persisted] == ["upstream/model-a"]
+    assert persisted[0]["skipped_reason"] == "cuda_precheck"
+    assert persisted[0]["free_bytes"] == 1 * 1024**3
+    assert persisted[0]["estimated_weights_bytes"] == 10 * 1024**3
+
+
+def test_text_rebuild_measure_charts_preserves_cuda_precheck_skip(tmp_path) -> None:
+    """``--rebuild-charts`` must preserve a pre-check skip row across standalone rebuilds.
+
+    Regression guard: task ``679ef`` preserved fresh failures against on-disk
+    stale success payloads. Extend the same guarantee to ``cuda_precheck`` so a
+    subsequent standalone ``--rebuild-charts`` keeps the pre-check row intact.
+    """
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [
+            {
+                "model": "upstream/model-a",
+                "device": "cuda:0",
+                "batch_size": 64,
+                "phase": "load",
+                "skipped_reason": "cuda_precheck",
+                "free_bytes": 1_073_741_824,
+                "required_bytes": 8_589_934_592,
+                "estimated_weights_bytes": 7_465_178_776,
+                "detail": "CUDA pre-check VRAM insufficient: free=... required=... estimated_weights=...",
+            }
+        ],
+        "measure",
+    )
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
+    assert [record["model"] for record in persisted] == ["upstream/model-a"]
+    assert persisted[0]["skipped_reason"] == "cuda_precheck"
+    rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
+    skipped_rows = [
+        row for row in rows if row.get("model") == "upstream/model-a" and row.get("skipped_reason") == "cuda_precheck"
+    ]
+    assert len(skipped_rows) == 1
+
+
+def test_text_rebuild_sweep_charts_preserves_cuda_precheck_skip(tmp_path) -> None:
+    """Sweep sibling: ``--rebuild-charts`` must preserve a pre-check skip row for sweep."""
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [
+            {
+                "model": "upstream/sweep-a",
+                "device": "cuda:0",
+                "batch_size": 16,
+                "phase": "load",
+                "skipped_reason": "cuda_precheck",
+                "free_bytes": 1_073_741_824,
+                "required_bytes": 8_589_934_592,
+                "estimated_weights_bytes": 7_465_178_776,
+            }
+        ],
+        "sweep",
+    )
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    persisted = text_bench._read_skipped_sidecar(tmp_path, "sweep")
+    assert [record["model"] for record in persisted] == ["upstream/sweep-a"]
+    assert persisted[0]["skipped_reason"] == "cuda_precheck"
+    rows = list(csv.DictReader((tmp_path / "combined.csv").open("r", encoding="utf-8")))
+    skipped_rows = [
+        row for row in rows if row.get("model") == "upstream/sweep-a" and row.get("skipped_reason") == "cuda_precheck"
+    ]
+    assert len(skipped_rows) == 1

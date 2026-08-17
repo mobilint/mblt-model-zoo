@@ -365,6 +365,61 @@ def _handle_cuda_oom(
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
 
+def _handle_cuda_precheck_skip(
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    free_bytes: int,
+    required_bytes: int,
+    estimated_bytes: int,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+    output_dir: str | Path,
+    benchmark_type: str,
+    fresh_failure_labels: set[str] | None = None,
+) -> None:
+    """Log a structured CUDA pre-check VRAM skip record and clear GPU state.
+
+    Mirrors :func:`_handle_cuda_oom` for the pre-load VRAM check so a target that
+    fails the pre-check is persisted to ``skipped_records_<mode>.json`` and shown
+    in the combined output with ``skipped_reason="cuda_precheck"``. Without this
+    handler the pre-check rejection would only print and ``continue``, producing
+    an asymmetric record: an actual runtime OOM would appear as a skip row while
+    the safer pre-check skip would be silently dropped from the combined output,
+    breaking one-pass NPU-vs-GPU comparisons where the GPU parent is pre-checked
+    out.
+    """
+    reason = "cuda_precheck"
+    print(
+        f"SKIP model={label} device={device} batch_size={batch_size} "
+        f"reason={reason} phase={phase}: "
+        f"free={_format_gib(free_bytes)} required~={_format_gib(required_bytes)} "
+        f"estimated_weights={_format_gib(estimated_bytes)}"
+    )
+    _clear_cuda_memory(device)
+    _replace_skip_record(
+        skipped_records,
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": (
+                f"CUDA pre-check VRAM insufficient: "
+                f"free={int(free_bytes)} required={int(required_bytes)} "
+                f"estimated_weights={int(estimated_bytes)}"
+            ),
+            "free_bytes": int(free_bytes),
+            "required_bytes": int(required_bytes),
+            "estimated_weights_bytes": int(estimated_bytes),
+        },
+        fresh_failure_labels,
+    )
+    _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
+
+
 def _handle_npu_alloc_error(
     exc: BaseException,
     *,
@@ -1856,12 +1911,19 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
                 if free_b < required:
-                    print(
-                        "Skipping (pre-check VRAM insufficient): "
-                        f"free={_format_gib(free_b)} required~={_format_gib(required)} "
-                        f"estimated_weights={_format_gib(estimated)}"
+                    _handle_cuda_precheck_skip(
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        free_bytes=int(free_b),
+                        required_bytes=int(required),
+                        estimated_bytes=int(estimated),
+                        skipped_records=skipped_records,
+                        phase="load",
+                        output_dir=output_dir,
+                        benchmark_type="sweep",
+                        fresh_failure_labels=fresh_failure_labels,
                     )
-                    _clear_cuda_memory(target_args.device)
                     continue
 
         pipeline = None
@@ -2610,11 +2672,19 @@ def _run_measure(args: argparse.Namespace) -> int:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
                 if free_b < required:
-                    print(
-                        f"Skipping {label} (pre-check VRAM insufficient): "
-                        f"free={_format_gib(free_b)} required~={_format_gib(required)}"
+                    _handle_cuda_precheck_skip(
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        free_bytes=int(free_b),
+                        required_bytes=int(required),
+                        estimated_bytes=int(estimated),
+                        skipped_records=skipped_records,
+                        phase="load",
+                        output_dir=output_dir,
+                        benchmark_type="measure",
+                        fresh_failure_labels=fresh_failure_labels,
                     )
-                    _clear_cuda_memory(target_args.device)
                     continue
         pipeline = None
         try:

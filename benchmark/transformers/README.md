@@ -541,9 +541,16 @@ target and the combined output records the skip. Either CUDA OOM (upstream GPU t
 Mobilint NPU allocation failure — `MobilintBackendAllocError` with `phase`, `slot`, and `dev`
 context — is logged as `SKIP model=... reason=cuda_oom|npu_alloc ...` and recorded in
 `combined.csv`/`combined_measure.csv` with empty numeric fields and a populated `skipped_reason`
-column. A single-target OOM does not fail the whole run. No per-target JSON is written for a
-skipped target, so a rerun with `--skip-existing` naturally retries it (typically at a smaller
-`--batch-size`). Each skip is also persisted to a mode-specific sidecar in the output directory:
+column. A single-target OOM does not fail the whole run. The default CUDA pre-load VRAM check
+(`--cuda-precheck`) uses the same skip machinery: a target that fails the pre-check is logged as
+`SKIP model=... reason=cuda_precheck phase=load: free=... required~=... estimated_weights=...`
+and recorded with `skipped_reason=cuda_precheck` (plus `free_bytes`, `required_bytes`, and
+`estimated_weights_bytes` fields), distinct from `cuda_oom` so the two failure modes stay
+distinguishable in the combined output. This preserves symmetry with the runtime-OOM path and
+keeps one-pass NPU-vs-GPU comparisons intact when a GPU parent is skipped by the pre-check.
+No per-target JSON is written for a skipped target, so a rerun with `--skip-existing` naturally
+retries it (typically at a smaller `--batch-size`). Each skip is also persisted to a mode-specific
+sidecar in the output directory:
 `skipped_records_measure.json` for `measure` runs and `skipped_records_sweep.json` for `sweep`
 runs. Splitting by mode keeps `measure` and `sweep` from overwriting each other's skips when
 they share an output directory, so a later `--rebuild-charts` pass reconstructs only the
