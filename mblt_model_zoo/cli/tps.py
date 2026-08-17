@@ -1112,6 +1112,55 @@ def _reject_qwen3_vl_batched_non_batch_text_mxq(
     raise SystemExit(_qwen3_vl_batched_non_batch_text_mxq_message(model, max_batch_size))
 
 
+def _resolve_effective_qwen3_vl_batch(
+    args: argparse.Namespace,
+    pipeline: Any,
+    backend: Any,
+) -> int | None:
+    """Return the effective aggregate batch capacity for the Qwen3-VL text backend.
+
+    Under the sw-batch contract (AGENTS.md L171-L177) the aggregate
+    ``max_batch_size`` is ``N * K``, where ``K`` is the compiled MXQ batch
+    axis and ``N`` is the launched slot count. When the caller omits
+    ``--batch-size``, ``N`` is chosen from the release config's
+    ``text_config.max_batch_size`` — a Batch16 release with a Hub-relative
+    ``K == 1`` override still fans out to ``N = 16`` sw-batch slots. The
+    Qwen3-VL post-launch guard must fire on this true aggregate, not just
+    the explicit CLI flag.
+
+    Resolution priority:
+
+    1. ``args.batch_size`` when set — the CLI always wins.
+    2. ``backend.max_batch_size`` — authoritative post-launch aggregate stashed
+       by :class:`MobilintNPUBackend` at construction time (see
+       ``mblt_model_zoo/utils/npu_backend.py``).
+    3. ``pipeline.model.config.text_config.max_batch_size`` (then
+       ``config.max_batch_size``) — release-shipped fallback for backends
+       that do not expose the aggregate.
+
+    Returns ``None`` when no signal resolves; the caller then falls through.
+    """
+    explicit = getattr(args, "batch_size", None)
+    if explicit is not None:
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            return None
+    backend_batch = _normalize_max_batch_size(getattr(backend, "max_batch_size", None))
+    if backend_batch is not None:
+        return backend_batch
+    inner = getattr(pipeline, "model", None)
+    config = getattr(inner, "config", None)
+    if config is None:
+        return None
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        text_batch = _normalize_max_batch_size(getattr(text_config, "max_batch_size", None))
+        if text_batch is not None:
+            return text_batch
+    return _normalize_max_batch_size(getattr(config, "max_batch_size", None))
+
+
 def _verify_qwen3_vl_batch_constraint_post_launch(pipeline: Any, args: argparse.Namespace) -> None:
     """Post-launch counterpart to :func:`_reject_qwen3_vl_batched_non_batch_text_mxq`.
 
@@ -1122,12 +1171,20 @@ def _verify_qwen3_vl_batch_constraint_post_launch(pipeline: Any, args: argparse.
     This post-launch verifier reads the authoritative ``k_per_model`` off the
     constructed text backend — reflecting the actually loaded artifact, not
     the shipped release config's ``text_config.max_batch_size`` — and raises
-    the same friendly :class:`SystemExit` when ``K == 1`` under
-    ``--batch-size B > 1``.
+    the same friendly :class:`SystemExit` when ``K == 1`` under an aggregate
+    batch capacity greater than one.
 
-    Non-VLM tasks, ``batch_size <= 1``, non-Qwen3-VL releases, and unknown
-    model structures fall through silently, matching the pre-launch guard's
-    fall-through discipline.
+    The effective aggregate capacity is resolved via
+    :func:`_resolve_effective_qwen3_vl_batch` so a config-configured
+    ``N > 1`` (Batch16 release with a Hub-relative ``K == 1`` text MXQ
+    override) still triggers the guard even when the CLI omits
+    ``--batch-size``. Under AGENTS.md L171-L177 the aggregate
+    ``max_batch_size`` is ``N * K``; inspecting only ``args.batch_size``
+    would lose the config-driven ``N``.
+
+    Non-VLM tasks, effective batch ``<= 1``, non-Qwen3-VL releases, and
+    unknown model structures fall through silently, matching the pre-launch
+    guard's fall-through discipline.
 
     TODO(beomsu): unify with :func:`_verify_batched_mxq_core_mode_post_launch`
     if a general ``_verify_backend_k(pipeline, k_predicate, error_factory)``
@@ -1135,9 +1192,6 @@ def _verify_qwen3_vl_batch_constraint_post_launch(pipeline: Any, args: argparse.
     """
     task = getattr(args, "task", None)
     if not _is_vlm_task(task):
-        return
-    batch_size = getattr(args, "batch_size", None)
-    if batch_size is None or int(batch_size) <= 1:
         return
     model = getattr(args, "model", None)
     if not model:
@@ -1150,10 +1204,13 @@ def _verify_qwen3_vl_batch_constraint_post_launch(pipeline: Any, args: argparse.
     backend = _resolve_llm_npu_backend(inner)
     if backend is None:
         return
+    effective_batch = _resolve_effective_qwen3_vl_batch(args, pipeline, backend)
+    if effective_batch is None or effective_batch <= 1:
+        return
     k = getattr(backend, "k_per_model", None)
     if not isinstance(k, int) or k > 1:
         return
-    raise SystemExit(_qwen3_vl_batched_non_batch_text_mxq_message(str(model), int(batch_size)))
+    raise SystemExit(_qwen3_vl_batched_non_batch_text_mxq_message(str(model), int(effective_batch)))
 
 
 def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:

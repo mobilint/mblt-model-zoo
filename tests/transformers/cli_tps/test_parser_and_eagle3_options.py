@@ -1707,17 +1707,26 @@ def _make_qwen3_vl_measure_args(**overrides) -> argparse.Namespace:
 
 
 class _FakeQwen3VLBackend:
-    """Minimal ``MobilintNPUBackend`` stand-in exposing ``k_per_model``."""
+    """Minimal ``MobilintNPUBackend`` stand-in exposing ``k_per_model`` and optional aggregate."""
 
-    def __init__(self, k: int) -> None:
+    def __init__(self, k: int, max_batch_size: int | None = None) -> None:
         self.k_per_model = k
+        if max_batch_size is not None:
+            self.max_batch_size = max_batch_size
 
 
-def _fake_qwen3_vl_pipeline(k: int) -> SimpleNamespace:
+def _fake_qwen3_vl_pipeline(
+    k: int,
+    max_batch_size: int | None = None,
+    config: object | None = None,
+) -> SimpleNamespace:
     """Return a pipeline whose ``.model.model.language_model.npu_backend`` mimics Qwen3-VL."""
-    language_model = SimpleNamespace(npu_backend=_FakeQwen3VLBackend(k))
+    language_model = SimpleNamespace(npu_backend=_FakeQwen3VLBackend(k, max_batch_size=max_batch_size))
     inner = SimpleNamespace(language_model=language_model)
-    return SimpleNamespace(model=SimpleNamespace(model=inner))
+    outer = SimpleNamespace(model=inner)
+    if config is not None:
+        outer.config = config
+    return SimpleNamespace(model=outer)
 
 
 def test_verify_qwen3_vl_post_launch_rejects_k1_on_hub_relative_override(monkeypatch) -> None:
@@ -1768,18 +1777,84 @@ def test_verify_qwen3_vl_post_launch_skips_non_qwen3_vl_release(monkeypatch) -> 
     tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
 
 
-def test_verify_qwen3_vl_post_launch_skips_batch_size_one(monkeypatch) -> None:
-    """--batch-size <= 1: post-launch guard falls through (no sw-batch fan-out possible)."""
+def test_verify_qwen3_vl_post_launch_skips_effective_batch_one(monkeypatch) -> None:
+    """Effective batch <= 1 (no CLI flag, no config-driven aggregate): guard falls through."""
     monkeypatch.setattr(
         tps_cli,
         "_detect_qwen3_vl_model",
-        lambda *a, **kw: pytest.fail("detection should not run when batch_size <= 1"),
+        lambda model, *, trust_remote_code, revision: True,
     )
 
     args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
-    pipeline = _fake_qwen3_vl_pipeline(k=1)
+    pipeline = _fake_qwen3_vl_pipeline(k=1)  # no backend.max_batch_size, no config
 
     tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_rejects_config_driven_batch_on_k1(monkeypatch) -> None:
+    """Batch16 release + Hub-relative K=1 override + no --batch-size: guard fires on N*K aggregate."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=1, max_batch_size=16)
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+    message = str(excinfo.value)
+    assert "batched Qwen3-VL sw-batch requires a batched text MXQ" in message
+    assert "--batch-size=16" in message
+    assert "mobilint/Qwen3-VL-8B" in message
+
+
+def test_verify_qwen3_vl_post_launch_skips_config_driven_batch_one(monkeypatch) -> None:
+    """Non-batch release (backend.max_batch_size == 1) + no --batch-size: no fan-out, guard skips."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=1, max_batch_size=1)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_accepts_batched_mxq_on_config_driven_batch(monkeypatch) -> None:
+    """Batched MXQ (K=16) servicing the config-driven aggregate (16): hardware batch handles it."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=16, max_batch_size=16)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_reads_text_config_when_backend_lacks_aggregate(monkeypatch) -> None:
+    """Config-driven aggregate falls back to ``pipeline.model.config.text_config.max_batch_size``."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    config = _DummyConfig(text_config=SimpleNamespace(max_batch_size=16))
+    pipeline = _fake_qwen3_vl_pipeline(k=1, config=config)  # no backend.max_batch_size
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+    assert "--batch-size=16" in str(excinfo.value)
 
 
 def test_verify_qwen3_vl_post_launch_skips_non_vlm_task(monkeypatch) -> None:
