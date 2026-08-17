@@ -257,9 +257,29 @@ class MobilintNPUBackend:
 
     @property
     def _spec(self) -> NPUTargetSpec:
-        """Lazily-finalized canonical view of the accumulated target overrides."""
+        """Lazily-finalized canonical view of the accumulated target overrides.
+
+        First read after a setter chain materializes the canonical spec by
+        running :meth:`NPUTargetSpecPending.finalize`, then caches it on
+        :attr:`_finalized` until the next setter invalidates the cache.
+
+        Every finalize call also closes the current override epoch: the
+        resolved spec is promoted to a fresh :class:`NPUTargetSpecPending`
+        baseline (see :meth:`NPUTargetSpecPending.from_baseline`), so the
+        next setter chain accumulates on a clean intent slate. Without this
+        promotion, a prior chain's ``target_cores`` override would leak into
+        a standalone ``dev_no`` override in the next chain, and the
+        device-set consistency check inside :func:`_resolve_targets` would
+        fire spuriously. Within a single chain (no accessor read between
+        setters) accumulated overrides finalize as one atomic decision;
+        across chains (accessor reads separate them) each chain sees a clean
+        intent slate.
+        """
         if self._finalized is None:
             self._finalized = self._pending.finalize()
+            # Close the current override epoch: the next setter chain
+            # accumulates on a fresh baseline with all intent flags cleared.
+            self._pending = NPUTargetSpecPending.from_baseline(self._finalized)
         return self._finalized
 
     # ---- Target-topology accessors ------------------------------------------

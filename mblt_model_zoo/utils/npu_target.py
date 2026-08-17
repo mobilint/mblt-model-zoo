@@ -26,6 +26,16 @@ a single pipeline: legacy migration → sibling drop → dev_no derive → grain
 unification → off-mode drop → ``global8`` coverage validation. Setter order
 becomes irrelevant because finalize sees the same accumulated state regardless
 of the sequence the caller used to build it.
+
+Override epochs: the pending accumulator is scoped to a single setter chain.
+:class:`MobilintNPUBackend` promotes ``self._pending`` to a fresh baseline
+(via :meth:`NPUTargetSpecPending.from_baseline`) every time it materializes
+the canonical spec, so a subsequent HF setter chain — or any standalone
+runtime mutation — never inherits stale intent flags from a previous chain.
+Within a single chain (no accessor read between setters) accumulated
+overrides finalize as one atomic decision; across chains (accessor reads
+separate them) each chain sees a clean intent slate. See
+:attr:`MobilintNPUBackend._spec` for the promotion callsite.
 """
 
 from __future__ import annotations
@@ -625,6 +635,31 @@ class NPUTargetSpecPending:
     raw_core_mode: Any = _UNSET
     raw_cores: Any = _UNSET
     raw_clusters: Any = _UNSET
+
+    @classmethod
+    def from_baseline(cls, spec: NPUTargetSpec) -> "NPUTargetSpecPending":
+        """Return a fresh pending baseline for the next override epoch.
+
+        :class:`MobilintNPUBackend` calls this immediately after materializing
+        its canonical spec so the next per-field setter chain accumulates on a
+        clean slate. All four intent flags (:attr:`raw_dev_no`,
+        :attr:`raw_core_mode`, :attr:`raw_cores`, :attr:`raw_clusters`) reset
+        to :data:`_UNSET`; the caller-facing baseline for the fresh epoch is
+        the canonical result of the previous epoch's finalize, with any
+        accumulated ``_pending`` history stripped from the baseline value so
+        the epochs are fully independent.
+
+        Args:
+            spec: Canonical :class:`NPUTargetSpec` to seed the fresh pending's
+                baseline with. Typically the finalized result of the previous
+                override epoch.
+
+        Returns:
+            A new :class:`NPUTargetSpecPending` whose baseline is ``spec``
+            (with any prior ``_pending`` history stripped) and whose intent
+            slots are all :data:`_UNSET`.
+        """
+        return cls(baseline=replace(spec, _pending=None))
 
     def _with(
         self,

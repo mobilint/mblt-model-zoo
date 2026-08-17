@@ -1426,3 +1426,180 @@ def test_setter_order_independence_partial_global8_still_raises_after_dev_no_ove
         spec._with(target_clusters=["0:0"])._with(core_mode="global8")
     with pytest.raises(ValueError, match="global8"):
         spec._with(core_mode="global8")._with(target_clusters=["0:0"])
+
+
+# ---------------------------------------------------------------------------
+# PR #109 review (r3796796856): override epoch boundary. The pending
+# accumulator is scoped to a single setter chain — every canonical read
+# promotes the resolved spec to a fresh :class:`NPUTargetSpecPending` baseline
+# so the next setter chain does not inherit stale intent flags from the
+# previous chain. Without this promotion, ``backend.target_cores = [...]``
+# followed by a canonical read followed by ``backend.dev_no = new_dev`` would
+# see BOTH the historical ``target_cores`` override and the new ``dev_no``
+# override live on the same pending, and the device-set consistency check
+# would fire spuriously against the caller's fresh dev-only intent.
+# ---------------------------------------------------------------------------
+
+
+def test_epoch_boundary_dev_no_override_after_target_readback_reexpands_from_new_sugar() -> None:
+    """Reviewer's exact scenario: target → read → dev_no must NOT surface stale target intent.
+
+    Chain 1 pins targets on device 1. A canonical read (``backend.dev_no``)
+    finalizes the pending and closes the epoch. Chain 2 overrides only
+    ``dev_no`` to device 2. Without the epoch boundary, the pending would
+    still carry chain 1's ``target_cores`` intent and the finalize step
+    would raise ``target device set {1} does not match dev_no {2}``. Under
+    the fix, the second chain sees a clean intent slate and the sibling-drop
+    branch re-expands the ``dev_no=2`` sugar into every core of device 2.
+    """
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    # Chain 1: target-only override to device 1.
+    backend.target_cores = ["1:0:0"]
+    # Canonical read closes the epoch; the pending is promoted to a fresh
+    # baseline whose canonical value already reflects the chain-1 override.
+    assert backend.dev_no == 1
+    # Chain 2: standalone dev_no override to device 2. Must NOT inherit the
+    # chain-1 ``target_cores`` intent.
+    backend.dev_no = 2
+    assert backend.dev_no == 2
+    # Re-expansion from the fresh ``dev_no=2`` sugar under single mode.
+    assert backend._target_cores_serialized == [f"2:{c}:{k}" for c in (0, 1) for k in range(4)]
+    assert backend._target_clusters_serialized == []
+
+
+def test_epoch_boundary_preserves_within_chain_order_independence() -> None:
+    """Within a single chain (no mid-chain accessor read) setter-order-independence still holds.
+
+    Regression guard: task d772c's guarantee is that ``dev_no`` before
+    ``core_mode`` and ``core_mode`` before ``dev_no`` land on identical
+    canonical specs when no accessor read separates the two setters. The
+    epoch boundary must fire only on accessor reads, not on individual
+    setters, so a two-setter chain still coalesces into one atomic finalize.
+    """
+
+    def _apply(order: tuple[str, ...]) -> tuple:
+        backend = _load_backend(
+            {
+                "mxq_path": "model.mxq",
+                "core_mode": "single",
+                "dev_no": 0,
+                "target_cores": ["0:0:0"],
+            }
+        )
+        for key in order:
+            if key == "dev_no":
+                backend.dev_no = 1
+            elif key == "target_cores":
+                backend.target_cores = ["1:0:0"]
+        return (
+            backend.dev_no,
+            backend.core_mode,
+            tuple(backend._target_cores_serialized),
+            tuple(backend._target_clusters_serialized),
+        )
+
+    forward = _apply(("dev_no", "target_cores"))
+    reverse = _apply(("target_cores", "dev_no"))
+    assert forward == reverse
+    assert forward == (1, "single", ("1:0:0",), ())
+
+
+def test_epoch_boundary_post_serialization_core_mode_override_does_not_raise() -> None:
+    """``to_dict`` reads ``_spec``; a follow-up ``core_mode`` override must not raise on stale intent.
+
+    Reproduces the shape of a downstream consumer that serializes the
+    backend (which reads the canonical spec) and then applies a runtime
+    override to a single field. Under the epoch boundary, the ``to_dict``
+    read closes the epoch and the ``core_mode`` override lands on a fresh
+    intent slate; ``dev_no`` sugar re-expands into the new mode without any
+    stale target consistency error.
+    """
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    # to_dict reads ``_spec`` and closes the epoch.
+    dumped = backend.to_dict()
+    assert dumped["core_mode"] == "single"
+    assert dumped["target_cores"] == ["0:0:0"]
+    # Standalone core_mode override on the fresh epoch. Under the pre-fix
+    # design the stale ``target_cores`` intent would fold to a single-cluster
+    # ``target_clusters`` under global4 and the device-set/coverage checks
+    # would fire; under the fix, sugar re-expands into both clusters.
+    backend.core_mode = "global4"
+    assert backend.core_mode == "global4"
+    assert backend._target_clusters_serialized == ["0:0", "0:1"]
+    assert backend._target_cores_serialized == []
+
+
+def test_epoch_boundary_three_back_to_back_chains_each_reflect_only_their_own_intent() -> None:
+    """Three sequential chains (separated by accessor reads) each land the LATEST intent only.
+
+    Chain 1: ``target_cores=["1:0:0"]``   → dev_no derives to 1.
+    Chain 2: ``dev_no=2``                  → sugar re-expands to device 2.
+    Chain 3: ``core_mode="global4"``       → sugar re-expands to both clusters on device 2.
+
+    Each chain's intent flag is scoped to its own epoch. Under the pre-fix
+    design chain 2 would inherit chain 1's ``target_cores`` intent and raise
+    a device-set mismatch; chain 3 would inherit chain 2's ``dev_no`` intent
+    and produce the correct answer only by luck.
+    """
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    # Chain 1.
+    backend.target_cores = ["1:0:0"]
+    assert backend.dev_no == 1
+    assert backend._target_cores_serialized == ["1:0:0"]
+
+    # Chain 2.
+    backend.dev_no = 2
+    assert backend.dev_no == 2
+    assert backend._target_cores_serialized == [f"2:{c}:{k}" for c in (0, 1) for k in range(4)]
+
+    # Chain 3.
+    backend.core_mode = "global4"
+    assert backend.core_mode == "global4"
+    assert backend._target_clusters_serialized == ["2:0", "2:1"]
+    assert backend._target_cores_serialized == []
+    assert backend.dev_no == 2
+
+
+def test_epoch_boundary_within_chain_mismatch_still_raises_on_read() -> None:
+    """Deferred mismatch check still fires when two conflicting setters run without a mid-chain read.
+
+    Guardrail: the epoch boundary must not silently swallow a genuine
+    caller-authored mismatch. When ``dev_no`` and ``target_cores`` are both
+    overridden within a single chain (no accessor read between them), the
+    finalize step still runs the device-set consistency check and raises.
+    """
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "single",
+            "dev_no": 0,
+            "target_cores": ["0:0:0"],
+        }
+    )
+    # Both mutations land on the same pending — no mid-chain accessor closes
+    # the epoch between them.
+    backend.dev_no = 1
+    backend.target_cores = ["2:0:0"]
+    with pytest.raises(ValueError, match="target device set"):
+        _ = backend._target_cores_serialized

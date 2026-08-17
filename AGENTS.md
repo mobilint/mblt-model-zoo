@@ -196,7 +196,12 @@ truth when this snapshot becomes stale.
   overrides only targets, `dev_no` syncs to the target device set at finalize; when a caller
   overrides only `dev_no`, stale targets are cleared and re-expanded from the new device sugar;
   when both are overridden, the device-set consistency check catches genuine mismatches on the
-  next canonical read (not on the setter itself).
+  next canonical read (not on the setter itself). Override intent flags are scoped to a single
+  setter chain: every canonical read promotes `MobilintNPUBackend._pending` to a fresh
+  `NPUTargetSpecPending` baseline (via `NPUTargetSpecPending.from_baseline`) so the next setter
+  chain — or any standalone runtime mutation — does not inherit stale intent flags from the
+  previous chain. Within a single chain (no accessor read between setters) accumulated overrides
+  finalize as one atomic decision; across chains each chain sees a clean intent slate.
 - The canonical NPU target wire form is fully-qualified: `target_cores` entries are `"d:c:k"`
   strings and `target_clusters` entries are `"d:c"` strings. Legacy 2-part `c:k` cores, bare
   integer clusters, and `qbruntime.CoreId` / `Cluster` objects are silently migrated to the

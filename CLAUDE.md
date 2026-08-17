@@ -85,7 +85,13 @@
   sequence. `NPUTargetSpec.from_kwargs` remains the config-layer entry (JSON load) where eager
   normalization is unambiguous. Target-only override syncs `dev_no` to the target device set;
   `dev_no`-only override clears stale targets and re-expands sugar; both overridden → device-set
-  consistency check surfaces mismatches on the next canonical read (not on the setter).
+  consistency check surfaces mismatches on the next canonical read (not on the setter). Override
+  intent flags are scoped to a single setter chain: every canonical read promotes
+  `MobilintNPUBackend._pending` to a fresh `NPUTargetSpecPending` baseline (via
+  `NPUTargetSpecPending.from_baseline`) so a subsequent setter chain — or any standalone runtime
+  mutation — never inherits stale intent flags from the previous chain. Within a single chain
+  (no mid-chain accessor read) accumulated overrides finalize as one atomic decision; across
+  chains each chain sees a clean intent slate.
 - Canonical NPU target wire form: `target_cores` items are `"d:c:k"` strings and
   `target_clusters` items are `"d:c"` strings. Legacy 2-part `c:k` cores, bare integer clusters,
   and `qbruntime.CoreId` / `Cluster` objects are silently migrated by
