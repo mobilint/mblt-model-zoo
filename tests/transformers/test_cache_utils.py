@@ -329,6 +329,98 @@ def test_build_mobilint_cache_from_model_dispatches_deepstack_cache_to_slots() -
         assert cache.model_of(row) is models[row]
 
 
+class _CapacityStubBackend:
+    """Minimal :class:`MobilintNPUBackend` stand-in for capacity-check regression tests."""
+
+    def __init__(self, models: list, k_per_model: int) -> None:
+        self.mxq_models = models
+        self.k_per_model = int(k_per_model)
+
+
+class _CapacityStubModel:
+    """Model wrapper that exposes a stub NPU backend for cache-building tests."""
+
+    def __init__(self, models: list, k_per_model: int) -> None:
+        self.npu_backend = _CapacityStubBackend(models, k_per_model)
+
+
+def test_build_mobilint_cache_from_model_n1_k1_batch1_fits_backend_capacity() -> None:
+    """Backend N=1, K=1 with batch_size=1 must build a size-1 cache (regression)."""
+    stub_model = _CapacityStubModel([_FakeMxqModel()], k_per_model=1)
+
+    cache = build_mobilint_cache_from_model(stub_model, batch_size=1)
+
+    assert cache.n_models == 1
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 1
+
+
+def test_build_mobilint_cache_from_model_rejects_n1_k1_batch_over_capacity() -> None:
+    """Backend N=1, K=1 with batch_size=2 must raise instead of legacy growth (bug fix).
+
+    The pre-fix helper called :meth:`MobilintCache.ensure_batch_size` here, which
+    took the legacy single-Model growth branch (``n_models == 1``) and expanded
+    ``k_per_model`` on the client side without launching a second Model. Downstream
+    dispatch then routed row 1 back to slot 0 whose compiled batch axis was still
+    ``K = 1``, silently corrupting inference. The multi-slot resolved-backend path
+    now rejects any request beyond ``N * K``.
+    """
+    stub_model = _CapacityStubModel([_FakeMxqModel()], k_per_model=1)
+
+    with pytest.raises(ValueError, match=r"N\*K = 1\*1 = 1"):
+        build_mobilint_cache_from_model(stub_model, batch_size=2)
+
+
+def test_build_mobilint_cache_from_model_n2_k2_batch_at_capacity_builds_cache() -> None:
+    """Backend N=2, K=2 with batch_size=4 must build a size-4 cache (regression)."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    stub_model = _CapacityStubModel(models, k_per_model=2)
+
+    cache = build_mobilint_cache_from_model(stub_model, batch_size=4)
+
+    assert cache.n_models == 2
+    assert cache.k_per_model == 2
+    assert cache.batch_size == 4
+    assert cache.model_of(0) is models[0]
+    assert cache.model_of(3) is models[1]
+
+
+def test_build_mobilint_cache_from_model_rejects_n2_k2_batch_over_capacity() -> None:
+    """Multi-slot rejection must extend to N>1 too: N=2, K=2, batch_size=5 raises."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    stub_model = _CapacityStubModel(models, k_per_model=2)
+
+    with pytest.raises(ValueError, match=r"N\*K = 2\*2 = 4"):
+        build_mobilint_cache_from_model(stub_model, batch_size=5)
+
+
+def test_build_mobilint_cache_from_model_backend_less_legacy_grows_via_batch_size() -> None:
+    """Backend-less legacy path must still forward ``batch_size`` to ``cache_cls`` (regression).
+
+    Preserves the pre-fix behavior for callers without a discoverable Mobilint NPU
+    backend — single-Model wrappers and unit-test stubs that only carry
+    ``get_cache_mxq_model``. Those callers may still grow via
+    :meth:`MobilintCache.ensure_batch_size`.
+    """
+
+    class _LegacyStubModel:
+        def __init__(self, mxq_model: _FakeMxqModel) -> None:
+            self._mxq_model = mxq_model
+
+        def get_cache_mxq_model(self) -> _FakeMxqModel:
+            return self._mxq_model
+
+    mxq_model = _FakeMxqModel()
+    stub_model = _LegacyStubModel(mxq_model)
+
+    cache = build_mobilint_cache_from_model(stub_model, batch_size=2)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2
+    assert cache.k_per_model == 2
+    assert cache.mxq_model is mxq_model
+
+
 def test_eagle3_cache_tracks_base_and_draft_lengths_independently() -> None:
     """EAGLE-3 cache should track base and draft MXQ sequence lengths separately."""
     cache = MobilintEagle3Cache(_FakeMxqModel(), _FakeMxqModel())

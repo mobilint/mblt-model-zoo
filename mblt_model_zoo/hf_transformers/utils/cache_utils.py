@@ -418,12 +418,20 @@ def build_mobilint_cache_from_model(
     backend cannot be resolved (unit-test stubs and single-Model wrappers
     without a discoverable backend).
 
-    Growing beyond ``n_models * k_per_model`` is only supported on the legacy
-    single-Model hardware-batch path (``ensure_batch_size`` raises otherwise);
-    multi-slot caches must be sized upfront by the backend.
+    On the resolved-backend path the cache is sized upfront to the backend's
+    aggregate ``N * K`` capacity and a caller ``batch_size`` that exceeds that
+    capacity is rejected with :class:`ValueError`; growing the cache after
+    construction via :meth:`MobilintCache.ensure_batch_size` would silently
+    misroute rows to slots that do not exist because no additional
+    :class:`qbruntime.Model` is launched. The backend-less legacy path still
+    passes ``batch_size`` through to ``cache_cls`` so ``ensure_batch_size``
+    growth remains available for single-Model hardware-batch callers.
     """
     backend = resolve_multi_slot_backend(model)
     if backend is None:
+        # Backend-less legacy path: allow ensure_batch_size growth via
+        # ``cache_cls``'s single-Model constructor. This is the only caller
+        # that may grow past ``cache.batch_size`` after construction.
         mxq_model = resolve_cache_mxq_model(model)
         if mxq_model is None:
             raise RuntimeError(
@@ -432,16 +440,25 @@ def build_mobilint_cache_from_model(
             )
         return cache_cls(mxq_model, batch_size=batch_size, **cache_kwargs)
 
+    # Multi-slot resolved-backend path: size is fixed by (N, K) at build.
+    # ``ensure_batch_size`` cannot grow the cache here because the backend
+    # launched exactly N Model slots; a larger request must lower
+    # ``max_batch_size`` (spread across more devices) or recompile with a
+    # larger compiled batch axis K.
     mxq_models = list(getattr(backend, "mxq_models", []) or [])
     if not mxq_models:
         raise RuntimeError("Mobilint NPU backend has no loaded Model slots.")
     k_per_model = int(getattr(backend, "k_per_model", 1) or 1)
-    cache = cache_cls(mxq_models, per_model_batch=k_per_model, **cache_kwargs)
-    if batch_size > cache.batch_size:
-        # ensure_batch_size raises for multi-Model caches (N > 1); the legacy
-        # single-Model path can still grow here.
-        cache.ensure_batch_size(batch_size)
-    return cache
+    capacity = len(mxq_models) * max(1, k_per_model)
+    if batch_size > capacity:
+        raise ValueError(
+            f"Requested batch_size={batch_size} exceeds Mobilint NPU backend "
+            f"capacity N*K = {len(mxq_models)}*{k_per_model} = {capacity}. "
+            "Recompile the MXQ with a larger compiled batch axis K, or raise "
+            "the backend's max_batch_size at construction time so it launches "
+            "more Model slots."
+        )
+    return cache_cls(mxq_models, per_model_batch=k_per_model, **cache_kwargs)
 
 
 def cache_matches_backend_topology(cache: Any, model: Any) -> bool:
