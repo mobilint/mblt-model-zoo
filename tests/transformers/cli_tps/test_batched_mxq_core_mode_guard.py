@@ -466,34 +466,35 @@ def test_measure_eagle3_prefers_base_core_mode_over_shared_core_mode_via_artifac
 
 
 class _FakeBackend:
-    """Minimal ``MobilintNPUBackend`` stand-in exposing ``k_per_model``."""
+    """Minimal ``MobilintNPUBackend`` stand-in exposing ``k_per_model`` and ``core_mode``."""
 
-    def __init__(self, k: int) -> None:
+    def __init__(self, k: int, core_mode: str | None = None) -> None:
         self.k_per_model = k
+        self.core_mode = core_mode
 
 
-def _fake_pipeline_with_llm_backend(k: int) -> SimpleNamespace:
+def _fake_pipeline_with_llm_backend(k: int, core_mode: str | None = None) -> SimpleNamespace:
     """Return a pipeline whose top-level ``.model.npu_backend`` mimics a plain LLM release."""
-    model = SimpleNamespace(npu_backend=_FakeBackend(k))
+    model = SimpleNamespace(npu_backend=_FakeBackend(k, core_mode=core_mode))
     return SimpleNamespace(model=model)
 
 
-def _fake_vlm_pipeline_with_text_backend(k: int) -> SimpleNamespace:
+def _fake_vlm_pipeline_with_text_backend(k: int, core_mode: str | None = None) -> SimpleNamespace:
     """Return a pipeline whose ``.model.model.language_model.npu_backend`` mimics Qwen3-VL."""
-    language_model = SimpleNamespace(npu_backend=_FakeBackend(k))
+    language_model = SimpleNamespace(npu_backend=_FakeBackend(k, core_mode=core_mode))
     inner = SimpleNamespace(language_model=language_model)
     return SimpleNamespace(model=SimpleNamespace(model=inner))
 
 
-def _fake_eagle3_pipeline_with_base_backend(k: int) -> SimpleNamespace:
+def _fake_eagle3_pipeline_with_base_backend(k: int, core_mode: str | None = None) -> SimpleNamespace:
     """Return a pipeline whose ``.model.eagle3_base_model.npu_backend`` mimics an EAGLE-3 release."""
-    eagle3_base_model = SimpleNamespace(npu_backend=_FakeBackend(k))
+    eagle3_base_model = SimpleNamespace(npu_backend=_FakeBackend(k, core_mode=core_mode))
     return SimpleNamespace(model=SimpleNamespace(eagle3_base_model=eagle3_base_model))
 
 
-def _fake_blip_pipeline_with_bert_backend(k: int) -> SimpleNamespace:
+def _fake_blip_pipeline_with_bert_backend(k: int, core_mode: str | None = None) -> SimpleNamespace:
     """Return a pipeline whose ``.model.text_decoder.bert.npu_backend`` mimics a BLIP release."""
-    bert = SimpleNamespace(npu_backend=_FakeBackend(k))
+    bert = SimpleNamespace(npu_backend=_FakeBackend(k, core_mode=core_mode))
     text_decoder = SimpleNamespace(bert=bert)
     return SimpleNamespace(model=SimpleNamespace(text_decoder=text_decoder))
 
@@ -542,8 +543,14 @@ def test_post_launch_skips_when_no_deferred_context():
     tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
 
 
-def test_post_launch_skips_when_effective_core_mode_is_none():
-    """Deferred ctx with ``effective_core_mode=None`` (no explicit LLM-role mode) is a noop."""
+def test_post_launch_skips_when_ctx_and_backend_both_lack_core_mode():
+    """Deferred ctx with ``effective_core_mode=None`` and no backend ``core_mode`` is a noop.
+
+    When the CLI omitted the role-specific flag and the loaded backend also
+    fails to expose a resolvable ``core_mode`` string (unusual, but covers
+    non-Mobilint-shaped stand-ins), the guard has no authoritative mode to
+    check against and must fall through rather than false-positive.
+    """
     args = argparse.Namespace()
     args._batched_mxq_guard_ctx = tps_cli._BatchedMxqGuardContext(
         effective_core_mode=None,
@@ -551,7 +558,57 @@ def test_post_launch_skips_when_effective_core_mode_is_none():
         args_attr="core_mode",
         model="mobilint/example",
     )
-    pipeline = _fake_pipeline_with_llm_backend(k=4)
+    pipeline = _fake_pipeline_with_llm_backend(k=4)  # backend.core_mode defaults to None
+
+    tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+
+def test_post_launch_falls_back_to_backend_core_mode_when_ctx_effective_is_none():
+    """CLI omitted --core-mode but the release ships global4 in config: reject at post-launch.
+
+    Regression: PR #109 review comment r3793175258. The pre-launch guard
+    resolves ``effective_core_mode`` from the CLI flags alone; when the
+    user does not pass ``--core-mode``/``--text-core-mode``/``--base-core-mode``
+    the deferred ctx carries ``effective_core_mode=None``. Previously the
+    post-launch verifier returned early on that None, silently allowing a
+    Qwen3-VL Batch16 release (``text_config.core_mode = 'global4'``) with a
+    Hub-only ``--text-mxq-path`` override to run its batched (K>1) MXQ under
+    global4. The fallback now reads the loaded backend's actual
+    ``core_mode`` and applies the same rejection.
+    """
+    args = argparse.Namespace()
+    args._batched_mxq_guard_ctx = tps_cli._BatchedMxqGuardContext(
+        effective_core_mode=None,
+        flag_label="--core-mode",
+        args_attr="core_mode",
+        model="mobilint/example",
+    )
+    pipeline = _fake_pipeline_with_llm_backend(k=4, core_mode="global4")
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
+
+    message = str(excinfo.value)
+    assert "batched MXQ only supports --core-mode single" in message
+    assert "artifact K=4" in message
+    assert "backend core_mode='global4'" in message
+
+
+def test_post_launch_accepts_backend_core_mode_single_when_ctx_effective_is_none():
+    """CLI omitted --core-mode and the release ships ``single``: no rejection even at K>1.
+
+    Safety guard for legitimately-single releases: when the fallback reads
+    the backend's ``core_mode`` it must still short-circuit for the
+    ``single`` case rather than treating "unspecified CLI" as an escalation.
+    """
+    args = argparse.Namespace()
+    args._batched_mxq_guard_ctx = tps_cli._BatchedMxqGuardContext(
+        effective_core_mode=None,
+        flag_label="--core-mode",
+        args_attr="core_mode",
+        model="mobilint/example",
+    )
+    pipeline = _fake_pipeline_with_llm_backend(k=4, core_mode="single")
 
     tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
 

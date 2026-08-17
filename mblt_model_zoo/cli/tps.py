@@ -1007,26 +1007,46 @@ def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Name
     :meth:`MobilintNPUBackend._probe_k_per_model` from
     ``qbruntime.Model.get_cache_infos()[0].num_batches`` — and raises the
     same friendly :class:`SystemExit` as the pre-launch guard when the
-    caller explicitly requested a non-``single`` LLM core mode against a
-    batched (``K > 1``) MXQ. Non-Mobilint pipelines, unknown model
-    structures, or missing ``k_per_model`` state fall through silently.
+    effective LLM core mode is non-``single`` against a batched
+    (``K > 1``) MXQ. Non-Mobilint pipelines, unknown model structures, or
+    missing ``k_per_model`` state fall through silently.
+
+    When the caller omitted the role-specific CLI mode flag,
+    ``ctx.effective_core_mode`` is ``None`` and the fallback reads the
+    loaded backend's actual ``core_mode`` (populated from the release
+    config, e.g. a Qwen3-VL Batch16 release shipping with
+    ``text_config.core_mode = 'global4'``). Without this fallback a
+    batched MXQ under a release-configured ``global4`` runs to completion
+    without ever being validated against the batched-MXQ single-only
+    rule.
     """
     ctx = getattr(args, "_batched_mxq_guard_ctx", None)
     if ctx is None:
-        return
-    if ctx.effective_core_mode is None or ctx.effective_core_mode not in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
         return
     model = getattr(pipeline, "model", None)
     backend = _resolve_llm_npu_backend(model)
     if backend is None:
         return
+
+    effective_core_mode = ctx.effective_core_mode
+    flag_label = ctx.flag_label
+    if effective_core_mode is None:
+        # CLI omitted the role-specific mode flag. Fall back to the loaded
+        # backend's actual ``core_mode`` (populated from the release
+        # config) so the guard still fires when the release ships in
+        # global4/global8/multi.
+        effective_core_mode = getattr(backend, "core_mode", None)
+        flag_label = "backend core_mode"
+    if effective_core_mode not in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
+        return
+
     k = getattr(backend, "k_per_model", None)
     if not isinstance(k, int) or k <= 1:
         return
     raise SystemExit(
         f"tps: batched MXQ only supports --core-mode single "
         f"(model={ctx.model!r}, artifact K={k}, "
-        f"{ctx.flag_label}={ctx.effective_core_mode!r})"
+        f"{flag_label}={effective_core_mode!r})"
     )
 
 
