@@ -71,6 +71,34 @@ core_map: Dict[int, "Core"] = {
     3: Core.Core3,
 }
 
+# Authoritative validity sets for cluster / core indices. Derived from the
+# maps so the two stay in sync if the Aries2 hardware topology ever changes;
+# consumed by :func:`_migrate_target_cores` / :func:`_migrate_target_clusters`
+# to reject caller-supplied indices at construction time before an invalid
+# entry can reach :meth:`MobilintNPUBackend.filter_cores_for` (which used to
+# silently drop the unknown key).
+_VALID_CLUSTER_INDICES: frozenset = frozenset(cluster_map.keys())
+_VALID_CORE_INDICES: frozenset = frozenset(core_map.keys())
+
+
+def _check_cluster_core_indices(c_val: int, k_val: int, entry: Any) -> None:
+    """Raise ``ValueError`` when ``c_val`` / ``k_val`` fall outside the Aries2 topology."""
+    if c_val not in _VALID_CLUSTER_INDICES or k_val not in _VALID_CORE_INDICES:
+        raise ValueError(
+            f"Invalid target_cores entry {entry!r}: cluster must be in "
+            f"{sorted(_VALID_CLUSTER_INDICES)} and core must be in "
+            f"{sorted(_VALID_CORE_INDICES)}."
+        )
+
+
+def _check_cluster_index(c_val: int, entry: Any) -> None:
+    """Raise ``ValueError`` when ``c_val`` falls outside the Aries2 topology."""
+    if c_val not in _VALID_CLUSTER_INDICES:
+        raise ValueError(
+            f"Invalid target_clusters entry {entry!r}: cluster must be in {sorted(_VALID_CLUSTER_INDICES)}."
+        )
+
+
 # Inverse maps: ``qbruntime`` enums do not expose a numeric conversion (their
 # ``.value`` returns the enum itself), so we build inverse lookups here and
 # reuse them everywhere a ``Cluster`` / ``Core`` object must be serialized to
@@ -135,6 +163,7 @@ def _migrate_target_cores(values: list, fallback_dev: int, dev_no_is_list: bool)
             raise TypeError(f"Unsupported target_cores entry: {v!r} ({type(v).__name__})")
         parts = v.split(":")
         if len(parts) == 3 and all(p.isdigit() for p in parts):
+            _check_cluster_core_indices(int(parts[1]), int(parts[2]), v)
             result.append(v)
             modes.add("new")
         elif len(parts) == 2 and all(p.isdigit() for p in parts):
@@ -144,6 +173,7 @@ def _migrate_target_cores(values: list, fallback_dev: int, dev_no_is_list: bool)
                     "use the fully-qualified 'd:c:k' form."
                 )
             c_val, r_val = parts
+            _check_cluster_core_indices(int(c_val), int(r_val), v)
             result.append(f"{fallback_dev}:{c_val}:{r_val}")
             modes.add("legacy")
         else:
@@ -197,6 +227,7 @@ def _migrate_target_clusters(values: list, fallback_dev: int, dev_no_is_list: bo
                     f"Legacy target_clusters int {v} is ambiguous when dev_no is a list; "
                     "use the fully-qualified 'd:c' form."
                 )
+            _check_cluster_index(v, v)
             result.append(f"{fallback_dev}:{v}")
             modes.add("legacy")
             continue
@@ -204,6 +235,7 @@ def _migrate_target_clusters(values: list, fallback_dev: int, dev_no_is_list: bo
             raise TypeError(f"Unsupported target_clusters entry: {v!r} ({type(v).__name__})")
         parts = v.split(":")
         if len(parts) == 2 and all(p.isdigit() for p in parts):
+            _check_cluster_index(int(parts[1]), v)
             result.append(v)
             modes.add("new")
         elif len(parts) == 1 and parts[0].isdigit():
@@ -212,6 +244,7 @@ def _migrate_target_clusters(values: list, fallback_dev: int, dev_no_is_list: bo
                     f"Legacy target_clusters item {v!r} is ambiguous when dev_no is a list; "
                     "use the fully-qualified 'd:c' form."
                 )
+            _check_cluster_index(int(parts[0]), v)
             result.append(f"{fallback_dev}:{v}")
             modes.add("legacy")
         else:

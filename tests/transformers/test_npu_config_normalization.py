@@ -1603,3 +1603,62 @@ def test_epoch_boundary_within_chain_mismatch_still_raises_on_read() -> None:
     backend.target_cores = ["2:0:0"]
     with pytest.raises(ValueError, match="target device set"):
         _ = backend._target_cores_serialized
+
+
+# ---------------------------------------------------------------------------
+# PR #109 review (r3803543905): the canonical / legacy migrator branches must
+# reject out-of-range cluster and core indices at construction time. Before
+# this fix, ``target_cores=["0:2:0"]`` (cluster 2 does not exist) passed the
+# canonical check and later got silently dropped by
+# :meth:`MobilintNPUBackend.filter_cores_for` via its defensive
+# ``KeyError`` swallow — the runtime then fell back to its default core
+# allocation, ignoring the caller's explicit topology request.
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_target_cores_rejects_out_of_range_cluster_canonical() -> None:
+    """Canonical ``"d:c:k"`` with cluster index outside ``cluster_map`` is rejected."""
+    with pytest.raises(ValueError, match="cluster must be in"):
+        _migrate_target_cores(["0:2:0"], fallback_dev=0, dev_no_is_list=False)
+
+
+def test_migrate_target_cores_rejects_out_of_range_core_canonical() -> None:
+    """Canonical ``"d:c:k"`` with core index outside ``core_map`` is rejected."""
+    with pytest.raises(ValueError, match="core must be in"):
+        _migrate_target_cores(["0:0:4"], fallback_dev=0, dev_no_is_list=False)
+
+
+def test_migrate_target_cores_accepts_boundary_cluster_and_core() -> None:
+    """The highest valid indices (cluster 1, core 3) still pass the range check."""
+    result = _migrate_target_cores(["0:1:3"], fallback_dev=0, dev_no_is_list=False)
+    assert result == ["0:1:3"]
+
+
+def test_migrate_target_cores_rejects_out_of_range_legacy_two_part() -> None:
+    """Legacy ``"c:k"`` with a core index outside ``core_map`` is rejected."""
+    with pytest.raises(ValueError, match="core must be in"):
+        _migrate_target_cores(["0:4"], fallback_dev=0, dev_no_is_list=False)
+
+
+def test_migrate_target_clusters_rejects_out_of_range_cluster_canonical() -> None:
+    """Canonical ``"d:c"`` with cluster index outside ``cluster_map`` is rejected."""
+    with pytest.raises(ValueError, match="cluster must be in"):
+        _migrate_target_clusters(["0:2"], fallback_dev=0, dev_no_is_list=False)
+
+
+def test_migrate_target_clusters_rejects_out_of_range_bare_int() -> None:
+    """Legacy bare-int cluster outside ``cluster_map`` is rejected."""
+    with pytest.raises(ValueError, match="cluster must be in"):
+        _migrate_target_clusters([2], fallback_dev=0, dev_no_is_list=False)
+
+
+def test_migrate_target_clusters_rejects_out_of_range_legacy_one_part_string() -> None:
+    """Legacy bare ``"c"`` string outside ``cluster_map`` is rejected."""
+    with pytest.raises(ValueError, match="cluster must be in"):
+        _migrate_target_clusters(["2"], fallback_dev=0, dev_no_is_list=False)
+
+
+def test_migrate_target_cores_rejects_out_of_range_with_list_dev_no() -> None:
+    """Range validation still fires when ``dev_no`` is a list of devices."""
+    with pytest.raises(ValueError, match="cluster must be in"):
+        _migrate_target_cores(["1:2:0", "0:0:0"], fallback_dev=0, dev_no_is_list=True)

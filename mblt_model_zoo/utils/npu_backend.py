@@ -661,6 +661,11 @@ class MobilintNPUBackend:
             try:
                 result.append(CoreId(cluster_map[c_val], core_map[k_val]))
             except KeyError:
+                # Defensive: :func:`_migrate_target_cores` now rejects
+                # out-of-range cluster / core indices at construction time,
+                # so this branch is unreachable for spec values that came
+                # through the migrator. Kept as a safety net in case a
+                # future callsite bypasses the migrator.
                 logger.warning("Unknown cluster/core id in target_cores entry %r", s)
         return result
 
