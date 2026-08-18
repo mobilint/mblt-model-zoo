@@ -22,9 +22,13 @@ samples exist.
 
 Result usage
 ------------
-The ``bad_alloc_at_n`` per device is the first ``N`` that failed. The largest
-successful ``N`` (last row with ``ok == true``) is the safe upper bound for
-that device+MXQ+core_mode combination.
+``bad_alloc_at_n`` is the actual ``N`` of the Model whose construction or
+``launch()`` failed — a 1-based attempted count derived from
+``len(models) + 1`` at the moment of failure — NOT the schedule endpoint at
+which failure surfaced. ``largest_ok_n`` reflects the true retained-and-
+launched count across every row (including intermediate successes recorded
+inside a schedule step that eventually failed). Together they bracket the
+safe upper bound for that device+MXQ+core_mode combination.
 
 Non-goals
 ---------
@@ -196,9 +200,7 @@ def _sanitize_schedule(schedule: list[int], hard_max: int) -> list[int]:
     """Return a deduped, sorted, ``hard_max``-clamped schedule (>=1 only)."""
     kept = sorted({n for n in schedule if 1 <= n <= hard_max})
     if not kept:
-        raise SystemExit(
-            f"--n-schedule empty after clamping to [1, {hard_max}]; check --n-schedule / --n-models-max."
-        )
+        raise SystemExit(f"--n-schedule empty after clamping to [1, {hard_max}]; check --n-schedule / --n-models-max.")
     return kept
 
 
@@ -267,11 +269,18 @@ def _sweep_device(dev_no: int, args: argparse.Namespace, status_exe: Optional[st
             ok, err = _launch_up_to(acc, models, target_n, args.mxq_path, args.core_mode)
             launch_wall_s = time.perf_counter() - t0
             if not ok:
-                bad_alloc_at_n = target_n
+                # ``_launch_up_to`` appends every successful Model to ``models`` before
+                # returning on the first failure, so ``len(models) + 1`` is the 1-based
+                # index of the Model whose construction/launch actually failed. Recording
+                # the schedule endpoint here would overstate the failing count whenever a
+                # step spans multiple Models (e.g., capacity=6 with schedule 1,2,4,8 fails
+                # on the 7th Model, not on ``target_n=8``).
+                attempted_n = len(models) + 1
+                bad_alloc_at_n = attempted_n
                 bad_alloc_error = err
                 rows.append(
                     {
-                        "n_models": target_n,
+                        "n_models": attempted_n,
                         "n_launched": len(models),
                         "ok": False,
                         "error": err,
@@ -284,11 +293,7 @@ def _sweep_device(dev_no: int, args: argparse.Namespace, status_exe: Optional[st
                 break
             time.sleep(max(0.0, float(args.settle_s)))
             usage_after, total_after = _read_memory_mb(dev_no, status_exe)
-            delta = (
-                (usage_after - usage_before)
-                if (usage_after is not None and usage_before is not None)
-                else None
-            )
+            delta = (usage_after - usage_before) if (usage_after is not None and usage_before is not None) else None
             rows.append(
                 {
                     "n_models": target_n,
@@ -301,10 +306,7 @@ def _sweep_device(dev_no: int, args: argparse.Namespace, status_exe: Optional[st
                     "launch_wall_s": launch_wall_s,
                 }
             )
-            print(
-                f"dev={dev_no} n={target_n}  usage={usage_after}MB "
-                f"delta={delta}MB  launch_time={launch_wall_s:.2f}s"
-            )
+            print(f"dev={dev_no} n={target_n}  usage={usage_after}MB delta={delta}MB  launch_time={launch_wall_s:.2f}s")
     finally:
         _dispose_all(models)
 
@@ -316,7 +318,10 @@ def _sweep_device(dev_no: int, args: argparse.Namespace, status_exe: Optional[st
         "rows": rows,
         "bad_alloc_at_n": bad_alloc_at_n,
         "bad_alloc_error": bad_alloc_error,
-        "largest_ok_n": max((r["n_models"] for r in rows if r["ok"]), default=None),
+        "largest_ok_n": max(
+            (r["n_launched"] for r in rows if r.get("n_launched") is not None),
+            default=None,
+        ),
     }
 
 
