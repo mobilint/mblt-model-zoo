@@ -72,7 +72,9 @@ from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
 from benchmark.transformers.asr_qwen_utils import is_qwen3_asr_model as _is_qwen3_asr_model
 from benchmark.transformers.asr_qwen_utils import move_native_qwen3_asr_to_device as _move_native_qwen3_asr_to_device
 from benchmark.transformers.asr_qwen_utils import quiet_apscheduler_info_logs as _quiet_apscheduler_info_logs
-from benchmark.transformers.asr_qwen_utils import resolve_native_qwen3_asr_language as _resolve_native_qwen3_asr_language
+from benchmark.transformers.asr_qwen_utils import (
+    resolve_native_qwen3_asr_language as _resolve_native_qwen3_asr_language,
+)
 from benchmark.transformers.asr_qwen_utils import (  # noqa: F401
     resolve_native_qwen3_asr_pad_token_id as _resolve_native_qwen3_asr_pad_token_id,
 )
@@ -86,6 +88,7 @@ from benchmark.transformers.benchmark_target_utils import (
 from benchmark.transformers.benchmark_target_utils import (
     iter_targets_from_mxq_dir as _iter_targets_from_mxq_dir_shared,
 )
+from benchmark.transformers.benchmark_target_utils import list_default_model_ids
 from benchmark.transformers.benchmark_target_utils import (
     resolve_model_id_from_mxq_name as _resolve_model_id_from_mxq_name_shared,
 )
@@ -94,10 +97,6 @@ from benchmark.transformers.benchmark_target_utils import (
 )
 from benchmark.transformers.benchmark_target_utils import revision_exists as _revision_exists_shared
 from benchmark.transformers.benchmark_target_utils import select_revision as _select_revision_shared
-from mblt_model_zoo.hf_transformers.utils import list_models
-from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
-    add_trace_energy_to_device_metric as _add_trace_energy_to_device_metric_common,
-)
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     CORE_MODE_CHOICES as _CORE_MODE_CHOICES_COMMON,
 )
@@ -106,6 +105,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     add_pipeline_device_args as _add_pipeline_device_args,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    add_trace_energy_to_device_metric as _add_trace_energy_to_device_metric_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     append_core_mode_suffix as _append_core_mode_suffix_common,
@@ -201,13 +203,21 @@ def _select_revision(model_id: str, candidates: list[str | None]) -> str | None:
     return _select_revision_shared(model_id, candidates)
 
 
-def _list_default_asr_models() -> list[str]:
-    available = list_models(tasks="automatic-speech-recognition")
-    return [
-        str(model_id)
-        for model_id in available.get("automatic-speech-recognition", [])
-        if not _is_excluded_asr_model_id(str(model_id))
-    ]
+def _list_default_asr_models(*, include_private: bool = False) -> list[str]:
+    """Return the default ASR benchmark target ids, optionally including private mobilint releases.
+
+    Args:
+        include_private: When True, include private mobilint/* models. Requires an authenticated
+            Hugging Face session (`hf auth login`).
+
+    Returns:
+        A list of ASR model ids with pipeline-incompatible whisper.cpp entries filtered out.
+    """
+    available = list_default_model_ids(
+        "automatic-speech-recognition",
+        include_private=include_private,
+    )
+    return [str(model_id) for model_id in available if not _is_excluded_asr_model_id(str(model_id))]
 
 
 def _is_excluded_asr_model_id(model_id: str) -> bool:
@@ -380,6 +390,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     _add_pipeline_device_args(parser, device_default=None, trust_remote_code_default=True)
     parser.add_argument("--model", dest="models", nargs="+", default=None, help="model id list to benchmark")
+    parser.add_argument(
+        "--include-private",
+        action="store_true",
+        help=(
+            "Include private mobilint/* models in the default target list. "
+            "Requires an authenticated Hugging Face session (hf auth login)."
+        ),
+    )
     parser.add_argument("--revision", default=None, help="model revision (e.g. W8)")
     parser.add_argument("--all", action="store_true", help="benchmark W8 and W4V8 revisions only")
     parser.add_argument("--mxq-dir", default=None, help="directory containing local mxq files")
@@ -479,9 +497,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             f"--{prefix}-core-mode",
             choices=list(_CORE_MODE_CHOICES_COMMON),
             default=None,
-            help=(
-                f"encoder-decoder ASR only: {prefix} NPU core mode override (falls back to --core-mode)"
-            ),
+            help=(f"encoder-decoder ASR only: {prefix} NPU core mode override (falls back to --core-mode)"),
         )
     _add_device_tracking_args(parser)
     args = parser.parse_args(argv)
@@ -990,21 +1006,23 @@ def _resolve_output_dir(args: argparse.Namespace) -> Path:
 
 def _build_run_targets(args: argparse.Namespace) -> list[tuple[ASRBenchmarkTarget, str | None, str, str]]:
     targets: list[ASRBenchmarkTarget]
+    include_private = bool(getattr(args, "include_private", False))
     if args.mxq_dir:
-        available_model_ids = _list_default_asr_models()
+        available_model_ids = _list_default_asr_models(include_private=include_private)
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
         if args.models or args.original_models or args.all or args.revision or args.mxq_path:
-            print(
-                "Note: --mxq-dir is set, so --model/--original-models/"
-                "--all/--revision/--mxq-path are ignored."
-            )
+            print("Note: --mxq-dir is set, so --model/--original-models/--all/--revision/--mxq-path are ignored.")
         targets = _iter_asr_targets_from_mxq_dir(mxq_dir, available_model_ids)
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
-        model_ids = [str(item) for item in args.models] if args.models else _list_default_asr_models()
+        model_ids = (
+            [str(item) for item in args.models]
+            if args.models
+            else _list_default_asr_models(include_private=include_private)
+        )
         if args.original_models:
             original_count = len(model_ids)
             model_ids = _resolve_original_model_ids(model_ids)

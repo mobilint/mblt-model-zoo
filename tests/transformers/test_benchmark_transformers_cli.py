@@ -342,7 +342,11 @@ def test_vlm_target_filtering_uses_image_text_task(monkeypatch, tmp_path) -> Non
         ]
     )
 
-    monkeypatch.setattr(vlm_bench, "list_models", lambda tasks: {"image-text-to-text": ["mobilint/vlm-a"]})
+    monkeypatch.setattr(
+        vlm_bench,
+        "list_default_model_ids",
+        lambda task, *, include_private=False: ["mobilint/vlm-a"],
+    )
 
     def _fake_filter(raw_targets, *, batch_mode: str, task: str):
         assert batch_mode == "batch"
@@ -673,9 +677,7 @@ def test_vlm_benchmark_sweep_populates_llm_tps_per_w(monkeypatch) -> None:
     assert [row["prefill_tps_per_w"] for row in llm_rows] == [pytest.approx(llm_run["prefill_tps_per_w"])] * len(
         llm_rows
     )
-    assert [row["decode_tps_per_w"] for row in llm_rows] == [pytest.approx(llm_run["decode_tps_per_w"])] * len(
-        llm_rows
-    )
+    assert [row["decode_tps_per_w"] for row in llm_rows] == [pytest.approx(llm_run["decode_tps_per_w"])] * len(llm_rows)
 
 
 def test_tps_cli_vlm_sweep_writes_phase_tps_per_w(monkeypatch, tmp_path) -> None:
@@ -1094,3 +1096,50 @@ def test_vlm_aggregate_llm_runs_tolerates_missing_latency_arrays() -> None:
     assert result.decode_sweep.tps_values == [30.0]
     assert result.prefill_sweep.avg_total_token_latency_values == [None]
     assert len(rows) == 2
+
+
+def test_text_benchmark_include_private_flag_defaults_false_and_forwards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify --include-private threads through text-generation default target resolution."""
+    observed: list[bool] = []
+
+    def fake_list_default_model_ids(task, *, include_private=False):  # type: ignore[no-untyped-def]
+        observed.append(bool(include_private))
+        return ["mobilint/text-a"]
+
+    monkeypatch.setattr(text_bench, "list_default_model_ids", fake_list_default_model_ids)
+
+    default_args = text_bench._build_arg_parser().parse_args(["measure"])
+    assert default_args.include_private is False
+    text_bench._collect_text_run_targets(default_args)
+
+    private_args = text_bench._build_arg_parser().parse_args(["measure", "--include-private"])
+    assert private_args.include_private is True
+    text_bench._collect_text_run_targets(private_args)
+
+    assert observed == [False, True]
+
+
+def test_vlm_benchmark_include_private_flag_defaults_false_and_forwards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify --include-private threads through image-text-to-text default target resolution."""
+    observed: list[bool] = []
+
+    def fake_list_default_model_ids(task, *, include_private=False):  # type: ignore[no-untyped-def]
+        observed.append(bool(include_private))
+        return ["mobilint/vlm-a"]
+
+    monkeypatch.setattr(vlm_bench, "list_default_model_ids", fake_list_default_model_ids)
+    monkeypatch.setattr(vlm_bench, "_filter_text_targets_by_batch_mode", lambda targets, **_: [])
+
+    default_args = vlm_bench._build_arg_parser().parse_args(["measure"])
+    assert default_args.include_private is False
+    vlm_bench._collect_vlm_run_targets(default_args)
+
+    private_args = vlm_bench._build_arg_parser().parse_args(["measure", "--include-private"])
+    assert private_args.include_private is True
+    vlm_bench._collect_vlm_run_targets(private_args)
+
+    assert observed == [False, True]
