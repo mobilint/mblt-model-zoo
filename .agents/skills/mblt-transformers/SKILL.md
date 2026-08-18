@@ -27,18 +27,24 @@ description: >-
   Scalar pins one device, a list expands to multiple devices. Read the canonical target lists
   (`_target_cores_serialized` / `_target_clusters_serialized`, or the public accessors) at
   dispatch time so multi-device backends behave correctly.
-- Backend target topology is stored as a single frozen `NPUTargetSpec` on
-  `MobilintNPUBackend._spec` (`dev_no`, `core_mode`, `cores`, `clusters`). The four per-field
-  setters each atomically replace `_spec` via `NPUTargetSpec._with`, which forwards to
-  `NPUTargetSpec.from_kwargs` for full canonical renormalization. HF `from_pretrained` cannot
-  observe a partial-state moment between its per-field `model_kwargs` `setattr` calls, and no
-  reconciliation pass runs before `create()`. Target-only override syncs `dev_no` to the target
-  device set; `dev_no`-only override clears stale targets and re-expands sugar; both overridden
-  → the device-set consistency check inside `from_kwargs` catches genuine mismatches.
+- Backend target topology accumulates raw overrides in `NPUTargetSpecPending` on
+  `MobilintNPUBackend._pending`; the lazy `_spec` property calls `pending.finalize()` once per
+  epoch and caches on `self._finalized`. After each finalize, `_pending` is promoted to a fresh
+  baseline via `NPUTargetSpecPending.from_baseline` (all intent flags cleared) so the next HF
+  setter chain or standalone runtime mutation gets an isolated intent slate. The per-field
+  setters (`dev_no`, `core_mode`, `target_cores`, `target_clusters`) only mutate `_pending` and
+  invalidate `_finalized`; setter order within one chain does not affect the resolved canonical
+  spec. `finalize_pending()` runs one ordered pipeline (legacy migration → sibling drop → grain
+  unification → off-mode drop → device-set consistency → `global8` coverage) once every
+  accumulated override is visible. Target-only override syncs `dev_no` to the target device
+  set at finalize; `dev_no`-only override clears stale targets and re-expands sugar; both
+  overridden → the device-set consistency check surfaces mismatches on the next canonical read
+  (not on the setter). `NPUTargetSpec.from_kwargs` remains the config-layer (JSON load) entry
+  point where eager normalization is unambiguous.
 - Canonical NPU target wire form is fully-qualified: `target_cores` entries are `"d:c:k"`
   strings and `target_clusters` entries are `"d:c"` strings. Legacy 2-part `c:k` cores, bare
   integer clusters, and `qbruntime.CoreId` / `Cluster` objects are silently migrated to the
-  canonical form by `NPUTargetSpec.from_kwargs` (and its `_normalize_npu_target_kwargs` config-
+  canonical form inside `finalize_pending()` (and its `_normalize_npu_target_kwargs` config-
   layer wrapper) using `dev_no` as the fallback prefix. `single` mode unfolds `target_clusters`
   into every cluster core; `multi` / `global4` / `global8` fold `target_cores` up to their
   `"d:c"` cluster prefixes and warn when a partial cluster is rounded up. `global8` requires
