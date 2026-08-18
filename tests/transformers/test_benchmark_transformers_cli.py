@@ -1939,6 +1939,134 @@ def test_text_rebuild_sweep_keeps_success_for_unrelated_target(tmp_path) -> None
     assert ("sweep-x", "") not in labels_and_reason
 
 
+_MEASURE_CHART_FILENAMES = (
+    "measure_prefill_tps.png",
+    "measure_prefill_tps_per_w.png",
+    "measure_decode_tps.png",
+    "measure_decode_tps_per_w.png",
+    "measure_avg_power_w.png",
+    "measure_avg_temperature_c.png",
+    "measure_avg_utilization_pct.png",
+    "measure_avg_memory_used_mb.png",
+    "measure_total_energy_j.png",
+)
+
+
+_SWEEP_CHART_FILENAMES = (
+    "prefill_tps.png",
+    "prefill_tps_per_w.png",
+    "decode_tps.png",
+    "decode_tps_per_w.png",
+    "avg_power_w.png",
+    "avg_temperature_c.png",
+    "avg_utilization_pct.png",
+    "avg_memory_used_mb.png",
+    "total_energy_j.png",
+)
+
+
+def test_text_rebuild_measure_overwrites_stale_markdown_when_all_superseded(tmp_path) -> None:
+    """Stale success markdown must be overwritten when every target is superseded by a newer skip.
+
+    Follow-up to PR #109 review: after the timestamp reconciler returns
+    ``skips=[X_skip]`` and ``successes=[]``, ``_write_measure_markdown`` must
+    still overwrite the on-disk file so the stale success table left by a
+    prior rebuild does not linger above the freshly appended skip section.
+    """
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
+    combined_md = tmp_path / "combined_measure.md"
+    combined_md.write_text(
+        "| model | prefill_tps_mean |\n| --- | ---: |\n| model-x | 10.0 |\n",
+        encoding="utf-8",
+    )
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+
+    content = combined_md.read_text(encoding="utf-8")
+    assert "_No successful measure results._" in content
+    assert "| model-x | 10.0 |" not in content
+    assert "## Skipped Targets" in content
+    assert "cuda_oom" in content
+
+
+def test_text_rebuild_measure_removes_stale_measure_png_when_all_superseded(tmp_path) -> None:
+    """Stale measure PNGs must be removed when every target is superseded by a newer skip."""
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
+    for filename in _MEASURE_CHART_FILENAMES:
+        (tmp_path / filename).write_bytes(b"stale-png")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+
+    for filename in _MEASURE_CHART_FILENAMES:
+        assert not (tmp_path / filename).exists(), f"stale PNG {filename} should be removed"
+
+
+def test_text_rebuild_measure_writes_success_markdown_when_only_success(tmp_path) -> None:
+    """Regression: on a clean success-only rebuild, the markdown carries the real table."""
+    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+
+    text_bench._rebuild_measure_outputs(tmp_path)
+
+    content = (tmp_path / "combined_measure.md").read_text(encoding="utf-8")
+    assert "_No successful measure results._" not in content
+    assert "model-x" in content
+    assert "prefill_tps_mean" in content
+
+
+def test_text_rebuild_sweep_overwrites_stale_markdown_when_all_superseded(tmp_path) -> None:
+    """Sweep sibling of the measure stale-markdown overwrite guard."""
+    _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
+    _backdate(tmp_path / "sweep-x.json")
+    combined_md = tmp_path / "combined.md"
+    combined_md.write_text(
+        "| model | prefill_tps_8 |\n| --- | ---: |\n| sweep-x | 10.0 |\n",
+        encoding="utf-8",
+    )
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc")],
+        "sweep",
+    )
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    content = combined_md.read_text(encoding="utf-8")
+    assert "_No successful sweep results._" in content
+    assert "| sweep-x | 10.0 |" not in content
+    assert "## Skipped Targets" in content
+    assert "npu_alloc" in content
+
+
+def test_text_rebuild_sweep_removes_stale_sweep_png_when_all_superseded(tmp_path) -> None:
+    """Sweep sibling of the measure stale-PNG cleanup guard."""
+    _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
+    _backdate(tmp_path / "sweep-x.json")
+    for filename in _SWEEP_CHART_FILENAMES:
+        (tmp_path / filename).write_bytes(b"stale-png")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc")],
+        "sweep",
+    )
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    for filename in _SWEEP_CHART_FILENAMES:
+        assert not (tmp_path / filename).exists(), f"stale PNG {filename} should be removed"
+
+
 def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
     """Verify old text sweep JSON without latency arrays still produces rows."""
     payload = {

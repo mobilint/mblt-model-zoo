@@ -1331,7 +1331,12 @@ def _write_single_combined_markdown(
     *,
     skipped_records: Sequence[dict[str, Any]] | None = None,
 ) -> None:
-    _write_token_combined_markdown(path, tps_rows, device_rows)
+    if tps_rows:
+        _write_token_combined_markdown(path, tps_rows, device_rows)
+    else:
+        # Overwrite any stale success table left by a prior rebuild; the skip
+        # section (if any) is appended below.
+        Path(path).write_text("_No successful sweep results._\n", encoding="utf-8")
     if skipped_records:
         _append_skipped_markdown_section(path, skipped_records)
 
@@ -1518,6 +1523,21 @@ def _rebuild_combined_outputs(
                 x_label=x_label,
                 output_path=output_dir / filename,
             )
+    else:
+        # No successful sweep data; remove stale PNGs from a prior rebuild so
+        # the on-disk view matches the reconciled state.
+        for filename in (
+            "prefill_tps.png",
+            "prefill_tps_per_w.png",
+            "decode_tps.png",
+            "decode_tps_per_w.png",
+            "avg_power_w.png",
+            "avg_temperature_c.png",
+            "avg_utilization_pct.png",
+            "avg_memory_used_mb.png",
+            "total_energy_j.png",
+        ):
+            (output_dir / filename).unlink(missing_ok=True)
 
     if combined_device_rows:
         device_csv = os.path.join(output_dir, "combined_device.csv")
@@ -2532,6 +2552,9 @@ def _collect_measure_rows(payloads: Sequence[dict[str, Any]]) -> list[dict[str, 
 def _write_measure_markdown(path: Path, rows: Sequence[dict[str, Any]]) -> None:
     """Write combined measure rows as a Markdown table."""
     if not rows:
+        # Overwrite any stale success table left by a prior rebuild; the
+        # caller appends the skip section afterwards when applicable.
+        path.write_text("_No successful measure results._\n", encoding="utf-8")
         return
     headers = list(rows[0].keys())
     lines = ["| " + " | ".join(headers) + " |\n", "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n"]
@@ -2542,11 +2565,6 @@ def _write_measure_markdown(path: Path, rows: Sequence[dict[str, Any]]) -> None:
 
 def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
     """Create combined measure bar charts."""
-    if not rows:
-        return
-    import matplotlib.pyplot as plt
-
-    models = [str(row.get("model")) for row in rows]
     specs = [
         ("measure_prefill_tps.png", "prefill_tps_mean", "Prefill Tokens Per Second", "Tokens Per Second"),
         (
@@ -2568,6 +2586,15 @@ def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> No
         ("measure_avg_memory_used_mb.png", "avg_memory_used_mb", "Memory Used Megabytes", "Memory Used (Megabytes)"),
         ("measure_total_energy_j.png", "total_energy_j", "Total Energy", "Energy (Joules)"),
     ]
+    if not rows:
+        # No successful data to plot; remove stale PNGs from a prior rebuild
+        # so the on-disk view matches the reconciled state.
+        for filename, *_ in specs:
+            (output_dir / filename).unlink(missing_ok=True)
+        return
+    import matplotlib.pyplot as plt
+
+    models = [str(row.get("model")) for row in rows]
     for filename, key, title, xlabel in specs:
         values = [float(row.get(key) or 0.0) for row in rows]
         height = max(4.0, 0.35 * len(models) + 1.5)
