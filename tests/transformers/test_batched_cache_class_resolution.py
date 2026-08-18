@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     _build_batched_mobilint_cache,
     _resolve_mobilint_cache_class,
+    _resolve_mobilint_cache_kwargs,
 )
 from mblt_model_zoo.hf_transformers.utils.cache_utils import (
     MobilintCache,
@@ -37,9 +38,27 @@ class _PlainMultiSlotModel:
 class _DeepStackMultiSlotModel(_PlainMultiSlotModel):
     """Qwen3-VL-style stub that declares :class:`MobilintDeepStackCache`."""
 
+    def __init__(
+        self,
+        mxq_models: tuple[object, ...],
+        k_per_model: int,
+        *,
+        num_deepstack_layers: int = 5,
+        hidden_size: int = 4096,
+    ) -> None:
+        super().__init__(mxq_models=mxq_models, k_per_model=k_per_model)
+        self._num_deepstack_layers = num_deepstack_layers
+        self._hidden_size = hidden_size
+
     @classmethod
     def get_mobilint_cache_cls(cls) -> type[MobilintDeepStackCache]:
         return MobilintDeepStackCache
+
+    def get_mobilint_cache_kwargs(self) -> dict[str, object]:
+        return {
+            "num_deepstack_layers": self._num_deepstack_layers,
+            "hidden_size": self._hidden_size,
+        }
 
 
 def test_resolve_mobilint_cache_class_defaults_to_plain_cache() -> None:
@@ -115,7 +134,12 @@ def test_build_batched_mobilint_cache_explicit_cache_cls_overrides_model() -> No
 
     Preserves the escape hatch for callers that need to build a specific
     cache subclass regardless of the model's default (e.g. tests exercising
-    the plain :class:`MobilintCache` path against a Qwen3-VL stub).
+    the plain :class:`MobilintCache` path against a Qwen3-VL stub). Explicit
+    ``cache_cls`` also opts out of the auto-resolved ``cache_kwargs``: the
+    override may target a class whose ``__init__`` does not accept the
+    model's declared extras (plain :class:`MobilintCache` rejects
+    ``num_deepstack_layers``), so the auto-resolver defers instead of
+    forwarding kwargs the constructor cannot consume.
     """
     slot_a, slot_b = object(), object()
     model = _DeepStackMultiSlotModel(mxq_models=(slot_a, slot_b), k_per_model=1)
@@ -123,3 +147,91 @@ def test_build_batched_mobilint_cache_explicit_cache_cls_overrides_model() -> No
     cache = _build_batched_mobilint_cache(model, batch_size=2, cache_cls=MobilintCache)
 
     assert type(cache) is MobilintCache
+
+
+def test_resolve_mobilint_cache_kwargs_defaults_to_empty_dict() -> None:
+    """A model without ``get_mobilint_cache_kwargs`` resolves to no extra kwargs."""
+    model = _PlainMultiSlotModel(mxq_models=(object(),), k_per_model=1)
+
+    assert _resolve_mobilint_cache_kwargs(model) == {}
+
+
+def test_resolve_mobilint_cache_kwargs_reads_model_method() -> None:
+    """A model overriding ``get_mobilint_cache_kwargs`` steers the resolver."""
+    model = _DeepStackMultiSlotModel(
+        mxq_models=(object(),),
+        k_per_model=1,
+        num_deepstack_layers=5,
+        hidden_size=4096,
+    )
+
+    assert _resolve_mobilint_cache_kwargs(model) == {
+        "num_deepstack_layers": 5,
+        "hidden_size": 4096,
+    }
+
+
+def test_resolve_mobilint_cache_kwargs_rejects_non_dict_override() -> None:
+    """A model exposing a non-dict override falls back to an empty dict.
+
+    Guards the resolver against a stray override that returns something the
+    downstream ``**cache_kwargs`` splat cannot consume; the fallback keeps the
+    benchmark path from crashing on model bugs and forces the guard to be
+    obvious in code review rather than a runtime ``TypeError``.
+    """
+
+    class _Rogue:
+        def get_mobilint_cache_kwargs(self) -> object:
+            return ("num_deepstack_layers", 5)
+
+    assert _resolve_mobilint_cache_kwargs(_Rogue()) == {}
+
+
+def test_build_batched_mobilint_cache_forwards_declared_cache_kwargs() -> None:
+    """Qwen3-VL-style stubs receive their declared deepstack kwargs automatically.
+
+    Regression for PR #109 (follow-up to task 0e9dd / commit b59213a): the
+    multi-slot builder routed the class correctly but constructed
+    :class:`MobilintDeepStackCache` with the zero defaults for
+    ``num_deepstack_layers`` / ``hidden_size``, so the cache emitted a
+    ``(0, chunk_len, 0)`` deepstack tensor that the text MXQ hard-rejected.
+    """
+    slot_a, slot_b = object(), object()
+    model = _DeepStackMultiSlotModel(
+        mxq_models=(slot_a, slot_b),
+        k_per_model=1,
+        num_deepstack_layers=5,
+        hidden_size=4096,
+    )
+
+    cache = _build_batched_mobilint_cache(model, batch_size=2)
+
+    assert isinstance(cache, MobilintDeepStackCache)
+    assert cache.num_deepstack_layers == 5
+    assert cache.hidden_size == 4096
+
+
+def test_build_batched_mobilint_cache_explicit_cache_kwargs_overrides_model() -> None:
+    """An explicit ``cache_kwargs`` argument wins over the model's declared kwargs.
+
+    Preserves the escape hatch for callers that need to build a specific
+    cache with different side-input dimensions than the model's default
+    (e.g. tests exercising the deepstack shape guard directly).
+    """
+    slot_a, slot_b = object(), object()
+    model = _DeepStackMultiSlotModel(
+        mxq_models=(slot_a, slot_b),
+        k_per_model=1,
+        num_deepstack_layers=5,
+        hidden_size=4096,
+    )
+
+    cache = _build_batched_mobilint_cache(
+        model,
+        batch_size=2,
+        cache_kwargs={"num_deepstack_layers": 2, "hidden_size": 128},
+    )
+
+    assert isinstance(cache, MobilintDeepStackCache)
+    assert cache.num_deepstack_layers == 2
+    assert cache.hidden_size == 128

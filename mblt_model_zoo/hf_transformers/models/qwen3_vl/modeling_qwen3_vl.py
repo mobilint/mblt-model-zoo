@@ -777,6 +777,22 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         """
         return MobilintDeepStackCache
 
+    def get_mobilint_cache_kwargs(self) -> dict[str, Any]:
+        """Forward the deepstack side-input shape to :class:`MobilintDeepStackCache`.
+
+        :class:`MobilintDeepStackCache` defaults ``num_deepstack_layers`` and
+        ``hidden_size`` to ``0`` so its ``__init__`` stays compatible with
+        callers that build a KV-only cache; the text MXQ, however, expects a
+        deepstack decoder input shaped ``(num_deepstack_layers, chunk_len,
+        hidden_size)`` on every invocation. This override supplies the same
+        values the model's own :meth:`_get_cache` uses so the multi-slot
+        benchmark builder never constructs a zero-shaped deepstack cache.
+        """
+        return {
+            "num_deepstack_layers": self.num_deepstack_layers,
+            "hidden_size": int(self.config.hidden_size),
+        }
+
     def _get_cache(
         self,
         cache_implementation: str,
@@ -810,8 +826,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 self,
                 configured_batch_size,
                 cache_cls=MobilintDeepStackCache,
-                num_deepstack_layers=self.num_deepstack_layers,
-                hidden_size=int(self.config.hidden_size),
+                **self.get_mobilint_cache_kwargs(),
             )
         else:
             self._cache.reset()

@@ -382,11 +382,31 @@ def _resolve_mobilint_cache_class(model: object) -> type[MobilintCache]:
     return MobilintCache
 
 
+def _resolve_mobilint_cache_kwargs(model: object) -> dict[str, object]:
+    """Return the extra constructor kwargs ``model`` declares for its cache class.
+
+    Reads :meth:`MobilintModelMixin.get_mobilint_cache_kwargs` when the model
+    exposes it so a specialized cache subclass (e.g.
+    :class:`MobilintDeepStackCache`, whose ``__init__`` requires
+    ``num_deepstack_layers`` and ``hidden_size`` to allocate the deepstack
+    side-input tensor with the right shape) is constructed with the same
+    kwargs the model's own ``_get_cache`` supplies. Falls back to ``{}`` for
+    models that do not override the method and for lightweight test doubles.
+    """
+    resolver = getattr(model, "get_mobilint_cache_kwargs", None)
+    if callable(resolver):
+        resolved = resolver()
+        if isinstance(resolved, dict):
+            return resolved
+    return {}
+
+
 def _build_batched_mobilint_cache(
     model: object,
     batch_size: int,
     *,
     cache_cls: type[MobilintCache] | None = None,
+    cache_kwargs: dict[str, object] | None = None,
 ) -> MobilintCache:
     """Build a ``MobilintCache`` sized to route ``batch_size`` rows across every backend slot.
 
@@ -395,10 +415,26 @@ def _build_batched_mobilint_cache(
     is not supplied the class is resolved from ``model`` via
     :func:`_resolve_mobilint_cache_class` so a Qwen3-VL text decoder (which
     hard-fails on plain :class:`MobilintCache`) receives its declared
-    :class:`MobilintDeepStackCache` subclass automatically.
+    :class:`MobilintDeepStackCache` subclass automatically. Extra constructor
+    kwargs follow the same defaults-with-escape-hatch rule: with neither
+    ``cache_cls`` nor ``cache_kwargs`` supplied the kwargs are resolved via
+    :func:`_resolve_mobilint_cache_kwargs` so the specialized cache is
+    instantiated with the same side-input dimensions the model's own
+    ``_get_cache`` uses (deepstack layers, hidden size, ...), rather than the
+    zero-shaped defaults the cache class exposes for signature compatibility.
+    An explicit ``cache_cls`` opts out of the auto-resolved kwargs (they may
+    not match the overridden class's constructor); pass ``cache_kwargs``
+    explicitly alongside ``cache_cls`` when the override needs specific
+    side-input dimensions.
     """
     resolved_cls = cache_cls if cache_cls is not None else _resolve_mobilint_cache_class(model)
-    return build_mobilint_cache_from_model(model, batch_size, cache_cls=resolved_cls)
+    if cache_kwargs is not None:
+        resolved_kwargs: dict[str, object] = cache_kwargs
+    elif cache_cls is None:
+        resolved_kwargs = _resolve_mobilint_cache_kwargs(model)
+    else:
+        resolved_kwargs = {}
+    return build_mobilint_cache_from_model(model, batch_size, cache_cls=resolved_cls, **resolved_kwargs)
 
 
 def _is_eagle3_model(model: object) -> bool:

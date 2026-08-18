@@ -183,6 +183,23 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         """
         return MobilintCache
 
+    def get_mobilint_cache_kwargs(self) -> dict[str, Any]:
+        """Return the extra constructor kwargs the declared cache class requires.
+
+        Companion to :meth:`get_mobilint_cache_cls`: the classmethod picks the
+        cache subclass, and this method supplies the additional keyword
+        arguments its ``__init__`` needs beyond the ``mxq_models`` /
+        ``per_model_batch`` (or ``batch_size``) arguments the multi-slot cache
+        builder already supplies. Returns ``{}`` by default so plain
+        :class:`MobilintCache` callers keep the existing signature. Models
+        whose declared cache carries dense side inputs (e.g.
+        :class:`MobilintDeepStackCache` requires ``num_deepstack_layers`` and
+        ``hidden_size``) override this to forward the same values the model's
+        own ``_get_cache`` uses, so multi-slot benchmark builders do not
+        instantiate the specialized cache with zero-shaped side tensors.
+        """
+        return {}
+
     def reset_npu_timing(self) -> None:
         """Reset aggregate NPU timing counters used by TPS benchmarks."""
         self.npu_timing = {
