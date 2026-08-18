@@ -219,7 +219,9 @@ def _make_model_config(
     return mc
 
 
-def _allocate_cores(core_mode: str, n: int, partition: bool) -> list[tuple[Optional[list["CoreId"]], Optional[list["Cluster"]]]]:
+def _allocate_cores(
+    core_mode: str, n: int, partition: bool
+) -> list[tuple[Optional[list["CoreId"]], Optional[list["Cluster"]]]]:
     """Return per-``Model`` (single_cores, clusters) tuples.
 
     Args:
@@ -248,11 +250,7 @@ def _allocate_cores(core_mode: str, n: int, partition: bool) -> list[tuple[Optio
         return [(None, None)] * n
     if n > 8:
         raise SystemExit("--core-mode single with --partition-cores supports at most n_models=8.")
-    core_seq = [
-        CoreId(_CLUSTER_MAP[cl], _CORE_MAP[co])
-        for cl in (0, 1)
-        for co in (0, 1, 2, 3)
-    ]
+    core_seq = [CoreId(_CLUSTER_MAP[cl], _CORE_MAP[co]) for cl in (0, 1) for co in (0, 1, 2, 3)]
     return [(list([core_seq[i]]), None) for i in range(n)]
 
 
@@ -331,7 +329,24 @@ def _run_for_n(
         for slot_idx, (single_cores, clusters) in enumerate(per_slot):
             mc = _make_model_config(args.core_mode, single_cores, clusters)
             mm = Model(args.mxq_path, mc)
-            mm.launch(acc)
+            try:
+                mm.launch(acc)
+            except BaseException:
+                # ``mm`` was constructed (allocating LPDDR / runtime state) but
+                # not yet appended to ``models``, so the outer ``finally``
+                # branch's ``_dispose_all(models)`` cannot release it. ``main``
+                # keeps probing larger ``N`` on the same device even after a
+                # per-``N`` failure, so a leaked handle here causes cascading
+                # BadAlloc that corrupts the reported saturation boundary.
+                # ``BaseException`` also releases on ``KeyboardInterrupt``.
+                try:
+                    mm.dispose()
+                except Exception as _dispose_exc:  # noqa: BLE001 — release path must not raise
+                    print(
+                        f"warning: dispose failed on launch-failure path: {_dispose_exc}",
+                        file=sys.stderr,
+                    )
+                raise
             models.append(mm)
 
         inputs_per_model: list[list[np.ndarray]] = []
@@ -352,9 +367,8 @@ def _run_for_n(
             if args.output_parity and n > 1:
                 # Recompute deterministically: identical seeds per slot -> compare argmax.
                 ref_seed = int(args.seed)
-                same_seed_inputs = _build_input(
-                    models[0], int(args.seq_len), np.random.default_rng(ref_seed)
-                )
+                same_seed_inputs = _build_input(models[0], int(args.seq_len), np.random.default_rng(ref_seed))
+
                 # Run every model on the SAME input to check handle-level parity.
                 def _one(idx: int) -> list[np.ndarray]:
                     out = models[idx].infer(same_seed_inputs)
@@ -363,11 +377,7 @@ def _run_for_n(
                 with ThreadPoolExecutor(max_workers=n) as pool:
                     parity_outputs = list(pool.map(_one, range(n)))
                 ref_argmax = _argmax_of(parity_outputs[0])
-                matches = sum(
-                    1
-                    for i in range(1, n)
-                    if _argmax_of(parity_outputs[i]) == ref_argmax
-                )
+                matches = sum(1 for i in range(1, n) if _argmax_of(parity_outputs[i]) == ref_argmax)
                 parity_rates.append(matches / max(1, n - 1))
 
         wall_stats = _summarize(wall_times)
@@ -384,9 +394,7 @@ def _run_for_n(
             "n_batches": int(args.repeat),
             "throughput_infers_per_s": (float(n) / wall_stats["median"]) if wall_stats["median"] > 0 else 0.0,
             "speedup_vs_n1": speedup,
-            "parity_median": (
-                float(statistics.median(parity_rates)) if parity_rates else None
-            ),
+            "parity_median": (float(statistics.median(parity_rates)) if parity_rates else None),
         }
     finally:
         _dispose_all(models)

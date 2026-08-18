@@ -68,12 +68,46 @@ class _FakeModel:
             raise _QBRUNTIME_ERROR("simulated BadAlloc")
         _FakeModel._created_ok += 1
         self.mxq_path = mxq_path
+        self.disposed = False
 
     def launch(self, acc: _FakeAccelerator) -> None:
         """No-op launch; allocation happens in ``__init__`` in this fake."""
 
     def dispose(self) -> None:
-        """No-op dispose; the real runtime releases HBM here."""
+        """Mark this fake handle as disposed so tests can assert release order."""
+        self.disposed = True
+
+
+class _LaunchFailModel:
+    """Fake ``qbruntime.Model`` whose ``launch`` raises after a set of successes.
+
+    ``__init__`` always succeeds (simulating LPDDR allocation during
+    construction); ``launch`` succeeds ``launch_ok_before_fail`` times, then
+    raises ``QbRuntimeError`` so ``_launch_up_to`` exercises the leak-fix path.
+    """
+
+    instances: list["_LaunchFailModel"] = []
+    launch_ok_before_fail: int = 0
+    _launched_ok: int = 0
+
+    @classmethod
+    def _reset(cls, launch_ok_before_fail: int) -> None:
+        cls.instances = []
+        cls.launch_ok_before_fail = int(launch_ok_before_fail)
+        cls._launched_ok = 0
+
+    def __init__(self, mxq_path: str, model_config: Any) -> None:
+        self.mxq_path = mxq_path
+        self.disposed = False
+        _LaunchFailModel.instances.append(self)
+
+    def launch(self, acc: _FakeAccelerator) -> None:
+        if _LaunchFailModel._launched_ok >= _LaunchFailModel.launch_ok_before_fail:
+            raise _QBRUNTIME_ERROR("simulated launch BadAlloc")
+        _LaunchFailModel._launched_ok += 1
+
+    def dispose(self) -> None:
+        self.disposed = True
 
 
 @pytest.fixture
@@ -146,3 +180,66 @@ def test_capacity_exceeds_schedule_leaves_no_failure(fake_probe: ModuleType) -> 
     assert all(r["ok"] for r in report["rows"])
     assert [r["n_models"] for r in report["rows"]] == [1, 2, 4, 8]
     assert [r["n_launched"] for r in report["rows"]] == [1, 2, 4, 8]
+
+
+def test_launch_failure_disposes_unappended_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``mm.launch`` raises, ``_launch_up_to`` must dispose the orphan handle.
+
+    Regression guard: without the fix, ``mm`` is constructed (allocating LPDDR)
+    but never appended to ``models``, so the caller's ``_dispose_all`` cannot
+    release it and subsequent probing rounds see the leaked handle as a
+    cascading BadAlloc.
+    """
+    _LaunchFailModel._reset(launch_ok_before_fail=2)
+    monkeypatch.setattr(probe, "Model", _LaunchFailModel)
+    monkeypatch.setattr(probe, "Accelerator", _FakeAccelerator)
+
+    models: list[Any] = []
+    ok, err = probe._launch_up_to(
+        acc=_FakeAccelerator(dev_no=0),
+        models=models,
+        target_n=4,
+        mxq_path="/dev/null/fake.mxq",
+        core_mode="single",
+    )
+
+    assert ok is False
+    assert err is not None and "QbRuntimeError" in err
+    # Two handles launched successfully and remain the caller's responsibility.
+    assert len(models) == 2
+    assert all(not m.disposed for m in models)
+    # The third handle was constructed but its launch failed — it must be
+    # disposed on the spot and NOT leak into ``models``.
+    assert len(_LaunchFailModel.instances) == 3
+    orphan = _LaunchFailModel.instances[-1]
+    assert orphan not in models
+    assert orphan.disposed is True
+
+
+def test_construct_failure_does_not_touch_dispose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``Model(...)`` itself raises, there is no handle to dispose.
+
+    ``_launch_up_to`` must surface the error unchanged and leave ``models`` at
+    its previously successful length.
+    """
+    _FakeModel._reset(capacity=1)
+    monkeypatch.setattr(probe, "Model", _FakeModel)
+    monkeypatch.setattr(probe, "Accelerator", _FakeAccelerator)
+
+    models: list[Any] = []
+    ok, err = probe._launch_up_to(
+        acc=_FakeAccelerator(dev_no=0),
+        models=models,
+        target_n=2,
+        mxq_path="/dev/null/fake.mxq",
+        core_mode="single",
+    )
+
+    assert ok is False
+    assert err is not None and "QbRuntimeError" in err
+    assert len(models) == 1
+    assert models[0].disposed is False

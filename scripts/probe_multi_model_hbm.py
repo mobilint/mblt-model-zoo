@@ -221,22 +221,38 @@ def _launch_up_to(
         mc = _make_model_config(core_mode)
         try:
             mm = Model(mxq_path, mc)
-            mm.launch(acc)
         except QbRuntimeError as e:
             return False, f"QbRuntimeError: {e}"
         except Exception as e:  # noqa: BLE001 — surface class + message for the report
+            return False, f"{type(e).__name__}: {e}"
+        try:
+            mm.launch(acc)
+        except QbRuntimeError as e:
+            # ``mm`` allocated LPDDR / runtime state during construction but is
+            # not yet appended to ``models``, so the caller's ``_dispose_all``
+            # would miss it. Sweep continues to the next device, so a leaked
+            # handle here would poison subsequent measurements.
+            _dispose_one(mm)
+            return False, f"QbRuntimeError: {e}"
+        except Exception as e:  # noqa: BLE001 — surface class + message for the report
+            _dispose_one(mm)
             return False, f"{type(e).__name__}: {e}"
         models.append(mm)
     return True, None
 
 
+def _dispose_one(mm: "Model") -> None:
+    """Best-effort ``dispose()`` of a single model; swallow release-path failures."""
+    try:
+        mm.dispose()
+    except Exception as e:  # noqa: BLE001 — release path must not raise
+        print(f"warning: dispose failed: {e}", file=sys.stderr)
+
+
 def _dispose_all(models: list["Model"]) -> None:
     """Best-effort ``dispose()`` of every model; swallow individual failures."""
     for mm in models:
-        try:
-            mm.dispose()
-        except Exception as e:  # noqa: BLE001 — release path must not raise
-            print(f"warning: dispose failed: {e}", file=sys.stderr)
+        _dispose_one(mm)
     models.clear()
 
 
