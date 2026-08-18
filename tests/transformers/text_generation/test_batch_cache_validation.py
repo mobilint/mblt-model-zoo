@@ -41,13 +41,16 @@ class _FakeMxqModel:
 
 
 class _FakeBackend:
-    def __init__(self, mxq_model: _FakeMxqModel):
+    def __init__(self, mxq_model: _FakeMxqModel, k_per_model: int = 2):
         self.mxq_model = mxq_model
         # ``_llm_forward_batch`` now consults ``npu_backend.mxq_models``
         # directly so per-group dispatch can address specific Model slots.
-        # A single-Model fake still exercises the fast path.
+        # A single-Model fake still exercises the fast path. ``k_per_model``
+        # defaults to ``2`` so the ``batch=2`` cacheless dispatch below stays
+        # within ``N*K`` after ``MultiSlotDispatcher.dispatch`` grew a capacity
+        # guard for cacheless requests.
         self.mxq_models = [mxq_model]
-        self.k_per_model = 1
+        self.k_per_model = int(k_per_model)
         self._output_layout_cached = None
         self._dispatcher = None
 

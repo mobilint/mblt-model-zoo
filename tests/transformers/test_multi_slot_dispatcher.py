@@ -375,6 +375,132 @@ def test_dispatch_reoverrides_stale_n_tokens_cache_from_runtime_observation() ->
 
 
 # ---------------------------------------------------------------------------
+# Cacheless capacity guard
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_cacheless_within_capacity_n1_k1_single_row() -> None:
+    """Regression: n_slots=1, k_per_model=1, cache_ids=[0] must dispatch cleanly."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    backend = _MockBackend([m0], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0],
+        sequence_lengths=[1],
+        cache_sizes=[0],
+        inputs_embeds_chunks=[_make_embed(1)],
+        max_sequence_length=1,
+    )
+    assert merged.shape == (1, 3)
+
+
+def test_dispatch_cacheless_over_capacity_n1_k1_raises_value_error() -> None:
+    """n_slots=1, k_per_model=1, cache_ids=[0, 1]: two items exceeds N*K=1."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    backend = _MockBackend([m0], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    with pytest.raises(ValueError) as excinfo:
+        dispatcher.dispatch(
+            cache_ids=[0, 1],
+            sequence_lengths=[1, 1],
+            cache_sizes=[0, 0],
+            inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+            max_sequence_length=1,
+        )
+
+    msg = str(excinfo.value)
+    assert "Cacheless batched dispatch exceeds backend capacity" in msg
+    assert "n_items=2" in msg
+    assert "N*K = 1 * 1 = 1" in msg
+
+
+def test_dispatch_cacheless_within_capacity_n2_k1_regression() -> None:
+    """n_slots=2, k_per_model=1, cache_ids=[0, 1] matches capacity — must succeed."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0, 1],
+        sequence_lengths=[1, 1],
+        cache_sizes=[0, 0],
+        inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+        max_sequence_length=1,
+    )
+    assert merged.shape == (2, 3)
+
+
+def test_dispatch_cacheless_max_row_beyond_capacity_raises_value_error() -> None:
+    """n_slots=2, k_per_model=1, cache_ids=[2]: single item but row_id=2 exceeds N*K=2."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    with pytest.raises(ValueError) as excinfo:
+        dispatcher.dispatch(
+            cache_ids=[2],
+            sequence_lengths=[1],
+            cache_sizes=[0],
+            inputs_embeds_chunks=[_make_embed(1)],
+            max_sequence_length=1,
+        )
+
+    msg = str(excinfo.value)
+    assert "max row_id=2" in msg
+    assert "N*K = 2 * 1 = 2" in msg
+
+
+def test_dispatch_cacheless_within_capacity_n1_k4_regression() -> None:
+    """n_slots=1, k_per_model=4, cache_ids=[0,1,2,3] fills exactly one batched slot."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    backend = _MockBackend([m0], k_per_model=4)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0, 1, 2, 3],
+        sequence_lengths=[1, 1, 1, 1],
+        cache_sizes=[0, 0, 0, 0],
+        inputs_embeds_chunks=[_make_embed(1) for _ in range(4)],
+        max_sequence_length=1,
+    )
+    assert merged.shape == (4, 3)
+
+
+def test_dispatch_with_cache_over_backend_capacity_delegates_to_cache() -> None:
+    """Regression: with a supplied cache the capacity guard is inactive.
+
+    The dispatcher must delegate slot resolution to ``past_key_values.slot_of``
+    and not raise the cacheless-only ``ValueError`` even when caller row IDs
+    exceed the backend's ``N * K``. Validating the with-cache case is
+    ``_validate_batch_cache``'s job, invoked earlier by the caller.
+    """
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    class _RoutingCache:
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            # Route rows 0 -> m0, 1 -> m1 (matches N*K=2).
+            return divmod(row, 1)
+
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0, 1],
+        sequence_lengths=[1, 1],
+        cache_sizes=[0, 0],
+        inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+        max_sequence_length=1,
+        past_key_values=_RoutingCache(),
+    )
+
+    assert merged.shape == (2, 3)
+
+
+# ---------------------------------------------------------------------------
 # N==1 guard
 # ---------------------------------------------------------------------------
 

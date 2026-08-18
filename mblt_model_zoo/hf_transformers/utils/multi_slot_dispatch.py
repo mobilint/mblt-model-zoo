@@ -162,6 +162,29 @@ class MultiSlotDispatcher:
         n_backend_slots = self.n_slots
         n_items = len(cache_ids)
 
+        # Cacheless capacity guard: when the caller omits ``past_key_values``
+        # (e.g. ``use_cache=False`` on an evaluation forward), ``slot_of``
+        # falls back to ``divmod(row, k_per_model)``. That routing has no
+        # awareness of ``n_slots``, so a request beyond ``N * K`` would
+        # otherwise surface as an ``IndexError`` on ``mxq_models[model_idx]``
+        # (multi-slot) or a low-level qbruntime error when ``cache_ids``
+        # exceed the compiled ``K`` on slot 0 (single-slot). Fail fast with a
+        # message that points at both the request size and the backend
+        # capacity. The with-cache branch is validated by
+        # :meth:`MobilintModelMixin._validate_batch_cache` against the cache's
+        # own capacity, so we skip this check when a cache is supplied.
+        if past_key_values is None:
+            capacity = n_backend_slots * self.k_per_model
+            max_row = max(cache_ids) if cache_ids else -1
+            if n_items > capacity or max_row >= capacity:
+                raise ValueError(
+                    "Cacheless batched dispatch exceeds backend capacity: "
+                    f"request has n_items={n_items} and max row_id={max_row}; "
+                    f"backend N*K = {n_backend_slots} * {self.k_per_model} = {capacity}. "
+                    "Either supply a MobilintCache with matching capacity, or "
+                    "reduce the batched request to at most N*K rows."
+                )
+
         # Multi-slot dispatch routes each flat row to its owning Model via
         # ``slot_of``. A single-slot backend keeps the flat cache_id
         # passthrough on slot 0.
