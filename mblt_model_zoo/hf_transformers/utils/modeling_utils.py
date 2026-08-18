@@ -169,6 +169,20 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     def get_mxq_model(self):
         return self.npu_backend.mxq_model
 
+    @classmethod
+    def get_mobilint_cache_cls(cls) -> type[MobilintCache]:
+        """Return the ``MobilintCache`` subclass this model uses for KV caching.
+
+        The multi-slot cache builder :func:`build_mobilint_cache_from_model`
+        (and its ``benchmark_utils`` wrapper) consults this classmethod when a
+        caller does not supply ``cache_cls`` explicitly. Models whose decoder
+        forward expects a specialized cache (e.g. :class:`MobilintDeepStackCache`
+        for Qwen3-VL text) override this so the multi-slot builder does not
+        default to plain :class:`MobilintCache` and trip the model-side
+        ``isinstance`` guard.
+        """
+        return MobilintCache
+
     def reset_npu_timing(self) -> None:
         """Reset aggregate NPU timing counters used by TPS benchmarks."""
         self.npu_timing = {

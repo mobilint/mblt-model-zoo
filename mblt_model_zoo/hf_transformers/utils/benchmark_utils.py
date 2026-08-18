@@ -365,13 +365,40 @@ def _resolve_multi_slot_backend(model: object) -> object | None:
     return None
 
 
-def _build_batched_mobilint_cache(model: object, batch_size: int) -> MobilintCache:
+def _resolve_mobilint_cache_class(model: object) -> type[MobilintCache]:
+    """Return the ``MobilintCache`` subclass ``model`` declares for its KV cache.
+
+    Reads :meth:`MobilintModelMixin.get_mobilint_cache_cls` when the model
+    exposes it so specialized decoders (e.g. Qwen3-VL text, which requires
+    :class:`MobilintDeepStackCache`) route the multi-slot builder to their
+    own cache subclass. Falls back to plain :class:`MobilintCache` for models
+    that do not override the classmethod and for lightweight test doubles.
+    """
+    resolver = getattr(model, "get_mobilint_cache_cls", None)
+    if callable(resolver):
+        resolved = resolver()
+        if isinstance(resolved, type) and issubclass(resolved, MobilintCache):
+            return resolved
+    return MobilintCache
+
+
+def _build_batched_mobilint_cache(
+    model: object,
+    batch_size: int,
+    *,
+    cache_cls: type[MobilintCache] | None = None,
+) -> MobilintCache:
     """Build a ``MobilintCache`` sized to route ``batch_size`` rows across every backend slot.
 
     Thin wrapper around :func:`build_mobilint_cache_from_model` retained so
-    benchmark_utils callers keep a stable local entry point.
+    benchmark_utils callers keep a stable local entry point. When ``cache_cls``
+    is not supplied the class is resolved from ``model`` via
+    :func:`_resolve_mobilint_cache_class` so a Qwen3-VL text decoder (which
+    hard-fails on plain :class:`MobilintCache`) receives its declared
+    :class:`MobilintDeepStackCache` subclass automatically.
     """
-    return build_mobilint_cache_from_model(model, batch_size)
+    resolved_cls = cache_cls if cache_cls is not None else _resolve_mobilint_cache_class(model)
+    return build_mobilint_cache_from_model(model, batch_size, cache_cls=resolved_cls)
 
 
 def _is_eagle3_model(model: object) -> bool:

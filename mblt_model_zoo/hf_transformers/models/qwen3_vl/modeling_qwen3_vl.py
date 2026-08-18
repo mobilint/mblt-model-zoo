@@ -764,6 +764,19 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
 
+    @classmethod
+    def get_mobilint_cache_cls(cls) -> type[MobilintDeepStackCache]:
+        """Qwen3-VL text decoder requires the deepstack-augmented KV cache.
+
+        :meth:`llm_forward` hard-fails on any ``past_key_values`` that is not
+        a :class:`MobilintDeepStackCache`. The default multi-slot builder in
+        :mod:`benchmark_utils` reads this override to construct the deepstack
+        cache directly rather than the plain :class:`MobilintCache`, so
+        fake-prefill VLM decode measurements do not trip that guard on
+        multi-slot backends.
+        """
+        return MobilintDeepStackCache
+
     def _get_cache(
         self,
         cache_implementation: str,
