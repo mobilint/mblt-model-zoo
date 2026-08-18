@@ -177,7 +177,11 @@ _NON_MODEL_JSON_FILENAMES: frozenset[str] = frozenset(
 )
 
 
-def collect_folder_metrics(folder: Path) -> dict[str, ModelMetrics]:
+def collect_folder_metrics(
+    folder: Path,
+    *,
+    include_labels: Optional[set[str]] = None,
+) -> dict[str, ModelMetrics]:
     """Aggregate per-model sweep metrics from a benchmark output folder.
 
     Sidecar JSONs listed in :data:`_NON_MODEL_JSON_FILENAMES` are skipped by
@@ -186,6 +190,12 @@ def collect_folder_metrics(folder: Path) -> dict[str, ModelMetrics]:
     :func:`load_model_metrics` (via its ``benchmark_type == "measure"`` guard)
     so mixed-mode folders can rebuild sweep views without measure-only targets
     appearing with empty token-sweep series.
+
+    ``include_labels`` restricts the output to model ids that appear in the
+    given set. Callers that reconcile sidecar rows against on-disk payloads
+    (the rebuild helpers) pass the reconciled success labels here so any
+    payload superseded by a newer skip row is dropped from the chart data.
+    ``None`` (the default) keeps every discovered payload.
     """
     metrics: dict[str, ModelMetrics] = {}
     for path in sorted(folder.glob("*.json")):
@@ -199,6 +209,8 @@ def collect_folder_metrics(folder: Path) -> dict[str, ModelMetrics]:
         if loaded is None:
             continue
         model_id, metric = loaded
+        if include_labels is not None and model_id not in include_labels:
+            continue
         if model_id in metrics:
             continue
         metrics[model_id] = metric

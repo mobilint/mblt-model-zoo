@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -220,26 +221,41 @@ def _write_skipped_sidecar(output_dir: str | Path, records: Sequence[dict[str, A
     os.replace(tmp, path)
 
 
-def _labels_from_existing_result_jsons(output_dir: str | Path, benchmark_type: str) -> set[str]:
-    """Return model labels present as per-target result JSONs at ``output_dir``.
+def _skip_record_timestamp(record: Mapping[str, Any]) -> float:
+    """Return ``record["recorded_at"]`` as a float, treating anything invalid as ``0.0``.
 
-    Scans on-disk per-target JSONs (from successful runs in the current or a
-    prior process) and returns their ``payload["model"]`` labels so
-    reconciliation can drop stale skip rows for targets that a ``--skip-existing``
-    pass never re-runs. Filters by ``benchmark_type``: measure reads
-    ``*_measure.json`` payloads that declare ``benchmark_type == "measure"``;
-    sweep reads ``*.json`` payloads that lack that marker, excluding the mode-
-    specific skip sidecars and the host_pc_info file. Missing directories and
-    unreadable or malformed JSON files are treated as absent.
+    Records written before the timestamp refactor (or by an older process) do
+    not carry ``recorded_at``. Treating those as epoch 0 makes any on-disk
+    result JSON with a real mtime authoritative for the same label, which is
+    the safe backward-compatible default.
+    """
+    value = record.get("recorded_at")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
+
+
+def _load_result_jsons_with_mtime(
+    output_dir: str | Path,
+    benchmark_type: str,
+) -> dict[str, tuple[dict[str, Any], float]]:
+    """Return per-label on-disk result payloads keyed by label with filesystem mtime.
+
+    Filters by ``benchmark_type``: measure reads ``*_measure.json`` payloads
+    that declare ``benchmark_type == "measure"``; sweep reads ``*.json``
+    payloads that lack that marker, excluding the mode-specific skip sidecars
+    and the ``host_pc_info`` file. Missing directories and unreadable or
+    malformed JSON files are treated as absent. When multiple payloads share a
+    label, the newest mtime wins.
     """
     if benchmark_type not in _SKIPPED_SIDECAR_MODES:
         raise ValueError(f"benchmark_type must be one of {_SKIPPED_SIDECAR_MODES}, got {benchmark_type!r}")
     output_dir = Path(output_dir)
     if not output_dir.is_dir():
-        return set()
-    labels: set[str] = set()
-    candidates = sorted(output_dir.glob("*_measure.json" if benchmark_type == "measure" else "*.json"))
-    for path in candidates:
+        return {}
+    result: dict[str, tuple[dict[str, Any], float]] = {}
+    pattern = "*_measure.json" if benchmark_type == "measure" else "*.json"
+    for path in sorted(output_dir.glob(pattern)):
         if _is_skipped_sidecar_name(path.name):
             continue
         if benchmark_type == "sweep" and path.name == _HOST_PC_INFO_FILENAME:
@@ -259,77 +275,95 @@ def _labels_from_existing_result_jsons(output_dir: str | Path, benchmark_type: s
             if payload_bench == "measure":
                 continue
         label = payload.get("model")
-        if isinstance(label, str) and label:
-            labels.add(label)
-    return labels
+        if not (isinstance(label, str) and label):
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        prior = result.get(label)
+        if prior is None or mtime > prior[1]:
+            result[label] = (payload, mtime)
+    return result
 
 
-def _drop_stale_skips_for_successful_targets(
-    skipped_records: list[dict[str, Any]],
-    successful_labels: Iterable[str],
+def reconcile_sidecar_and_disk(
+    output_dir: str | Path,
+    benchmark_type: str,
     *,
-    output_dir: str | Path | None = None,
-    benchmark_type: str | None = None,
-    fresh_failure_labels: Iterable[str] | None = None,
-) -> None:
-    """Drop skip rows for targets that now have a successful per-target JSON.
+    sidecar_rows: Sequence[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return the reconciled ``(skips, successes)`` view for ``benchmark_type``.
 
-    The reconciliation set is the union of:
+    Reconciliation attaches a timestamp to every fact and takes the newer one:
 
-    * ``successful_labels`` — targets that produced a fresh per-target JSON in
-      the current process.
-    * When ``output_dir`` and ``benchmark_type`` are both supplied, labels read
-      from existing per-target JSONs on disk, minus ``fresh_failure_labels``.
-      This covers ``--skip-existing`` targets whose result JSON was written by
-      a prior process — the current loop ``continue``s past them without
-      adding to ``successful_labels`` — and ``--rebuild-charts`` invocations
-      that only touch the sidecar. Subtracting ``fresh_failure_labels``
-      preserves fresh-failure precedence: if the current process re-ran a
-      target that had a stale success JSON on disk and it OOMed or hit an
-      NPU alloc / runtime error, the fresh skip record supersedes the
-      on-disk success so the diagnostic output reflects the current-run
-      failure instead of the older passing run at a different ``--batch-size``
-      or ``--dev-no``. Callers that run the benchmark loop populate
-      ``fresh_failure_labels`` from :func:`_replace_skip_record`;
-      ``_rebuild_*`` reconciliation callsites pass the preloaded sidecar's
-      labels so any preserved fresh failure from a prior run stays protected
-      across repeat ``--rebuild-charts`` invocations.
+    * Sidecar rows carry ``recorded_at`` (seconds since the epoch, populated by
+      each skip handler). Rows missing the field are treated as epoch 0.
+    * On-disk per-target JSONs use their filesystem mtime.
 
-    The list is mutated in place so all references to ``skipped_records`` (mid-
-    run handlers and the final rebuild) observe the same reconciled contents.
+    For a given model label:
+
+    * only sidecar → the row is a skip.
+    * only disk → the payload is a success.
+    * both present → whichever timestamp is larger wins. A newer sidecar row
+      supersedes the older disk payload (the JSON stays on disk for manual
+      inspection but is excluded from combined output). A newer disk payload
+      supersedes the older sidecar row (the row is dropped).
+    * both timestamps missing / zero → the sidecar row is preserved as the
+      safe default (the payload's mtime is at least present, so this branch
+      is only reached when both readers hit the epoch fallback).
+
+    When ``sidecar_rows`` is provided the caller's authoritative in-memory list
+    is used instead of re-reading the sidecar file; this lets the run-loop
+    pass its current skip list without a redundant read of the file it just
+    wrote through the handlers.
     """
-    if (output_dir is None) != (benchmark_type is None):
-        raise ValueError("output_dir and benchmark_type must be provided together")
-    labels = {label for label in successful_labels if label}
-    if output_dir is not None and benchmark_type is not None:
-        existing = _labels_from_existing_result_jsons(output_dir, benchmark_type)
-        fresh = {label for label in (fresh_failure_labels or ()) if label}
-        labels |= existing - fresh
-    if not labels:
-        return
-    skipped_records[:] = [record for record in skipped_records if record.get("model") not in labels]
+    if sidecar_rows is None:
+        sidecar_rows = _read_skipped_sidecar(output_dir, benchmark_type)
+    disk_payloads = _load_result_jsons_with_mtime(output_dir, benchmark_type)
+    row_by_label: dict[str, dict[str, Any]] = {}
+    for row in sidecar_rows:
+        if not isinstance(row, dict):
+            continue
+        label = row.get("model")
+        if not (isinstance(label, str) and label):
+            continue
+        row_by_label[label] = row
+    labels = sorted(set(row_by_label) | set(disk_payloads))
+    skips: list[dict[str, Any]] = []
+    successes: list[dict[str, Any]] = []
+    for label in labels:
+        row = row_by_label.get(label)
+        payload_entry = disk_payloads.get(label)
+        if row is not None and payload_entry is None:
+            skips.append(row)
+            continue
+        if payload_entry is not None and row is None:
+            successes.append(payload_entry[0])
+            continue
+        assert row is not None and payload_entry is not None
+        row_ts = _skip_record_timestamp(row)
+        payload_ts = payload_entry[1]
+        if row_ts > payload_ts:
+            skips.append(row)
+        elif payload_ts > row_ts:
+            successes.append(payload_entry[0])
+        else:
+            skips.append(row)
+    return skips, successes
 
 
-def _replace_skip_record(
-    skipped_records: list[dict[str, Any]],
-    new_record: dict[str, Any],
-    fresh_failure_labels: set[str] | None = None,
-) -> None:
+def _replace_skip_record(skipped_records: list[dict[str, Any]], new_record: dict[str, Any]) -> None:
     """Insert ``new_record`` replacing any prior entry with the same target identity.
 
     Target identity is the model label; a later failure for the same model
     replaces the earlier record so retries do not accumulate duplicate rows in
     the sidecar or rebuilt combined outputs. The list is mutated in place.
-    When ``fresh_failure_labels`` is supplied, the record's label is added to
-    it so downstream reconciliation can distinguish a fresh in-process failure
-    from a preloaded stale sidecar row.
     """
     label = new_record.get("model")
     if label:
         skipped_records[:] = [record for record in skipped_records if record.get("model") != label]
     skipped_records.append(new_record)
-    if fresh_failure_labels is not None and label:
-        fresh_failure_labels.add(label)
 
 
 def _handle_cuda_oom(
@@ -343,7 +377,6 @@ def _handle_cuda_oom(
     phase: str,
     output_dir: str | Path,
     benchmark_type: str,
-    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Log a structured CUDA OOM skip record and clear GPU state."""
     reason = "cuda_oom"
@@ -359,8 +392,8 @@ def _handle_cuda_oom(
             "phase": phase,
             "skipped_reason": reason,
             "detail": _format_exception(exc),
+            "recorded_at": time.time(),
         },
-        fresh_failure_labels,
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -377,7 +410,6 @@ def _handle_cuda_precheck_skip(
     phase: str,
     output_dir: str | Path,
     benchmark_type: str,
-    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Log a structured CUDA pre-check VRAM skip record and clear GPU state.
 
@@ -414,8 +446,8 @@ def _handle_cuda_precheck_skip(
             "free_bytes": int(free_bytes),
             "required_bytes": int(required_bytes),
             "estimated_weights_bytes": int(estimated_bytes),
+            "recorded_at": time.time(),
         },
-        fresh_failure_labels,
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -431,7 +463,6 @@ def _handle_npu_alloc_error(
     phase: str,
     output_dir: str | Path,
     benchmark_type: str,
-    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Log a structured Mobilint NPU allocation skip record."""
     reason = "npu_alloc"
@@ -460,8 +491,8 @@ def _handle_npu_alloc_error(
             "skipped_reason": reason,
             "detail": _format_exception(exc),
             **{f"npu_{k}": v for k, v in context.items() if v is not None},
+            "recorded_at": time.time(),
         },
-        fresh_failure_labels,
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -477,7 +508,6 @@ def _handle_npu_runtime_error(
     phase: str,
     output_dir: str | Path,
     benchmark_type: str,
-    fresh_failure_labels: set[str] | None = None,
 ) -> None:
     """Log a structured Mobilint NPU non-alloc runtime skip record.
 
@@ -502,8 +532,8 @@ def _handle_npu_runtime_error(
             "phase": phase,
             "skipped_reason": reason,
             "detail": _format_exception(exc),
+            "recorded_at": time.time(),
         },
-        fresh_failure_labels,
     )
     _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
 
@@ -951,9 +981,7 @@ def _merge_resolved_parents_with_caller_mobilint(
     return merged
 
 
-def _load_result(path: str) -> BenchmarkResult:
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
+def _result_from_payload(payload: dict[str, Any]) -> BenchmarkResult:
     if "benchmark" in payload and isinstance(payload["benchmark"], dict):
         payload = payload["benchmark"]
     prefill = payload.get("prefill_sweep", {})
@@ -981,12 +1009,13 @@ def _load_result(path: str) -> BenchmarkResult:
     )
 
 
-def _load_device(path: str) -> dict[str, float | None] | None:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception:
-        return None
+def _load_result(path: str) -> BenchmarkResult:
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return _result_from_payload(payload)
+
+
+def _device_from_payload(payload: dict[str, Any]) -> dict[str, float | None] | None:
     device = payload.get("device")
     if not isinstance(device, dict):
         return None
@@ -1014,6 +1043,15 @@ def _load_device(path: str) -> dict[str, float | None] | None:
         value = device.get(key)
         out[key] = float(value) if isinstance(value, (int, float)) else None
     return out
+
+
+def _load_device(path: str) -> dict[str, float | None] | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    return _device_from_payload(payload)
 
 
 def _aggregate_benchmark_results(results: Sequence[BenchmarkResult]) -> BenchmarkResult:
@@ -1236,7 +1274,11 @@ def _token_sweep_plot_table(
 
 def _build_text_generation_plot_tables(output_dir: Path) -> dict[str, str]:
     """Build plot-specific Markdown tables for text-generation sweep summaries."""
-    metrics_by_model = collect_folder_metrics(output_dir)
+    _, successes = reconcile_sidecar_and_disk(output_dir, "sweep")
+    include_labels = {
+        payload.get("model") for payload in successes if isinstance(payload.get("model"), str) and payload.get("model")
+    }
+    metrics_by_model = collect_folder_metrics(output_dir, include_labels=include_labels)
     if not metrics_by_model:
         return {}
     models = sorted(metrics_by_model.keys())
@@ -1343,67 +1385,37 @@ def _rebuild_combined_outputs(
 ) -> None:
     """Rebuild combined text-generation sweep CSV, Markdown, and charts.
 
-    A per-target sweep JSON on disk is superseded when the finalized
-    ``skipped_records`` contain a matching entry for its label. A fresh
-    in-process failure (task ``2efaa``) or a preloaded sidecar row that is
-    not reconciled away by :func:`_drop_stale_skips_for_successful_targets`
-    represents the current-run outcome for that target; letting the older
-    passing payload also flow into the combined CSV / Markdown / charts
-    would double-represent the target as both a success and a skip. The
-    stale JSON is left on disk for manual inspection — only the rebuilt
-    aggregate view drops it.
+    Resolution rule for a given model label follows :func:`reconcile_sidecar_and_disk`:
+    the newer ``recorded_at`` sidecar row or on-disk JSON mtime wins. The
+    stale side is excluded from the combined output; the physical JSON file
+    on disk is preserved for manual inspection.
+
+    When ``skipped_records`` is supplied the caller's authoritative in-memory
+    list overrides the persisted sidecar for this rebuild; missing rows fall
+    back to the on-disk sidecar.
     """
     output_dir = Path(output_dir)
+    skips, successes = reconcile_sidecar_and_disk(
+        output_dir,
+        "sweep",
+        sidecar_rows=None if skipped_records is None else list(skipped_records),
+    )
+    if list(skips) != _read_skipped_sidecar(output_dir, "sweep"):
+        _write_skipped_sidecar(output_dir, skips, "sweep")
+
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
-    if skipped_records is None:
-        skipped_records = _read_skipped_sidecar(output_dir, "sweep")
-        # Preloaded sidecar rows are the authoritative record of preserved fresh
-        # failures from prior runs (task ``2efaa``). Pass their labels as
-        # ``fresh_failure_labels`` so their on-disk stale success payloads do
-        # not sweep them out of the sidecar via the disk-union reconciliation.
-        preloaded_fresh_labels = {
-            record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
-        }
-        before_len = len(skipped_records)
-        _drop_stale_skips_for_successful_targets(
-            skipped_records,
-            set(),
-            output_dir=output_dir,
-            benchmark_type="sweep",
-            fresh_failure_labels=preloaded_fresh_labels,
-        )
-        if before_len != len(skipped_records):
-            _write_skipped_sidecar(output_dir, skipped_records, "sweep")
-    else:
-        skipped_records = list(skipped_records)
-        _write_skipped_sidecar(output_dir, skipped_records, "sweep")
-    skipped_labels = {
-        record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
-    }
-    for path in sorted(output_dir.glob("*.json")):
-        if _is_skipped_sidecar_name(path.name):
-            continue
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
-        if payload.get("benchmark_type") == "measure" or path.name == _HOST_PC_INFO_FILENAME:
-            continue
+    success_labels: set[str] = set()
+    for payload in successes:
         label = payload.get("model")
         if not isinstance(label, str) or not label:
             continue
-        if label in skipped_labels:
-            continue
-        json_path = str(path)
-        result = _load_result(json_path)
+        result = _result_from_payload(payload)
         combined_results.append(result)
         combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
-        device = _load_device(json_path)
+        success_labels.add(label)
+        device = _device_from_payload(payload)
         if device:
             combined_device_rows.append(
                 {
@@ -1429,22 +1441,22 @@ def _rebuild_combined_outputs(
                 }
             )
 
-    if not combined_results and not skipped_records:
+    if not combined_results and not skips:
         print("No existing JSON results matched the current target set. Nothing to aggregate.")
         _write_text_generation_summary(output_dir)
         return
 
     combined_csv = os.path.join(output_dir, "combined.csv")
     combined_md = os.path.join(output_dir, "combined.md")
-    BenchmarkResult.write_combined_csv(combined_csv, combined_rows, skipped_records=skipped_records)
+    BenchmarkResult.write_combined_csv(combined_csv, combined_rows, skipped_records=skips)
     _write_single_combined_markdown(
         combined_md,
         tps_rows=combined_rows,
         device_rows=combined_device_rows,
-        skipped_records=skipped_records,
+        skipped_records=skips,
     )
 
-    folder_metrics = collect_folder_metrics(output_dir)
+    folder_metrics = collect_folder_metrics(output_dir, include_labels=success_labels)
     if folder_metrics:
         models = sorted(folder_metrics.keys())
         labels = ["benchmark"]
@@ -1958,8 +1970,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
             )
 
     skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "sweep")
-    successful_labels: set[str] = set()
-    fresh_failure_labels: set[str] = set()
     for (
         model_id,
         revision_candidates,
@@ -2036,7 +2046,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         phase="load",
                         output_dir=output_dir,
                         benchmark_type="sweep",
-                        fresh_failure_labels=fresh_failure_labels,
                     )
                     continue
 
@@ -2068,7 +2077,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="sweep",
-                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except _NPU_RUNTIME_ERROR_TYPE as e:
@@ -2082,7 +2090,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="sweep",
-                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except Exception as e:
@@ -2097,7 +2104,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                         phase="load",
                         output_dir=output_dir,
                         benchmark_type="sweep",
-                        fresh_failure_labels=fresh_failure_labels,
                     )
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
@@ -2168,7 +2174,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="sweep",
-                fresh_failure_labels=fresh_failure_labels,
             )
             _release_pipeline(pipeline, target_args.device)
             continue
@@ -2183,7 +2188,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="sweep",
-                fresh_failure_labels=fresh_failure_labels,
             )
             _release_pipeline(pipeline, target_args.device)
             continue
@@ -2199,7 +2203,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     phase="measure",
                     output_dir=output_dir,
                     benchmark_type="sweep",
-                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
@@ -2407,18 +2410,10 @@ def _run_sweep(args: argparse.Namespace) -> int:
         }
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-        successful_labels.add(label)
         measurer.plot_and_save(result, save_path=png_path)
 
         _release_pipeline(pipeline, target_args.device)
 
-    _drop_stale_skips_for_successful_targets(
-        skipped_records,
-        successful_labels,
-        output_dir=output_dir,
-        benchmark_type="sweep",
-        fresh_failure_labels=fresh_failure_labels,
-    )
     _rebuild_combined_outputs(output_dir, skipped_records=skipped_records)
 
     return 0
@@ -2593,54 +2588,25 @@ def _rebuild_measure_outputs(
 ) -> None:
     """Rebuild combined text-generation measure CSV, Markdown, and charts.
 
-    A per-target ``*_measure.json`` on disk is superseded when the finalized
-    ``skipped_records`` contain a matching entry for its label. A fresh
-    in-process failure (task ``2efaa``) or a preloaded sidecar row that is
-    not reconciled away by :func:`_drop_stale_skips_for_successful_targets`
-    represents the current-run outcome for that target; letting the older
-    passing payload also flow into the combined CSV / Markdown / charts
-    would double-represent the target as both a success and a skip. The
-    stale JSON is left on disk for manual inspection — only the rebuilt
-    aggregate view drops it.
+    Resolution rule for a given model label follows :func:`reconcile_sidecar_and_disk`:
+    the newer ``recorded_at`` sidecar row or on-disk JSON mtime wins. The
+    stale side is excluded from the combined output; the physical JSON file
+    on disk is preserved for manual inspection.
+
+    When ``skipped_records`` is supplied the caller's authoritative in-memory
+    list overrides the persisted sidecar for this rebuild; missing rows fall
+    back to the on-disk sidecar.
     """
     output_dir = Path(output_dir)
-    if skipped_records is None:
-        skipped_records = _read_skipped_sidecar(output_dir, "measure")
-        # Preloaded sidecar rows are the authoritative record of preserved fresh
-        # failures from prior runs (task ``2efaa``). Pass their labels as
-        # ``fresh_failure_labels`` so their on-disk stale success payloads do
-        # not sweep them out of the sidecar via the disk-union reconciliation.
-        preloaded_fresh_labels = {
-            record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
-        }
-        before_len = len(skipped_records)
-        _drop_stale_skips_for_successful_targets(
-            skipped_records,
-            set(),
-            output_dir=output_dir,
-            benchmark_type="measure",
-            fresh_failure_labels=preloaded_fresh_labels,
-        )
-        if before_len != len(skipped_records):
-            _write_skipped_sidecar(output_dir, skipped_records, "measure")
-    else:
-        skipped_records = list(skipped_records)
-        _write_skipped_sidecar(output_dir, skipped_records, "measure")
-    skipped_labels = {
-        record.get("model") for record in skipped_records if isinstance(record, dict) and record.get("model")
-    }
-    payloads: list[dict[str, Any]] = []
-    for path in sorted(output_dir.glob("*_measure.json")):
-        if _is_skipped_sidecar_name(path.name):
-            continue
-        with path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if not isinstance(payload, dict) or payload.get("benchmark_type") != "measure":
-            continue
-        if payload.get("model") in skipped_labels:
-            continue
-        payloads.append(payload)
-    if not payloads and not skipped_records:
+    skips, successes = reconcile_sidecar_and_disk(
+        output_dir,
+        "measure",
+        sidecar_rows=None if skipped_records is None else list(skipped_records),
+    )
+    if list(skips) != _read_skipped_sidecar(output_dir, "measure"):
+        _write_skipped_sidecar(output_dir, skips, "measure")
+    payloads = list(successes)
+    if not payloads and not skips:
         print("No measure JSON results found. Nothing to aggregate.")
         _write_text_generation_summary(output_dir, measure=True)
         return
@@ -2667,7 +2633,7 @@ def _rebuild_measure_outputs(
         writer.writeheader()
         for row in rows:
             writer.writerow({**row, "skipped_reason": ""})
-        for record in skipped_records:
+        for record in skips:
             writer.writerow(
                 {
                     "model": record.get("model", ""),
@@ -2676,8 +2642,8 @@ def _rebuild_measure_outputs(
                 }
             )
     _write_measure_markdown(output_dir / "combined_measure.md", rows)
-    if skipped_records:
-        _append_skipped_markdown_section(str(output_dir / "combined_measure.md"), skipped_records)
+    if skips:
+        _append_skipped_markdown_section(str(output_dir / "combined_measure.md"), skips)
     _plot_measure_charts(output_dir, rows)
     _write_text_generation_summary(output_dir, measure=True)
 
@@ -2781,8 +2747,6 @@ def _run_measure(args: argparse.Namespace) -> int:
         )
     _collect_host_pc_info(output_dir)
     skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "measure")
-    successful_labels: set[str] = set()
-    fresh_failure_labels: set[str] = set()
     for (
         model_id,
         revision_candidates,
@@ -2829,7 +2793,6 @@ def _run_measure(args: argparse.Namespace) -> int:
                         phase="load",
                         output_dir=output_dir,
                         benchmark_type="measure",
-                        fresh_failure_labels=fresh_failure_labels,
                     )
                     continue
         pipeline = None
@@ -2860,7 +2823,6 @@ def _run_measure(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="measure",
-                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except _NPU_RUNTIME_ERROR_TYPE as e:
@@ -2874,7 +2836,6 @@ def _run_measure(args: argparse.Namespace) -> int:
                     phase="load",
                     output_dir=output_dir,
                     benchmark_type="measure",
-                    fresh_failure_labels=fresh_failure_labels,
                 )
                 continue
             except Exception as e:
@@ -2889,7 +2850,6 @@ def _run_measure(args: argparse.Namespace) -> int:
                         phase="load",
                         output_dir=output_dir,
                         benchmark_type="measure",
-                        fresh_failure_labels=fresh_failure_labels,
                     )
                     continue
                 raise
@@ -3023,7 +2983,6 @@ def _run_measure(args: argparse.Namespace) -> int:
             }
             with json_path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
-            successful_labels.add(label)
             print(f"Saved: {json_path.name}")
         except _NPU_ALLOC_ERROR_TYPE as e:
             _handle_npu_alloc_error(
@@ -3036,7 +2995,6 @@ def _run_measure(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="measure",
-                fresh_failure_labels=fresh_failure_labels,
             )
         except _NPU_RUNTIME_ERROR_TYPE as e:
             _handle_npu_runtime_error(
@@ -3049,7 +3007,6 @@ def _run_measure(args: argparse.Namespace) -> int:
                 phase="measure",
                 output_dir=output_dir,
                 benchmark_type="measure",
-                fresh_failure_labels=fresh_failure_labels,
             )
         except Exception as e:
             if _is_cuda_oom_error(e):
@@ -3063,19 +3020,11 @@ def _run_measure(args: argparse.Namespace) -> int:
                     phase="measure",
                     output_dir=output_dir,
                     benchmark_type="measure",
-                    fresh_failure_labels=fresh_failure_labels,
                 )
             else:
                 print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, target_args.device)
-    _drop_stale_skips_for_successful_targets(
-        skipped_records,
-        successful_labels,
-        output_dir=output_dir,
-        benchmark_type="measure",
-        fresh_failure_labels=fresh_failure_labels,
-    )
     _rebuild_measure_outputs(output_dir, skipped_records=skipped_records)
     return 0
 

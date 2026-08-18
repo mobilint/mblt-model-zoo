@@ -1,11 +1,27 @@
 import csv
 import json
+import os
 import sys
+import time
 from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+_SKIP_TIMESTAMP_GAP_S = 3600.0
+
+
+def _backdate(path: Path, *, seconds: float = _SKIP_TIMESTAMP_GAP_S) -> None:
+    """Backdate a file's atime and mtime so reconciliation tests can express "on-disk is older"."""
+    stamp = path.stat().st_mtime - seconds
+    os.utime(path, (stamp, stamp))
+
+
+def _sidecar_row_now(**fields: Any) -> dict[str, Any]:
+    """Return a sidecar row stamped with ``recorded_at = time.time()`` for "sidecar is newer" tests."""
+    return {**fields, "recorded_at": time.time()}
+
 
 _TRANSFORMERS_BENCHMARK_DIR = Path(__file__).resolve().parents[2] / "benchmark" / "transformers"
 if str(_TRANSFORMERS_BENCHMARK_DIR) not in sys.path:
@@ -1327,104 +1343,269 @@ def test_text_rebuild_explicit_records_persist_sidecar(tmp_path) -> None:
     assert text_bench._read_skipped_sidecar(tmp_path, "sweep") == []
 
 
-def test_text_drop_stale_skips_removes_only_successful_labels() -> None:
-    """Verify the reconcile helper drops skip rows whose label succeeded this run."""
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-a", "phase": "load", "skipped_reason": "cuda_oom"},
-        {"model": "model-b", "phase": "measure", "skipped_reason": "npu_alloc"},
-        {"model": "model-c", "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
+def _write_measure_result_json_for_reconcile(path: Path, label: str) -> None:
+    """Minimal measure per-target JSON with the ``benchmark_type`` marker the reconciler expects."""
+    path.write_text(
+        json.dumps(
+            {
+                "model": label,
+                "benchmark_type": "measure",
+                "task": "text-generation",
+                "prefill": 128,
+                "decode": 32,
+                "repeat": 1,
+                "summary": {
+                    "prefill_tps": {"mean": 10.0},
+                    "decode_tps": {"mean": 20.0},
+                    "ttft_ms": {"mean": 30.0},
+                    "decode_duration_ms": {"mean": 40.0},
+                    "total_time_ms": {"mean": 70.0},
+                },
+                "device": None,
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    text_bench._drop_stale_skips_for_successful_targets(skipped_records, {"model-b"})
 
-    assert [record["model"] for record in skipped_records] == ["model-a", "model-c"]
+def _write_sweep_result_json_for_reconcile(path: Path, label: str) -> None:
+    """Minimal sweep per-target JSON that :func:`reconcile_sidecar_and_disk` accepts as success."""
+    path.write_text(
+        json.dumps(
+            {
+                "model": label,
+                "benchmark": {
+                    "prefill_sweep": {"x_values": [8], "tps_values": [10.0], "time_values": [0.8]},
+                    "decode_sweep": {"x_values": [4], "tps_values": [20.0], "time_values": [0.2]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
-def test_text_drop_stale_skips_no_successful_labels_is_noop() -> None:
-    """Verify an empty successful-label set leaves preloaded skip rows untouched."""
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-a", "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
-
-    text_bench._drop_stale_skips_for_successful_targets(skipped_records, set())
-
-    assert skipped_records == [{"model": "model-a", "phase": "load", "skipped_reason": "cuda_oom"}]
+def _labels(records: list[dict[str, Any]]) -> list[str]:
+    return [record.get("model") for record in records]
 
 
-def test_text_preload_and_reconcile_measure_preserves_stable_skips(tmp_path) -> None:
-    """Simulate the normal-run preload + reconcile sequence for measure mode.
+def test_reconcile_sidecar_only_skip_no_disk_payload_measure(tmp_path) -> None:
+    """Task ``a7672`` baseline: only sidecar has X, no disk JSON — X is a skip."""
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", batch_size=8, phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
 
-    ``model-preserved`` failed in a prior run and does not run again this pass — the
-    reconciled sidecar must keep its skip row so a later ``--rebuild-charts`` still
-    surfaces it. ``model-recovered`` also failed previously but succeeds this pass —
-    its stale skip row must be dropped.
-    """
-    prior_records = [
-        {"model": "model-preserved", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
-        {"model": "model-recovered", "batch_size": 4, "phase": "load", "skipped_reason": "npu_alloc"},
-    ]
-    text_bench._write_skipped_sidecar(tmp_path, prior_records, "measure")
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
 
-    # Preload preexisting sidecar (mirrors _run_measure entry point).
-    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert skipped_records == prior_records
+    assert _labels(skips) == ["model-x"]
+    assert successes == []
 
-    # Simulate a run where only "model-recovered" produced a fresh per-target JSON.
-    successful_labels = {"model-recovered"}
-    text_bench._drop_stale_skips_for_successful_targets(skipped_records, successful_labels)
 
-    # Rebuild persists the reconciled list back to the mode-specific sidecar.
-    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
+def test_reconcile_preloaded_sidecar_after_process_crash_measure(tmp_path) -> None:
+    """Task ``1e113`` preload: a prior process's sidecar is preserved when nothing on disk conflicts."""
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", batch_size=8, phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
+
+    assert _labels(skips) == ["model-x"]
+    assert successes == []
+
+
+def test_reconcile_retry_replace_keeps_newer_detail_measure(tmp_path) -> None:
+    """Task ``b2199`` retry-dedup interaction: latest ``_replace_skip_record`` row wins as a skip."""
+    skipped_records: list[dict[str, Any]] = []
+    text_bench._replace_skip_record(
+        skipped_records,
+        _sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom", detail="first"),
+    )
+    text_bench._replace_skip_record(
+        skipped_records,
+        _sidecar_row_now(model="model-x", batch_size=32, phase="measure", skipped_reason="npu_alloc", detail="second"),
+    )
+    text_bench._write_skipped_sidecar(tmp_path, skipped_records, "measure")
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
+
+    assert _labels(skips) == ["model-x"]
+    assert skips[0]["detail"] == "second"
+    assert successes == []
+
+
+def test_reconcile_disk_newer_drops_stale_sidecar_measure(tmp_path) -> None:
+    """Task ``81f7a`` orphan-sidecar: an older sidecar row is dropped when the disk JSON is newer."""
+    _write_measure_result_json_for_reconcile(tmp_path / "model-x_measure.json", "model-x")
+    stale_row = {"model": "model-x", "phase": "load", "skipped_reason": "cuda_oom", "recorded_at": 0.0}
+    text_bench._write_skipped_sidecar(tmp_path, [stale_row], "measure")
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
+
+    assert skips == []
+    assert [payload.get("model") for payload in successes] == ["model-x"]
+
+
+def test_reconcile_sidecar_newer_supersedes_stale_disk_measure(tmp_path) -> None:
+    """Task ``2efaa`` fresh-failure-over-stale-success: newer sidecar row wins; JSON stays on disk."""
+    _write_measure_result_json_for_reconcile(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
+
+    assert _labels(skips) == ["model-x"]
+    assert successes == []
+    assert (tmp_path / "model-x_measure.json").exists()
+
+
+def test_reconcile_rebuild_only_pass_same_result_as_normal_run_measure(tmp_path) -> None:
+    """Task ``ea993`` rebuild-only: reconciler result is identical to the normal-run path."""
+    _write_measure_result_json_for_reconcile(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
+
+    assert _labels(skips) == ["model-x"]
+    assert successes == []
+
+
+def test_reconcile_rebuild_charts_preserves_newer_sidecar_measure(tmp_path) -> None:
+    """Task ``679ef`` rebuild-charts preservation: a newer sidecar row survives standalone rebuild."""
+    _write_measure_result_json_for_reconcile(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+
+    text_bench._rebuild_measure_outputs(tmp_path)
 
     persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert [record["model"] for record in persisted] == ["model-preserved"]
+    assert _labels(persisted) == ["model-x"]
 
 
-def test_text_preload_and_reconcile_measure_no_new_failures_preserves_all(tmp_path) -> None:
-    """A subset re-run producing no new failures must not overwrite the prior sidecar."""
-    prior_records = [
-        {"model": "model-a", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
-        {"model": "model-b", "batch_size": 4, "phase": "measure", "skipped_reason": "npu_alloc"},
-    ]
-    text_bench._write_skipped_sidecar(tmp_path, prior_records, "measure")
+def test_reconcile_todays_case_stale_preloaded_sidecar_new_success_wins(tmp_path) -> None:
+    """Discussion ``r3804234997``: older preloaded sidecar row + newer retry-success JSON → success wins."""
+    stale_row = {
+        "model": "model-x",
+        "batch_size": 8,
+        "phase": "load",
+        "skipped_reason": "cuda_oom",
+        "recorded_at": time.time() - _SKIP_TIMESTAMP_GAP_S,
+    }
+    text_bench._write_skipped_sidecar(tmp_path, [stale_row], "measure")
+    _write_measure_result_json_for_reconcile(tmp_path / "model-x_measure.json", "model-x")
 
-    # Preload preexisting sidecar, run with no new targets (no successes, no failures).
-    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    text_bench._drop_stale_skips_for_successful_targets(skipped_records, set())
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
 
-    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
-
-    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert persisted == prior_records
-
-
-def test_text_preload_and_reconcile_sweep_preserves_stable_skips(tmp_path) -> None:
-    """Verify sweep mode's preload + reconcile sequence mirrors measure mode."""
-    prior_records = [
-        {"model": "sweep-preserved", "batch_size": 16, "phase": "load", "skipped_reason": "cuda_oom"},
-        {"model": "sweep-recovered", "batch_size": 8, "phase": "measure", "skipped_reason": "npu_alloc"},
-    ]
-    text_bench._write_skipped_sidecar(tmp_path, prior_records, "sweep")
-
-    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "sweep")
-    text_bench._drop_stale_skips_for_successful_targets(skipped_records, {"sweep-recovered"})
-
-    text_bench._rebuild_combined_outputs(tmp_path, skipped_records=skipped_records)
-
-    persisted = text_bench._read_skipped_sidecar(tmp_path, "sweep")
-    assert [record["model"] for record in persisted] == ["sweep-preserved"]
+    assert skips == []
+    assert [payload.get("model") for payload in successes] == ["model-x"]
 
 
-def test_text_preload_missing_sidecar_is_empty_backward_compat(tmp_path) -> None:
-    """Verify the preload path on a fresh output dir yields an empty list and does not crash."""
-    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert skipped_records == []
+def test_reconcile_legacy_row_without_recorded_at_defers_to_disk_measure(tmp_path) -> None:
+    """Legacy rows written before the timestamp refactor default to epoch 0; disk JSON wins."""
+    _write_measure_result_json_for_reconcile(tmp_path / "model-x_measure.json", "model-x")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [{"model": "model-x", "phase": "load", "skipped_reason": "cuda_oom"}],
+        "measure",
+    )
 
-    # No preloaded rows, no new failures, no successes — reconcile is a no-op.
-    text_bench._drop_stale_skips_for_successful_targets(skipped_records, set())
-    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
 
-    assert text_bench._read_skipped_sidecar(tmp_path, "measure") == []
+    assert skips == []
+    assert [payload.get("model") for payload in successes] == ["model-x"]
+
+
+def test_reconcile_sweep_sidecar_only_skip_no_disk_payload(tmp_path) -> None:
+    """Sweep sibling of ``a7672`` baseline: sidecar-only entry is a skip."""
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc")],
+        "sweep",
+    )
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "sweep")
+
+    assert _labels(skips) == ["sweep-x"]
+    assert successes == []
+
+
+def test_reconcile_sweep_disk_newer_drops_stale_sidecar(tmp_path) -> None:
+    """Sweep sibling of ``81f7a``: newer sweep JSON drops the older sidecar row."""
+    _write_sweep_result_json_for_reconcile(tmp_path / "sweep-x.json", "sweep-x")
+    stale_row = {"model": "sweep-x", "phase": "measure", "skipped_reason": "npu_alloc", "recorded_at": 0.0}
+    text_bench._write_skipped_sidecar(tmp_path, [stale_row], "sweep")
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "sweep")
+
+    assert skips == []
+    assert [payload.get("model") for payload in successes] == ["sweep-x"]
+
+
+def test_reconcile_sweep_sidecar_newer_supersedes_stale_disk(tmp_path) -> None:
+    """Sweep sibling of ``2efaa``: newer sidecar row wins over the backdated sweep JSON."""
+    _write_sweep_result_json_for_reconcile(tmp_path / "sweep-x.json", "sweep-x")
+    _backdate(tmp_path / "sweep-x.json")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc")],
+        "sweep",
+    )
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "sweep")
+
+    assert _labels(skips) == ["sweep-x"]
+    assert successes == []
+
+
+def test_reconcile_ignores_other_mode_disk_payloads(tmp_path) -> None:
+    """Sweep JSON must not participate in the measure reconciliation (and vice versa)."""
+    _write_sweep_result_json_for_reconcile(tmp_path / "model-x.json", "model-x")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-x", phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure")
+
+    assert _labels(skips) == ["model-x"]
+    assert successes == []
+
+
+def test_reconcile_uses_caller_provided_sidecar_rows_measure(tmp_path) -> None:
+    """``sidecar_rows`` overrides the on-disk sidecar for the current reconcile call."""
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="model-persisted", phase="load", skipped_reason="cuda_oom")],
+        "measure",
+    )
+    override_rows = [_sidecar_row_now(model="model-override", phase="measure", skipped_reason="npu_alloc")]
+
+    skips, successes = text_bench.reconcile_sidecar_and_disk(tmp_path, "measure", sidecar_rows=override_rows)
+
+    assert _labels(skips) == ["model-override"]
+    assert successes == []
+
+
+def test_reconcile_rejects_unknown_benchmark_type(tmp_path) -> None:
+    """The reconciler forwards the sidecar filename validation for unknown modes."""
+    with pytest.raises(ValueError):
+        text_bench.reconcile_sidecar_and_disk(tmp_path, "bogus")
 
 
 def test_text_replace_skip_record_dedups_same_target_retry() -> None:
@@ -1481,20 +1662,6 @@ def test_text_replace_skip_record_preserves_other_targets() -> None:
     ]
 
 
-def test_text_replace_skip_record_then_success_reconciles_to_empty() -> None:
-    """Verify a target that failed then succeeded on retry leaves no row after reconciliation."""
-    skipped_records: list[dict[str, Any]] = []
-
-    text_bench._replace_skip_record(
-        skipped_records,
-        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
-    )
-    # Retry succeeded — reconcile via successful_labels drops the stale skip.
-    text_bench._drop_stale_skips_for_successful_targets(skipped_records, {"model-a"})
-
-    assert skipped_records == []
-
-
 def _write_measure_result_json(path: Path, label: str) -> None:
     """Write a minimal measure per-target JSON payload for reconciliation tests."""
     payload = {
@@ -1528,136 +1695,6 @@ def _write_sweep_result_json(path: Path, label: str) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_text_drop_stale_skips_reads_existing_measure_jsons(tmp_path) -> None:
-    """Verify reconciliation drops rows for targets with an existing per-target measure JSON.
-
-    Mirrors the ``--skip-existing`` scenario where a prior process wrote
-    ``X_measure.json`` after leaving a stale skip row in the measure sidecar.
-    """
-    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-x", "phase": "load", "skipped_reason": "cuda_oom"},
-        {"model": "model-y", "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
-
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records, set(), output_dir=tmp_path, benchmark_type="measure"
-    )
-
-    assert [record["model"] for record in skipped_records] == ["model-y"]
-
-
-def test_text_drop_stale_skips_ignores_other_benchmark_type(tmp_path) -> None:
-    """Verify measure reconciliation does not read sweep JSONs (and vice versa)."""
-    _write_sweep_result_json(tmp_path / "model-x.json", "model-x")
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-x", "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
-
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records, set(), output_dir=tmp_path, benchmark_type="measure"
-    )
-
-    assert [record["model"] for record in skipped_records] == ["model-x"]
-
-
-def test_text_drop_stale_skips_requires_both_output_dir_and_benchmark_type(tmp_path) -> None:
-    """Verify the helper rejects partial disk-scan configuration."""
-    skipped_records: list[dict[str, Any]] = []
-    with pytest.raises(ValueError):
-        text_bench._drop_stale_skips_for_successful_targets(skipped_records, set(), output_dir=tmp_path)
-    with pytest.raises(ValueError):
-        text_bench._drop_stale_skips_for_successful_targets(skipped_records, set(), benchmark_type="measure")
-
-
-def test_text_measure_skip_existing_reconciles_stale_skip(tmp_path) -> None:
-    """Case (a): preloaded skip + existing per-target JSON + --skip-existing drops stale row.
-
-    Simulates the bug: a prior process left a skip row for ``model-x`` after that
-    same target had actually succeeded (``model-x_measure.json`` exists). A later
-    ``--skip-existing`` run reads the stale skip row, never re-runs ``model-x``,
-    and must still drop the stale skip via disk-scan reconciliation.
-    """
-    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
-    text_bench._write_skipped_sidecar(
-        tmp_path,
-        [{"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"}],
-        "measure",
-    )
-
-    # Preload sidecar (mirrors _run_measure entry point) with no fresh successes.
-    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    successful_labels: set[str] = set()
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records,
-        successful_labels,
-        output_dir=tmp_path,
-        benchmark_type="measure",
-    )
-    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
-
-    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert persisted == []
-    rows = list(csv.DictReader((tmp_path / "combined_measure.csv").open("r", encoding="utf-8")))
-    assert not [row for row in rows if row.get("skipped_reason") == "cuda_oom"]
-
-
-def test_text_measure_no_existing_json_keeps_single_skip_row(tmp_path) -> None:
-    """Case (b): preloaded skip + NO existing per-target JSON + retry fails again keeps one row.
-
-    Regression guard for task ``b2199``: reconciliation must not spuriously drop
-    a stable skip when the target has no on-disk success JSON.
-    """
-    text_bench._write_skipped_sidecar(
-        tmp_path,
-        [{"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"}],
-        "measure",
-    )
-
-    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    # Retry attempt fails again — dedup keeps a single row.
-    text_bench._replace_skip_record(
-        skipped_records,
-        {"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
-    )
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records,
-        set(),
-        output_dir=tmp_path,
-        benchmark_type="measure",
-    )
-    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
-
-    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert [record["model"] for record in persisted] == ["model-x"]
-
-
-def test_text_measure_unrelated_existing_json_preserves_skip(tmp_path) -> None:
-    """Case (c): preloaded skip for X + unrelated ``Y_measure.json`` does not touch X.
-
-    The disk-scan must be label-scoped: an existing result for ``model-y`` must
-    not drop the skip row for ``model-x``.
-    """
-    _write_measure_result_json(tmp_path / "model-y_measure.json", "model-y")
-    text_bench._write_skipped_sidecar(
-        tmp_path,
-        [{"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"}],
-        "measure",
-    )
-
-    skipped_records = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records,
-        set(),
-        output_dir=tmp_path,
-        benchmark_type="measure",
-    )
-    text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
-
-    persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
-    assert [record["model"] for record in persisted] == ["model-x"]
-
-
 def test_text_rebuild_measure_charts_preserves_sidecar_fresh_failure(tmp_path) -> None:
     """``--rebuild-charts`` alone must not sweep preserved fresh failures out of the sidecar.
 
@@ -1666,13 +1703,14 @@ def test_text_rebuild_measure_charts_preserves_sidecar_fresh_failure(tmp_path) -
     ``2efaa`` preserved the fresh failure in ``skipped_records_measure.json``
     and task ``ea993`` masked the stale success from that run's combined
     output. A subsequent standalone ``--rebuild-charts`` must keep treating
-    the preloaded skip row as authoritative rather than deleting it because
-    ``X_measure.json`` still sits on disk.
+    the preloaded skip row as authoritative because its ``recorded_at`` is
+    strictly newer than the ``X_measure.json`` file's mtime.
     """
     _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
     text_bench._write_skipped_sidecar(
         tmp_path,
-        [{"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"}],
+        [_sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom")],
         "measure",
     )
 
@@ -1723,9 +1761,10 @@ def test_text_rebuild_measure_charts_preserve_fresh_failure_is_idempotent(tmp_pa
     invocations.
     """
     _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
     text_bench._write_skipped_sidecar(
         tmp_path,
-        [{"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"}],
+        [_sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom")],
         "measure",
     )
 
@@ -1746,12 +1785,14 @@ def test_text_rebuild_sweep_charts_preserves_sidecar_fresh_failure(tmp_path) -> 
 
     Mirrors ``test_text_rebuild_measure_charts_preserves_sidecar_fresh_failure``
     against ``_rebuild_combined_outputs`` so the sweep code path receives the
-    same protection against sweeping preloaded skip rows out via the disk-union.
+    same protection: sidecar row's ``recorded_at`` beats the backdated on-disk
+    payload's mtime.
     """
     _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
+    _backdate(tmp_path / "sweep-x.json")
     text_bench._write_skipped_sidecar(
         tmp_path,
-        [{"model": "sweep-x", "batch_size": 16, "phase": "measure", "skipped_reason": "npu_alloc"}],
+        [_sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc")],
         "sweep",
     )
 
@@ -1790,9 +1831,10 @@ def test_text_rebuild_sweep_charts_keeps_orphan_skip_row(tmp_path) -> None:
 def test_text_rebuild_sweep_charts_preserve_fresh_failure_is_idempotent(tmp_path) -> None:
     """Sweep sibling of the preserved-fresh-failure idempotency guard."""
     _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
+    _backdate(tmp_path / "sweep-x.json")
     text_bench._write_skipped_sidecar(
         tmp_path,
-        [{"model": "sweep-x", "batch_size": 16, "phase": "measure", "skipped_reason": "npu_alloc"}],
+        [_sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc")],
         "sweep",
     )
 
@@ -1808,138 +1850,20 @@ def test_text_rebuild_sweep_charts_preserve_fresh_failure_is_idempotent(tmp_path
     assert csv_after_first == csv_after_second
 
 
-def test_text_drop_stale_skips_fresh_failure_supersedes_existing_json(tmp_path) -> None:
-    """Fresh failure for X + existing ``X_measure.json`` keeps the fresh skip row.
-
-    Scenario: an earlier run wrote ``X_measure.json`` at one batch size; the
-    current run reruns X at a different batch size and it OOMs. The on-disk
-    success is stale relative to the current attempt, so the fresh skip
-    record must survive reconciliation instead of being dropped by the
-    on-disk union.
-    """
-    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
-
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records,
-        set(),
-        output_dir=tmp_path,
-        benchmark_type="measure",
-        fresh_failure_labels={"model-x"},
-    )
-
-    assert skipped_records == [
-        {"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
-
-
-def test_text_drop_stale_skips_fresh_failure_preserved_across_other_success(tmp_path) -> None:
-    """Fresh failure for X survives even when an unrelated Y has an existing JSON.
-
-    Regression guard: on-disk union must not sweep away a fresh skip for X
-    just because a different target Y has a valid result JSON on disk.
-    """
-    _write_measure_result_json(tmp_path / "model-y_measure.json", "model-y")
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-x", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
-    ]
-
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records,
-        set(),
-        output_dir=tmp_path,
-        benchmark_type="measure",
-        fresh_failure_labels={"model-x"},
-    )
-
-    assert skipped_records == [
-        {"model": "model-x", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
-    ]
-
-
-def test_text_drop_stale_skips_fresh_success_drops_prior_skip(tmp_path) -> None:
-    """Fresh success for X still drops any stale skip row for X.
-
-    Regression guard for task ``1e113``: a target that succeeded THIS run
-    must reconcile its stale sidecar row, even when its result JSON already
-    existed on disk (the disk union would include it too).
-    """
-    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
-
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records,
-        {"model-x"},
-        output_dir=tmp_path,
-        benchmark_type="measure",
-        fresh_failure_labels=set(),
-    )
-
-    assert skipped_records == []
-
-
-def test_text_replace_skip_record_populates_fresh_failure_labels() -> None:
-    """Verify _replace_skip_record adds the label to fresh_failure_labels when supplied."""
-    skipped_records: list[dict[str, Any]] = []
-    fresh_failure_labels: set[str] = set()
-
-    text_bench._replace_skip_record(
-        skipped_records,
-        {"model": "model-a", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
-        fresh_failure_labels,
-    )
-    text_bench._replace_skip_record(
-        skipped_records,
-        {"model": "model-b", "batch_size": 8, "phase": "measure", "skipped_reason": "npu_alloc"},
-        fresh_failure_labels,
-    )
-
-    assert fresh_failure_labels == {"model-a", "model-b"}
-
-
-def test_text_drop_stale_skips_fresh_success_and_failure_mix(tmp_path) -> None:
-    """Mixed reconcile: X succeeded (fresh), Y failed fresh (was on disk before), Z stale from prior sidecar.
-
-    Verifies the three routes interact correctly in one call:
-    - fresh success for X → X's stale skip is dropped.
-    - fresh failure for Y with existing Y JSON → Y's fresh skip is preserved.
-    - preloaded stale skip for Z with existing Z JSON but no fresh action → Z's stale skip is dropped.
-    """
-    _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
-    _write_measure_result_json(tmp_path / "model-y_measure.json", "model-y")
-    _write_measure_result_json(tmp_path / "model-z_measure.json", "model-z")
-    skipped_records: list[dict[str, Any]] = [
-        {"model": "model-x", "batch_size": 8, "phase": "load", "skipped_reason": "cuda_oom"},
-        {"model": "model-y", "batch_size": 32, "phase": "measure", "skipped_reason": "npu_alloc"},
-        {"model": "model-z", "batch_size": 16, "phase": "load", "skipped_reason": "cuda_oom"},
-    ]
-
-    text_bench._drop_stale_skips_for_successful_targets(
-        skipped_records,
-        {"model-x"},
-        output_dir=tmp_path,
-        benchmark_type="measure",
-        fresh_failure_labels={"model-y"},
-    )
-
-    assert [record["model"] for record in skipped_records] == ["model-y"]
-
-
 def test_text_rebuild_measure_excludes_stale_success_for_skipped_target(tmp_path) -> None:
-    """Fresh failure preserved via ``skipped_records=`` excludes stale on-disk success.
+    """Fresh failure passed via ``skipped_records=`` excludes stale on-disk success.
 
     Follow-up to task ``2efaa``: when a fresh in-process failure for ``model-x``
     is passed through ``skipped_records`` while a prior ``model-x_measure.json``
     still sits on disk, the rebuilt combined CSV must contain only the fresh
-    skip row — not a duplicate passing row derived from the stale JSON.
+    skip row — not a duplicate passing row derived from the stale JSON. The
+    fresh row carries ``recorded_at = time.time()`` while the on-disk JSON is
+    backdated, so timestamp precedence keeps the skip.
     """
     _write_measure_result_json(tmp_path / "model-x_measure.json", "model-x")
+    _backdate(tmp_path / "model-x_measure.json")
     skipped_records: list[dict[str, Any]] = [
-        {"model": "model-x", "batch_size": 64, "phase": "load", "skipped_reason": "cuda_oom"},
+        _sidecar_row_now(model="model-x", batch_size=64, phase="load", skipped_reason="cuda_oom"),
     ]
 
     text_bench._rebuild_measure_outputs(tmp_path, skipped_records=skipped_records)
@@ -1984,8 +1908,9 @@ def test_text_rebuild_measure_keeps_success_for_unrelated_target(tmp_path) -> No
 def test_text_rebuild_sweep_excludes_stale_success_for_skipped_target(tmp_path) -> None:
     """Sweep sibling: fresh failure via ``skipped_records=`` excludes stale sweep JSON."""
     _write_sweep_result_json(tmp_path / "sweep-x.json", "sweep-x")
+    _backdate(tmp_path / "sweep-x.json")
     skipped_records: list[dict[str, Any]] = [
-        {"model": "sweep-x", "batch_size": 16, "phase": "measure", "skipped_reason": "npu_alloc"},
+        _sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc"),
     ]
 
     text_bench._rebuild_combined_outputs(tmp_path, skipped_records=skipped_records)
@@ -2682,12 +2607,12 @@ def test_text_measure_continues_on_npu_alloc_error(monkeypatch, tmp_path) -> Non
 def test_text_handle_cuda_precheck_skip_writes_structured_record(tmp_path) -> None:
     """Verify the precheck handler records a structured cuda_precheck row and sidecar entry.
 
-    Fresh-failure precedence: the handler must add its label to
-    ``fresh_failure_labels`` so a stale on-disk success payload for the same
-    label is masked by rebuild reconciliation.
+    Fresh-failure precedence: the handler stamps ``recorded_at`` on the record
+    so a stale on-disk success payload for the same label is masked by rebuild
+    reconciliation via timestamp comparison.
     """
     skipped_records: list[dict[str, Any]] = []
-    fresh_failure_labels: set[str] = set()
+    before = time.time()
 
     text_bench._handle_cuda_precheck_skip(
         label="upstream/model-a",
@@ -2700,10 +2625,9 @@ def test_text_handle_cuda_precheck_skip_writes_structured_record(tmp_path) -> No
         phase="load",
         output_dir=tmp_path,
         benchmark_type="measure",
-        fresh_failure_labels=fresh_failure_labels,
     )
+    after = time.time()
 
-    assert fresh_failure_labels == {"upstream/model-a"}
     assert len(skipped_records) == 1
     record = skipped_records[0]
     assert record["model"] == "upstream/model-a"
@@ -2715,6 +2639,7 @@ def test_text_handle_cuda_precheck_skip_writes_structured_record(tmp_path) -> No
     assert record["required_bytes"] == 8_000_000
     assert record["estimated_weights_bytes"] == 7_000_000
     assert "CUDA pre-check VRAM insufficient" in record["detail"]
+    assert before <= float(record["recorded_at"]) <= after
 
     persisted = text_bench._read_skipped_sidecar(tmp_path, "measure")
     assert persisted == skipped_records
