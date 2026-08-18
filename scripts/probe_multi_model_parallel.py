@@ -17,6 +17,10 @@ concurrently through ``ThreadPoolExecutor``, and reports:
 * median per-``Model`` ``.infer`` latency,
 * ``speedup_vs_N1`` = ``N * per_model_time(N=1) / wall_time(N=N)``.
 
+``speedup_vs_n1`` is measured only when ``--n-models`` includes ``1``; otherwise
+the column is null in JSON, empty in CSV, and ``n/a`` in the console print so
+the missing baseline is not confused with a valid ``1.0`` measurement.
+
 An ``--output-parity`` mode also compares each ``Model``'s output argmax to a
 reference ``Model``, i.e. in-process determinism across replicated handles.
 
@@ -382,11 +386,16 @@ def _run_for_n(
 
         wall_stats = _summarize(wall_times)
         per_model_stats = _summarize(per_model_times)
-        # Speedup relative to a single Model of the same core_mode.
+        # Speedup relative to a single Model of the same core_mode. When no
+        # ``N=1`` baseline is available (either the sweep skipped ``N=1`` or
+        # the baseline run failed) we emit ``None`` rather than a fabricated
+        # ``1.0``: downstream renderers treat ``None`` as "unmeasured" so a
+        # missing baseline cannot be mistaken for flat parallel scaling.
+        speedup: Optional[float]
         if baseline_per_model_median is not None and wall_stats["median"] > 0:
             speedup = float(n * baseline_per_model_median / wall_stats["median"])
         else:
-            speedup = 1.0
+            speedup = None
         return {
             "n_models": n,
             "wall_time_s": wall_stats,
@@ -429,7 +438,7 @@ def _write_csv(rows: list[dict[str, Any]], csv_path: Path) -> None:
                     f"{row['per_model_time_s']['min']:.6f}",
                     f"{row['per_model_time_s']['max']:.6f}",
                     f"{row['throughput_infers_per_s']:.6f}",
-                    f"{row['speedup_vs_n1']:.6f}",
+                    "" if row["speedup_vs_n1"] is None else f"{row['speedup_vs_n1']:.6f}",
                     "" if row["parity_median"] is None else f"{row['parity_median']:.4f}",
                 ]
             )
@@ -440,6 +449,18 @@ def main() -> int:
     args = _parse_args()
 
     n_values = _parse_n_list(args.n_models)
+
+    if 1 not in n_values:
+        # The baseline is measured only when N=1 runs, so users who deliberately
+        # skip it (e.g. tight LPDDR budgets) get null speedups rather than a
+        # fabricated 1.0. Warn once so the null column isn't mistaken for a
+        # tooling bug.
+        print(
+            "warning: --n-models does not include 1; speedup_vs_n1 will be reported "
+            "as null (no baseline measurement). Add 1 to --n-models to enable "
+            "speedup reporting.",
+            file=sys.stderr,
+        )
 
     if args.core_mode == "global8" and any(n > 1 for n in n_values):
         raise SystemExit("--core-mode global8 requires --n-models 1.")
@@ -469,11 +490,12 @@ def main() -> int:
         if n == 1 and baseline_median is None:
             baseline_median = row["per_model_time_s"]["median"]
             row["speedup_vs_n1"] = 1.0
+        speedup_display = "n/a" if row["speedup_vs_n1"] is None else f"{row['speedup_vs_n1']:.2f}"
         print(
             f"n_models={n}  wall_median={row['wall_time_s']['median']:.4f}s  "
             f"per_model_median={row['per_model_time_s']['median']:.4f}s  "
             f"throughput={row['throughput_infers_per_s']:.2f} infers/s  "
-            f"speedup_vs_n1={row['speedup_vs_n1']:.2f}"
+            f"speedup_vs_n1={speedup_display}"
         )
 
     report = {
