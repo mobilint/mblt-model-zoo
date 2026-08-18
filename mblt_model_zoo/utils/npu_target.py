@@ -124,6 +124,38 @@ def _normalize_dev_list(dev_no: Any) -> List[int]:
     return [int(dev_no)]
 
 
+def _dedup_dev_no(dev_no: Any) -> Any:
+    """Return ``dev_no`` with duplicate device indices removed, order-preserving.
+
+    A repeated device index in the caller's ``dev_no`` list is semantically
+    equivalent to a single index — a device cannot be "used twice" — but the
+    raw duplicates propagate through ``dev_no`` sugar expansion and produce
+    duplicated ``target_clusters`` / ``target_cores`` entries. Downstream
+    ``_validate_global8_coverage`` collapses duplicates via a set, so it
+    passes on an invalid target list; the failure then surfaces as a
+    confusing cluster-count assert inside
+    :meth:`MobilintNPUBackend._make_slot_config`. Normalizing here keeps
+    every downstream helper's contract intact.
+
+    A list that reduces to a single unique entry is unwrapped to a scalar
+    so subsequent legacy-migration heuristics treat it as a single-device
+    input (the wire form ``[0, 0]`` should behave exactly like ``0``).
+    Non-list inputs pass through unchanged.
+    """
+    if not isinstance(dev_no, (list, tuple)):
+        return dev_no
+    seen: set[int] = set()
+    result: List[int] = []
+    for d in dev_no:
+        d_int = int(d)
+        if d_int not in seen:
+            seen.add(d_int)
+            result.append(d_int)
+    if len(result) == 1:
+        return result[0]
+    return result
+
+
 def _migrate_target_cores(values: list, fallback_dev: int, dev_no_is_list: bool) -> List[str]:
     """Migrate a mixed ``target_cores`` list to the canonical ``"d:c:k"`` form.
 
@@ -413,7 +445,7 @@ class NPUTargetSpec:
         clusters_key = f"{prefix}target_clusters"
 
         core_mode = normalize_core_mode(kwargs.get(core_mode_key, "single"))
-        dev_no = kwargs.get(dev_no_key, _DEFAULT_DEV_NO)
+        dev_no = _dedup_dev_no(kwargs.get(dev_no_key, _DEFAULT_DEV_NO))
         dev_no_is_list = isinstance(dev_no, (list, tuple))
         dev_list = _normalize_dev_list(dev_no)
         fallback_dev = dev_list[0]
@@ -770,9 +802,11 @@ class NPUTargetSpecPending:
         # Inherited dev_no is what a legacy 2-part grain item should adopt
         # as its device prefix when no explicit dev_no override is in play.
         # The caller's raw ``dev_no`` wins if set; otherwise use the
-        # baseline's canonical dev_no.
+        # baseline's canonical dev_no. Dedup here so a caller-supplied list
+        # like ``[0, 0]`` collapses to a single-device input before it
+        # reaches sugar expansion or the device-set consistency check.
         if dev_no_overridden:
-            inherited_dev_no = self.raw_dev_no
+            inherited_dev_no = _dedup_dev_no(self.raw_dev_no)
         else:
             inherited_dev_no = baseline.dev_no_public()
         inherited_is_list = isinstance(inherited_dev_no, (list, tuple))
@@ -813,11 +847,12 @@ class NPUTargetSpecPending:
         )
 
         # Resolve the effective ``dev_no`` for the returned canonical spec.
-        # Caller override wins; otherwise derive from the canonical target
-        # device prefixes so the spec is self-consistent for a later
-        # setter-chain override.
+        # Caller override wins (reusing the already-deduped ``inherited_dev_no``
+        # so a caller-supplied list like ``[0, 0]`` collapses to a scalar);
+        # otherwise derive from the canonical target device prefixes so the
+        # spec is self-consistent for a later setter-chain override.
         if dev_no_overridden:
-            resolved_dev_no: Any = self.raw_dev_no
+            resolved_dev_no: Any = inherited_dev_no
         elif cores or clusters:
             derived_devs = sorted(_devices_from_targets(cores, clusters))
             resolved_dev_no = derived_devs if len(derived_devs) > 1 else derived_devs[0]

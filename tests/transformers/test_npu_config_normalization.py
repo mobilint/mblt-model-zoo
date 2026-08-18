@@ -1662,3 +1662,92 @@ def test_migrate_target_cores_rejects_out_of_range_with_list_dev_no() -> None:
     """Range validation still fires when ``dev_no`` is a list of devices."""
     with pytest.raises(ValueError, match="cluster must be in"):
         _migrate_target_cores(["1:2:0", "0:0:0"], fallback_dev=0, dev_no_is_list=True)
+
+
+# ---------------------------------------------------------------------------
+# ``dev_no`` duplicate normalization (PR #109 review P2 follow-up)
+#
+# A repeat device index in the caller's ``dev_no`` sugar (``[0, 0]``, or a
+# script emitting ``0,0``) is semantically equivalent to a single device.
+# Before normalization the duplicate propagated through
+# ``dev_no`` sugar expansion to produce duplicated ``target_clusters`` /
+# ``target_cores`` entries. ``_validate_global8_coverage`` uses a set, so the
+# check passed on the invalid target list; the failure then surfaced as a
+# confusing cluster-count assert inside
+# :meth:`MobilintNPUBackend._make_slot_config`.
+# ---------------------------------------------------------------------------
+
+
+def test_from_kwargs_dedups_repeated_dev_no_scalar_pair_under_global8() -> None:
+    """``dev_no=[0, 0]`` normalizes to a single device without duplicating clusters."""
+    kwargs = {"core_mode": "global8", "dev_no": [0, 0]}
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0", "0:1"]
+
+
+def test_from_kwargs_scalar_dev_no_matches_deduped_pair_under_global8() -> None:
+    """``dev_no=0`` and deduped ``dev_no=[0, 0]`` produce the same canonical targets."""
+    scalar_kwargs = {"core_mode": "global8", "dev_no": 0}
+    _normalize_npu_target_kwargs(scalar_kwargs)
+    pair_kwargs = {"core_mode": "global8", "dev_no": [0, 0]}
+    _normalize_npu_target_kwargs(pair_kwargs)
+    assert scalar_kwargs["target_clusters"] == pair_kwargs["target_clusters"]
+
+
+def test_from_kwargs_preserves_caller_order_when_dedup_leaves_multiple_devices() -> None:
+    """Dedup preserves caller-supplied device order for stable script behavior."""
+    kwargs = {"core_mode": "single", "dev_no": [3, 0]}
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_cores"] == [f"{d}:{c}:{k}" for d in (3, 0) for c in (0, 1) for k in range(4)]
+
+
+def test_from_kwargs_dedups_and_preserves_order_across_alternating_pairs() -> None:
+    """``dev_no=[0, 1, 0, 1]`` under ``global8`` yields exactly one cluster pair per unique device."""
+    kwargs = {"core_mode": "global8", "dev_no": [0, 1, 0, 1]}
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0", "0:1", "1:0", "1:1"]
+
+
+def test_from_kwargs_unwraps_singleton_list_dev_no_to_scalar() -> None:
+    """A single-element ``dev_no`` list collapses to a scalar in the derived form."""
+    kwargs = {"core_mode": "single", "dev_no": [0]}
+    _normalize_npu_target_kwargs(kwargs)
+    # Sugar expansion under a scalar device produces exactly the 8-core single-device layout.
+    assert kwargs["target_cores"] == [f"0:{c}:{k}" for c in (0, 1) for k in range(4)]
+
+
+def test_backend_from_dedup_dev_no_pair_makes_slot_config_succeed() -> None:
+    """Repeated ``dev_no`` no longer trips the cluster-count assert in ``_make_slot_config``.
+
+    Before the fix, ``dev_no=[0, 0]`` + ``core_mode=global8`` produced a
+    ``target_clusters`` list of four entries (``["0:0", "0:1", "0:0", "0:1"]``);
+    :meth:`MobilintNPUBackend._make_slot_config` then asserted the filtered
+    cluster count was exactly two and failed with ``got 4``. The dedup here
+    keeps the backend construction path clean.
+    """
+    kwargs = {
+        "mxq_path": "model.mxq",
+        "core_mode": "global8",
+        "dev_no": [0, 0],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    assert backend._target_clusters_serialized == ["0:0", "0:1"]
+    # ``_make_slot_config`` filters clusters by device prefix and asserts
+    # ``len(clusters) == 2`` under ``global8``; a duplicate would give 4.
+    slot_cfg = backend._make_slot_config(0)
+    assert slot_cfg is not None
+
+
+def test_dev_no_setter_dedups_repeated_pair() -> None:
+    """A runtime ``backend.dev_no = [0, 0]`` override deduplicates before sugar expansion."""
+    backend = _load_backend(
+        {
+            "mxq_path": "model.mxq",
+            "core_mode": "global8",
+            "dev_no": 0,
+        }
+    )
+    backend.dev_no = [0, 0]
+    assert backend._target_clusters_serialized == ["0:0", "0:1"]
+    assert backend.dev_no == 0
