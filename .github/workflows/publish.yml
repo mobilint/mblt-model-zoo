@@ -28,7 +28,36 @@ jobs:
           python -m pip install build
 
       - name: Build package
-        run: python -m build
+        run: |
+          rm -rf build dist *.egg-info
+          python -m build
+
+      - name: Verify Vision facade wheel contents
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          forbidden_prefixes = (
+              "mblt_model_zoo/vision/models/",
+              "mblt_model_zoo/vision/utils/datasets/",
+              "mblt_model_zoo/vision/utils/evaluation/",
+              "mblt_model_zoo/vision/utils/postprocess/",
+              "mblt_model_zoo/vision/utils/preprocess/",
+          )
+          wheel = next(Path("dist").glob("*.whl"))
+          with ZipFile(wheel) as archive:
+              forbidden = [
+                  name
+                  for name in archive.namelist()
+                  if name.startswith(forbidden_prefixes)
+              ]
+          if forbidden:
+              raise SystemExit(
+                  "Wheel contains legacy Vision implementation files:\n"
+                  + "\n".join(forbidden)
+              )
+          PY
 
       - name: Upload built distributions
         uses: actions/upload-artifact@v7

@@ -11,7 +11,8 @@ description: >-
 1. Read `AGENTS.md`, run `git status --short`, and inspect the relevant parser, exports, tests, and
    `pyproject.toml` before editing.
 2. Keep `mblt_model_zoo.vision` and its Vision compilation exports as thin compatibility layers.
-   Do not reintroduce Vision implementation, datasets, evaluation, or benchmarks. Limit
+   Compatibility modules must forward to `mblt_vision`; never copy Vision implementation, model
+   YAMLs, dataset YAMLs, evaluation, or benchmarks into Model Zoo. Limit
    `tests/vision` to generic opt-in facade smoke tests; keep implementation-specific Vision tests
    in `mblt-vision-python`.
 3. Make new Vision CLI behavior in `mblt-vision-python` first. The Model Zoo `predict`, `val`, and
@@ -26,3 +27,6 @@ description: >-
 7. When package ownership, public API, CLI bridges, or runtime dependencies change significantly,
    update `AGENTS.md`, this canonical skill, the Claude entry point when its workflow changes, and
    relevant documentation in the same change.
+8. Before a release, build from a clean tree and inspect the wheel. Reject legacy Vision
+   implementation paths such as `vision/models/`, `vision/utils/preprocess/`,
+   `vision/utils/postprocess/`, `vision/utils/datasets/`, and `vision/utils/evaluation/`.

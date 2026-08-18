@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `mblt_model_zoo.vision` is now a forwarding-only compatibility facade. Vision model metadata,
+  preprocessing, postprocessing, datasets, evaluation, and result handling are sourced exclusively
+  from `mblt-vision-python`; Model Zoo no longer ships duplicate Vision dataset YAMLs or utility
+  implementations.
+- Historical compatibility imports that remain available resolve to the matching `mblt_vision`
+  object. New applications should import from `mblt_vision` directly.
+
 ## 2.3.0
 
 ### Breaking Changes

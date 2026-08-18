@@ -16,7 +16,7 @@ def test_model_zoo_vision_commands_use_standalone_handlers() -> None:
 
     predict_args = parser.parse_args(["predict", "--source", "image.jpg", "--model", "resnet50"])
     val_args = parser.parse_args(["val", "--model", "resnet50"])
-    compile_args = parser.parse_args(["compile", "--model-cls", "resnet50"])
+    compile_args = parser.parse_args(["compile", "--model-cls", "resnet50", "--target-device", "aries-rb"])
 
     assert predict_args._handler is _cmd_predict
     assert val_args._handler is _cmd_val

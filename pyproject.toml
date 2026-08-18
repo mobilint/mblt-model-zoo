@@ -110,7 +110,6 @@ version = { attr = "mblt_model_zoo.__version__" }
 "mblt_model_zoo" = [
     "MeloTTS/text/cmudict.rep",
     "MeloTTS/text/cmudict_cache.pickle",
-    "vision/datasets/*.yaml",
 ]
 
 [dependency-groups]

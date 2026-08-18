@@ -39,11 +39,11 @@ Release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
 ## Vision
 
-Vision models, model metadata, preprocessing, postprocessing, and Python API
+Vision models, model metadata, preprocessing, postprocessing, datasets, evaluation, and Python API
 documentation are maintained in
 [mblt-vision-python](https://github.com/mobilint/mblt-vision-python). Install it
 and import from `mblt_vision` for new applications. `mblt_model_zoo.vision`
-remains available as a compatibility facade for existing code.
+remains available as a forwarding-only compatibility facade for existing code.
 
 Model Zoo continues to provide the Vision CLI, compilation, benchmarks, and
 dataset-management workflows documented below.

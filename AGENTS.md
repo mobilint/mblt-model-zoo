@@ -22,8 +22,9 @@ Before editing, run `git status --short` and preserve unrelated work.
 ## Repository Map
 
 - `mblt_model_zoo/cli`: Model Zoo CLI; Vision command handlers are imported from `mblt_vision.cli`.
-- `mblt_model_zoo/vision`: compatibility imports and re-exports only; do not restore moved Vision
-  implementation here.
+- `mblt_model_zoo/vision`: compatibility imports and re-exports only. Every compatibility module
+  must forward to `mblt_vision`; do not restore copied Vision implementation, model YAMLs, or
+  dataset YAMLs here.
 - `mblt_model_zoo/compile`: compatibility exports for Vision compilation plus Model Zoo APIs.
 - `mblt_model_zoo/hf_transformers`: Hugging Face integrations and benchmark utilities.
 - `mblt_model_zoo/MeloTTS`: MeloTTS integration and text normalization.
@@ -48,6 +49,10 @@ Before editing, run `git status --short` and preserve unrelated work.
   processing, datasets, evaluation, benchmarks, or compilation here. The only Vision tests kept
   here are generic, opt-in facade smoke tests under `tests/vision`; implementation-specific tests
   belong in `mblt-vision-python`.
+- Build release artifacts from a clean tree and inspect the wheel contents. Model Zoo distributions
+  must not contain legacy Vision `models/`, `utils/preprocess/`, `utils/postprocess/`,
+  `utils/datasets/`, or `utils/evaluation/` paths; those belong exclusively to
+  `mblt-vision-python`.
 - Use `obb` when a Model Zoo compatibility configuration must name the Vision task.
 
 ## Transformers and MeloTTS

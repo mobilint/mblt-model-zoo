@@ -1,8 +1,6 @@
-"""Vision utilities."""
+"""Deprecated compatibility exports for standalone Vision utilities."""
 
-from __future__ import annotations
-
-from .results import Results
-from .types import ListTensorLike, TensorLike
+from mblt_vision.utils.results import Results
+from mblt_vision.utils.types import ListTensorLike, TensorLike
 
 __all__: list[str] = ["Results", "TensorLike", "ListTensorLike"]
