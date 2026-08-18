@@ -1751,3 +1751,104 @@ def test_dev_no_setter_dedups_repeated_pair() -> None:
     backend.dev_no = [0, 0]
     assert backend._target_clusters_serialized == ["0:0", "0:1"]
     assert backend.dev_no == 0
+
+
+# ---------------------------------------------------------------------------
+# Canonical target duplicate normalization (PR #109 review P2 follow-up)
+#
+# When the caller supplies canonical ``target_cores`` / ``target_clusters``
+# strings directly (no ``dev_no`` sugar involved), a repeated entry means the
+# same target listed twice. ``_validate_global8_coverage`` collapses those
+# duplicates via a set — so the coverage check passes on an invalid target
+# list — but the raw list propagates unchanged into
+# :meth:`MobilintNPUBackend._make_slot_config`, which asserts the exact
+# cluster / core count and fails with a confusing ``got N`` message. Dedup
+# in the migrator matches the reviewer's guidance ("Deduplicate canonical
+# cluster entries") and keeps ``_validate_global8_coverage`` /
+# ``_make_slot_config`` consistent.
+# ---------------------------------------------------------------------------
+
+
+def test_from_kwargs_dedups_repeated_target_clusters_under_global8() -> None:
+    """``target_clusters=["0:0", "0:1", "0:0"]`` collapses to two entries."""
+    kwargs = {"core_mode": "global8", "target_clusters": ["0:0", "0:1", "0:0"]}
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0", "0:1"]
+
+
+def test_from_kwargs_dedups_multi_device_target_clusters_under_global8() -> None:
+    """A duplicate on one device does not drop coverage on other devices."""
+    kwargs = {
+        "core_mode": "global8",
+        "target_clusters": ["0:0", "0:1", "1:0", "1:1", "0:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0", "0:1", "1:0", "1:1"]
+
+
+def test_from_kwargs_dedups_repeated_target_cores_under_single() -> None:
+    """A repeated canonical core string collapses in ``_migrate_target_cores``."""
+    kwargs = {"core_mode": "single", "target_cores": ["0:0:0", "0:0:1", "0:0:0"]}
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_cores"] == ["0:0:0", "0:0:1"]
+
+
+def test_from_kwargs_leaves_unique_target_clusters_untouched() -> None:
+    """A canonical list without duplicates is preserved verbatim (regression)."""
+    kwargs = {"core_mode": "global8", "target_clusters": ["0:0", "0:1"]}
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0", "0:1"]
+
+
+def test_from_kwargs_combines_dev_no_and_target_clusters_dedup() -> None:
+    """``dev_no=[0, 0]`` + duplicate canonical clusters both dedup in a single pass.
+
+    Confirms the target-migration dedup coexists with the ``dev_no`` dedup
+    (task 8f028): with both dedup paths firing, the device-set consistency
+    check sees ``{0}`` on each side and the resulting backend spec has one
+    device and two clusters.
+    """
+    kwargs = {
+        "core_mode": "global8",
+        "dev_no": [0, 0],
+        "target_clusters": ["0:0", "0:1", "0:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    assert kwargs["target_clusters"] == ["0:0", "0:1"]
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    assert backend._target_clusters_serialized == ["0:0", "0:1"]
+    assert backend.dev_no == 0
+
+
+def test_backend_from_duplicate_target_clusters_makes_slot_config_succeed() -> None:
+    """Repeated canonical clusters no longer trip the cluster-count assert.
+
+    Before the fix, ``target_clusters=["0:0", "0:1", "0:0"]`` under
+    ``global8`` passed :func:`_validate_global8_coverage` (which uses a set)
+    but failed :meth:`MobilintNPUBackend._make_slot_config`'s exact-count
+    assertion with ``got 3``. The migrator now silently collapses the
+    duplicate before either check.
+    """
+    kwargs = {
+        "mxq_path": "model.mxq",
+        "core_mode": "global8",
+        "target_clusters": ["0:0", "0:1", "0:0"],
+    }
+    _normalize_npu_target_kwargs(kwargs)
+    backend = MobilintNPUBackend.from_dict(dict(kwargs))
+    assert backend._target_clusters_serialized == ["0:0", "0:1"]
+    slot_cfg = backend._make_slot_config(0)
+    assert slot_cfg is not None
+
+
+def test_migrate_target_clusters_dedups_direct_call() -> None:
+    """Direct call to the migrator returns a deduplicated canonical list."""
+    assert _migrate_target_clusters(["0:0", "0:1", "0:0"], fallback_dev=0, dev_no_is_list=False) == ["0:0", "0:1"]
+
+
+def test_migrate_target_cores_dedups_direct_call() -> None:
+    """Direct call to the core migrator returns a deduplicated canonical list."""
+    assert _migrate_target_cores(["0:0:0", "0:0:1", "0:0:0"], fallback_dev=0, dev_no_is_list=False) == [
+        "0:0:0",
+        "0:0:1",
+    ]

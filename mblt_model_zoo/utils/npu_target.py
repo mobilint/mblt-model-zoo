@@ -156,6 +156,26 @@ def _dedup_dev_no(dev_no: Any) -> Any:
     return result
 
 
+def _dedup_preserve_order(entries: List[str]) -> List[str]:
+    """Return ``entries`` with duplicates removed, first occurrence wins.
+
+    A repeated canonical ``target_cores`` (``"d:c:k"``) or ``target_clusters``
+    (``"d:c"``) string is semantically identical to a single occurrence — a
+    target cannot be pinned twice. Raw duplicates would otherwise slip past
+    :func:`_validate_global8_coverage` (which uses a set) and surface as a
+    confusing cluster-count assert in
+    :meth:`MobilintNPUBackend._make_slot_config`. Sibling to
+    :func:`_dedup_dev_no`; keep them colocated.
+    """
+    seen: set[str] = set()
+    result: List[str] = []
+    for entry in entries:
+        if entry not in seen:
+            seen.add(entry)
+            result.append(entry)
+    return result
+
+
 def _migrate_target_cores(values: list, fallback_dev: int, dev_no_is_list: bool) -> List[str]:
     """Migrate a mixed ``target_cores`` list to the canonical ``"d:c:k"`` form.
 
@@ -212,7 +232,7 @@ def _migrate_target_cores(values: list, fallback_dev: int, dev_no_is_list: bool)
             raise ValueError(f"Invalid target_cores entry: {v!r}")
     if len(modes) > 1:
         raise ValueError("target_cores mixes legacy 'c:k' and canonical 'd:c:k' items; use one form for every entry.")
-    return result
+    return _dedup_preserve_order(result)
 
 
 def _migrate_target_clusters(values: list, fallback_dev: int, dev_no_is_list: bool) -> List[str]:
@@ -283,7 +303,7 @@ def _migrate_target_clusters(values: list, fallback_dev: int, dev_no_is_list: bo
             raise ValueError(f"Invalid target_clusters entry: {v!r}")
     if len(modes) > 1:
         raise ValueError("target_clusters mixes legacy and canonical items; use one form for every entry.")
-    return result
+    return _dedup_preserve_order(result)
 
 
 def _expand_clusters_to_cores(clusters: List[str]) -> List[str]:
