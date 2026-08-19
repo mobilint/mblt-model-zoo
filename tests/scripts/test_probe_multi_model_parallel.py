@@ -308,6 +308,139 @@ def test_main_no_warning_when_n1_included(
     assert "does not include 1" not in captured.err
 
 
+def _global8_main_args(tmp_path: Path, n_models: str, mxq_path: Path, core_mode: str = "global8") -> list[str]:
+    """Build a ``sys.argv``-style list that requests a specific ``--core-mode``."""
+    argv = _main_args(tmp_path, n_models, mxq_path)
+    mode_idx = argv.index("--core-mode")
+    argv[mode_idx + 1] = core_mode
+    return argv
+
+
+def test_main_global8_filters_default_n_models(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--core-mode global8`` + default ``--n-models 1,2,4`` runs N=1 and warns on drop.
+
+    Regression guard: the previous startup ``SystemExit`` terminated the whole
+    invocation before any report was written, even though N=1 could have
+    produced a valid baseline.
+    """
+    _FakeModel._reset(launch_ok_before_fail=1_000_000)
+    mxq_path = tmp_path / "fake.mxq"
+    mxq_path.write_bytes(b"")
+    monkeypatch.setattr(sys, "argv", _global8_main_args(tmp_path, "1,2,4", mxq_path))
+
+    assert probe.main() == 0
+
+    captured = capsys.readouterr()
+    assert "--core-mode global8 forces N=1" in captured.err
+    assert "[1, 2, 4] -> [1]" in captured.err
+
+    report = json.loads((tmp_path / "probe_report.json").read_text(encoding="utf-8"))
+    assert report["n_values"] == [1]
+    n_by_row = {row["n_models"]: row for row in report["rows"]}
+    assert set(n_by_row.keys()) == {1}
+
+
+def test_main_global8_fallback_when_no_n1_requested(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--core-mode global8`` + ``--n-models 2,4`` falls back to N=1 and warns.
+
+    A caller who explicitly asked only for N>1 under global8 still gets a
+    usable baseline row rather than a hard failure.
+    """
+    _FakeModel._reset(launch_ok_before_fail=1_000_000)
+    mxq_path = tmp_path / "fake.mxq"
+    mxq_path.write_bytes(b"")
+    monkeypatch.setattr(sys, "argv", _global8_main_args(tmp_path, "2,4", mxq_path))
+
+    assert probe.main() == 0
+
+    captured = capsys.readouterr()
+    assert "--core-mode global8 forces N=1" in captured.err
+    assert "[2, 4] -> [1]" in captured.err
+    # After the filter promotes N=1 back into scope, the null-baseline warning
+    # would be stale — the ordering in ``main`` runs the filter first so the
+    # baseline check reflects the post-filter sweep.
+    assert "--n-models does not include 1" not in captured.err
+
+    report = json.loads((tmp_path / "probe_report.json").read_text(encoding="utf-8"))
+    assert report["n_values"] == [1]
+
+
+def test_main_global8_no_warning_when_n_values_already_singleton(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--core-mode global8`` + ``--n-models 1`` runs N=1 silently (no filter drop).
+
+    The filter only prints when it actually changed ``n_values`` so a caller
+    who already asked for N=1 doesn't see a misleading warning.
+    """
+    _FakeModel._reset(launch_ok_before_fail=1_000_000)
+    mxq_path = tmp_path / "fake.mxq"
+    mxq_path.write_bytes(b"")
+    monkeypatch.setattr(sys, "argv", _global8_main_args(tmp_path, "1", mxq_path))
+
+    assert probe.main() == 0
+
+    captured = capsys.readouterr()
+    assert "--core-mode global8 forces N=1" not in captured.err
+
+
+def test_main_global4_runs_full_sweep(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Non-global8 modes must keep the caller's ``--n-models`` untouched.
+
+    Regression guard: the global8 filter must not apply to global4/single so
+    the existing multi-N sweep semantics are preserved.
+    """
+    _FakeModel._reset(launch_ok_before_fail=1_000_000)
+    mxq_path = tmp_path / "fake.mxq"
+    mxq_path.write_bytes(b"")
+    monkeypatch.setattr(sys, "argv", _global8_main_args(tmp_path, "1,2,4", mxq_path, core_mode="global4"))
+
+    assert probe.main() == 0
+
+    captured = capsys.readouterr()
+    assert "--core-mode global8 forces N=1" not in captured.err
+
+    report = json.loads((tmp_path / "probe_report.json").read_text(encoding="utf-8"))
+    assert report["n_values"] == [1, 2, 4]
+    n_by_row = {row["n_models"]: row for row in report["rows"]}
+    assert set(n_by_row.keys()) == {1, 2, 4}
+
+
+def test_main_global8_writes_reports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``--core-mode global8`` + default sweep must produce both JSON and CSV reports.
+
+    Before the fix, the startup ``SystemExit`` raised before any report file
+    was written, so callers who inherited the default ``--n-models`` were
+    left with no output at all.
+    """
+    _FakeModel._reset(launch_ok_before_fail=1_000_000)
+    mxq_path = tmp_path / "fake.mxq"
+    mxq_path.write_bytes(b"")
+    monkeypatch.setattr(sys, "argv", _global8_main_args(tmp_path, "1,2,4", mxq_path))
+
+    assert probe.main() == 0
+
+    json_path = tmp_path / "probe_report.json"
+    csv_path = tmp_path / "probe_report.csv"
+    assert json_path.is_file()
+    assert csv_path.is_file()
+
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert any(row["n_models"] == 1 for row in report["rows"])
+
+    with csv_path.open("r", encoding="utf-8") as f:
+        csv_rows = list(csv.reader(f))
+    header = csv_rows[0]
+    n_col = header.index("n_models")
+    assert any(row[n_col] == "1" for row in csv_rows[1:])
+
+
 def test_main_reports_null_speedup_after_baseline_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

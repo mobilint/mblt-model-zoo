@@ -99,7 +99,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Core mode applied to each Model. 'single' claims a single core, "
             "'global4' claims a 4-core cluster, 'global8' claims all 8 cores. "
-            "Global8 forces N=1."
+            "Global8 forces N=1 (any larger --n-models values are silently dropped)."
         ),
     )
     parser.add_argument(
@@ -450,6 +450,21 @@ def main() -> int:
 
     n_values = _parse_n_list(args.n_models)
 
+    if args.core_mode == "global8":
+        # global8 claims every core, so more than one Model on the same accelerator is
+        # impossible; filter the sweep down to N=1 (falling back to [1] when the caller
+        # explicitly asked only for N>1) and warn so partial reports still get written.
+        # This matches probe_multi_model_hbm._sweep_device. The per-iteration guard in
+        # ``_allocate_cores`` stays as defense in depth against callers that bypass main.
+        original_n_values = list(n_values)
+        n_values = [n for n in n_values if n == 1] or [1]
+        if n_values != original_n_values:
+            print(
+                f"--core-mode global8 forces N=1 (all 8 cores claimed by a single Model); "
+                f"filtered --n-models {original_n_values} -> {n_values}.",
+                file=sys.stderr,
+            )
+
     if 1 not in n_values:
         # The baseline is measured only when N=1 runs, so users who deliberately
         # skip it (e.g. tight LPDDR budgets) get null speedups rather than a
@@ -461,9 +476,6 @@ def main() -> int:
             "speedup reporting.",
             file=sys.stderr,
         )
-
-    if args.core_mode == "global8" and any(n > 1 for n in n_values):
-        raise SystemExit("--core-mode global8 requires --n-models 1.")
 
     if not Path(args.mxq_path).is_file():
         raise SystemExit(f"--mxq-path not found: {args.mxq_path}")
