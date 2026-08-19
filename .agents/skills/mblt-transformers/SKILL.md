@@ -34,7 +34,7 @@ description: >-
   setter chain or standalone runtime mutation gets an isolated intent slate. The per-field
   setters (`dev_no`, `core_mode`, `target_cores`, `target_clusters`) only mutate `_pending` and
   invalidate `_finalized`; setter order within one chain does not affect the resolved canonical
-  spec. `finalize_pending()` runs one ordered pipeline (legacy migration → sibling drop → grain
+  spec. `finalize()` runs one ordered pipeline (legacy migration → sibling drop → grain
   unification → off-mode drop → device-set consistency → `global8` coverage) once every
   accumulated override is visible. Target-only override syncs `dev_no` to the target device
   set at finalize; `dev_no`-only override clears stale targets and re-expands sugar; both
@@ -44,7 +44,7 @@ description: >-
 - Canonical NPU target wire form is fully-qualified: `target_cores` entries are `"d:c:k"`
   strings and `target_clusters` entries are `"d:c"` strings. Legacy 2-part `c:k` cores, bare
   integer clusters, and `qbruntime.CoreId` / `Cluster` objects are silently migrated to the
-  canonical form inside `finalize_pending()` (and its `_normalize_npu_target_kwargs` config-
+  canonical form inside `finalize()` (and its `_normalize_npu_target_kwargs` config-
   layer wrapper) using `dev_no` as the fallback prefix. `single` mode unfolds `target_clusters`
   into every cluster core; `multi` / `global4` / `global8` fold `target_cores` up to their
   `"d:c"` cluster prefixes and warn when a partial cluster is rounded up. `global8` requires

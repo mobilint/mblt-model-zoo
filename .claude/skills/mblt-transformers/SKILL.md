@@ -25,14 +25,14 @@ at dispatch time, not `dev_no`. Backend target topology accumulates raw override
 to a fresh baseline via `NPUTargetSpecPending.from_baseline` so the next setter chain (or
 standalone runtime mutation) gets a clean intent slate. Setters (`dev_no`, `core_mode`,
 `target_cores`, `target_clusters`) only mutate `_pending` and invalidate `_finalized`; setter
-order within one chain does not affect the resolved spec. `finalize_pending()` runs one
+order within one chain does not affect the resolved spec. `finalize()` runs one
 ordered pipeline (legacy migration → sibling drop → grain unification → off-mode drop →
 device-set consistency → `global8` coverage). Target-only override syncs `dev_no` to the
 target device set; `dev_no`-only override clears stale targets and re-expands sugar; both
 overridden → device-set consistency check surfaces mismatches on the next canonical read (not
 on the setter). `NPUTargetSpec.from_kwargs` remains the config-layer (JSON load) entry point.
 Legacy 2-part cores, bare int clusters, and `qbruntime.CoreId`/`Cluster` objects are silently
-migrated to canonical form inside `finalize_pending()` (and its `_normalize_npu_target_kwargs`
+migrated to canonical form inside `finalize()` (and its `_normalize_npu_target_kwargs`
 config-layer wrapper); `single` unfolds clusters to cores, `multi`/`global4`/`global8` fold
 cores to clusters and warn on partial coverage, `global8` requires both clusters on every
 covered device. `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV along
