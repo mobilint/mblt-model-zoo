@@ -664,6 +664,30 @@ def _candidate_max_batch_sizes(config: Any, *, task: str) -> Iterable[Any]:
             yield getattr(vision_config, "max_batch_size", None)
 
 
+def _candidate_core_modes(config: Any, *, task: str) -> Iterable[Any]:
+    """Yield task-specific ``core_mode`` candidates from a model config.
+
+    Mirrors :func:`_candidate_max_batch_sizes` so the pre-launch core-mode
+    probe honors the same VLM sub-config traversal (Qwen3-VL Batch16 releases
+    ship ``text_config.core_mode``).
+
+    Args:
+        config: Model config object that may expose top-level or nested ``core_mode`` attributes.
+        task: Transformers pipeline task used to decide VLM-specific candidates.
+
+    Yields:
+        Candidate ``core_mode`` string values in priority order.
+    """
+    yield getattr(config, "core_mode", None)
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        yield getattr(text_config, "core_mode", None)
+    if _is_vlm_task(task):
+        vision_config = getattr(config, "vision_config", None)
+        if vision_config is not None:
+            yield getattr(vision_config, "core_mode", None)
+
+
 def _resolve_model_max_batch_size(pipeline: Any, *, task: str) -> int:
     """Resolve the automatic CLI batch size from a loaded pipeline.
 
@@ -700,7 +724,144 @@ def _resolve_cli_batch_size(args: argparse.Namespace, pipeline: Any) -> int:
     return _resolve_model_max_batch_size(pipeline, task=args.task)
 
 
+# Batch and core-mode resolution
+# ------------------------------
+# Every ``args.batch_size`` / ``args.core_mode`` reader in this module routes
+# through one of four canonical entry points so a fourth-repeat "CLI-only
+# reader missing the config-driven aggregate" review comment cannot resurface:
+#
+# Pre-launch (before pipeline construction):
+#     :func:`_resolve_effective_batch_size_pre_launch` (CLI → config → 1)
+#     :func:`_resolve_effective_core_mode_pre_launch`  (CLI → config → None)
+#
+# Post-launch measurement (pipeline exists):
+#     :func:`_resolve_cli_batch_size` (CLI → pipeline config → 1)
+#
+# Post-launch Qwen3-VL guard (pipeline + backend exist):
+#     :func:`_resolve_effective_qwen3_vl_batch` (CLI → backend → config → None)
+#
+# Raw pass-through to :func:`_build_pipeline` (no resolution needed — the
+# Mobilint config layer normalizes the value downstream):
+#     ``core_mode=args.core_mode`` and ``max_batch_size=args.batch_size`` at
+#     the four :func:`_build_pipeline` call sites in ``_run_text_measure``,
+#     ``_run_vlm_measure``, ``_run_text_sweep``, ``_run_vlm_sweep``.
+#
+# Any new CLI-vs-config decision MUST use one of these resolvers; do NOT add
+# a fresh ``args.batch_size`` / ``args.core_mode`` read outside these bodies.
+
+
 _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES = frozenset({"multi", "global4", "global8"})
+
+
+def _resolve_effective_batch_size_pre_launch(
+    args: argparse.Namespace,
+    *,
+    model: str | None,
+    task: str | None,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> int:
+    """Resolve the effective aggregate ``max_batch_size`` before pipeline construction.
+
+    The pre-launch counterpart to :func:`_resolve_cli_batch_size`. Runs when
+    the pipeline does not exist yet (e.g. from
+    :func:`_default_single_target_cores_for_args`, which decides target-cores
+    defaults that feed into pipeline construction).
+
+    Under the sw-batch contract (AGENTS.md L171-L177) the aggregate
+    ``max_batch_size`` is ``N * K``: a ``K == 1`` release with
+    ``config.max_batch_size = 16`` still fans out to ``N = 16`` sw-batch
+    slots even when the CLI omits ``--batch-size``. Inspecting only
+    ``args.batch_size`` at pre-launch time loses that config-driven ``N`` and
+    was the root cause of the "``K == 1`` MXQ pinned to ``0:0`` on all
+    slots → Model_NotAlive" bug (PR review r3813611879).
+
+    Resolution priority:
+
+    1. ``args.batch_size`` when set — the CLI always wins.
+    2. :func:`_probe_config_max_batch_size` — release config aggregate,
+       task-aware via :func:`_candidate_max_batch_sizes` so VLM
+       ``text_config.max_batch_size`` / ``vision_config.max_batch_size`` are
+       honored.
+    3. ``1`` — both signals absent, treat as non-batched.
+
+    Args:
+        args: Parsed CLI arguments.
+        model: Model repo string or local path. When ``None`` or empty, the
+            config probe is skipped and this returns ``1``.
+        task: Transformers pipeline task (drives VLM sub-config traversal
+            through :func:`_candidate_max_batch_sizes`).
+        trust_remote_code: Forwarded to :meth:`AutoConfig.from_pretrained`.
+        revision: Forwarded to :meth:`AutoConfig.from_pretrained`.
+
+    Returns:
+        Effective aggregate batch size (``>= 1``).
+    """
+    explicit = getattr(args, "batch_size", None)
+    if explicit is not None:
+        try:
+            return max(1, int(explicit))
+        except (TypeError, ValueError):
+            pass
+    if not model:
+        return 1
+    return _probe_config_max_batch_size(
+        str(model),
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+        task=task or "",
+    )
+
+
+def _resolve_effective_core_mode_pre_launch(
+    args: argparse.Namespace,
+    *,
+    model: str | None,
+    task: str | None,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> str | None:
+    """Resolve the effective ``--core-mode`` before pipeline construction.
+
+    Sibling of :func:`_resolve_effective_batch_size_pre_launch`. The pre-launch
+    guard chain (:func:`_enforce_batched_mxq_core_mode_constraint` via
+    :func:`_resolve_effective_llm_core_mode`) uses this to catch a release
+    that ships a non-``single`` ``core_mode`` in its config even when the
+    caller omits ``--core-mode`` — the previous CLI-only read let a
+    ``text_config.core_mode = 'global4'`` release defer silently until
+    post-launch.
+
+    Resolution priority:
+
+    1. ``getattr(args, "core_mode", None)`` when set — the CLI always wins.
+    2. :func:`_probe_config_core_mode` — release config's declared
+       ``core_mode`` (task-aware sub-config traversal).
+    3. ``None`` — no CLI signal and no resolvable config signal; the caller
+       treats this as "unspecified" and falls through to its own default.
+
+    Args:
+        args: Parsed CLI arguments.
+        model: Model repo string or local path. When ``None`` or empty, the
+            config probe is skipped and this returns whatever the CLI holds
+            (possibly ``None``).
+        task: Transformers pipeline task (drives VLM sub-config traversal).
+        trust_remote_code: Forwarded to :meth:`AutoConfig.from_pretrained`.
+        revision: Forwarded to :meth:`AutoConfig.from_pretrained`.
+
+    Returns:
+        Effective core-mode string or ``None`` when neither signal resolves.
+    """
+    explicit = getattr(args, "core_mode", None)
+    if explicit is not None:
+        return explicit
+    if not model:
+        return None
+    return _probe_config_core_mode(
+        str(model),
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+        task=task or "",
+    )
 
 
 def _probe_config_max_batch_size(
@@ -734,6 +895,41 @@ def _probe_config_max_batch_size(
         if size is not None:
             return size
     return 1
+
+
+def _probe_config_core_mode(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+    task: str,
+) -> str | None:
+    """Return the config-declared ``core_mode``, or ``None`` when unavailable.
+
+    Pre-launch analogue of the ``backend.core_mode`` fallback used by
+    :func:`_verify_batched_mxq_core_mode_post_launch`. Loads
+    ``AutoConfig.from_pretrained(model)`` and walks
+    :func:`_candidate_core_modes` so a Qwen3-VL release shipping
+    ``text_config.core_mode = 'global4'`` (with no CLI ``--core-mode``) is
+    still surfaced. Any resolution failure returns ``None`` and the caller
+    falls through — matching :func:`_probe_config_max_batch_size`'s
+    fault-tolerance discipline.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return None
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return None
+    for candidate in _candidate_core_modes(config, task=task):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
 
 
 def _probe_mxq_artifact_k(mxq_path: str) -> int | None:
@@ -830,6 +1026,14 @@ def _resolve_effective_llm_core_mode(
     the caller can raise a rejection message that names the flag the user
     actually passed and pin the same attribute when auto-defaulting to
     ``single``.
+
+    When neither a role-specific flag nor ``--core-mode`` is set on the CLI,
+    the base-flag fallback routes through
+    :func:`_resolve_effective_core_mode_pre_launch` so a release that ships
+    a non-``single`` ``core_mode`` in its config (e.g. Qwen3-VL Batch16 with
+    ``text_config.core_mode = 'global4'``) is still surfaced at pre-launch.
+    The ``flag_label`` becomes ``"release config core_mode"`` in that case
+    to keep the SystemExit message honest about where the value came from.
     """
     if _is_vlm_task(getattr(args, "task", None)):
         text_mode = getattr(args, "text_core_mode", None)
@@ -839,7 +1043,17 @@ def _resolve_effective_llm_core_mode(
         base_mode = getattr(args, "base_core_mode", None)
         if base_mode is not None:
             return base_mode, "--base-core-mode", "base_core_mode"
-    return getattr(args, "core_mode", None), "--core-mode", "core_mode"
+    if getattr(args, "core_mode", None) is not None:
+        return args.core_mode, "--core-mode", "core_mode"
+    effective = _resolve_effective_core_mode_pre_launch(
+        args,
+        model=getattr(args, "model", None),
+        task=getattr(args, "task", None),
+        trust_remote_code=getattr(args, "trust_remote_code", True),
+        revision=getattr(args, "revision", None),
+    )
+    label = "--core-mode" if effective is None else "release config core_mode"
+    return effective, label, "core_mode"
 
 
 @dataclass(frozen=True)
@@ -1216,13 +1430,28 @@ def _verify_qwen3_vl_batch_constraint_post_launch(pipeline: Any, args: argparse.
 def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:
     """Return default single-mode target cores for the pipeline construction phase.
 
-    Explicit batched TPS runs should leave ``target_cores`` unset so qbruntime can use every
+    Batched TPS runs should leave ``target_cores`` unset so qbruntime can use every
     available core in single mode. User-provided ``--target-cores`` still takes precedence.
     A list-shaped ``--dev-no`` (e.g. ``--dev-no 0,1``) also skips the default because
     the legacy ``"0:0"`` sentinel would migrate to a single-device canonical target during
     setter application and force the model-init re-normalization to warn about the mismatch.
+
+    The batched-vs-not classification routes through
+    :func:`_resolve_effective_batch_size_pre_launch` so the config-driven
+    aggregate is honored when the CLI omits ``--batch-size``. Under sw-batch,
+    a ``K == 1`` release with ``config.max_batch_size = 16`` still fans out
+    to ``N = 16`` slots; pinning every slot to ``"0:0"`` would collapse them
+    onto one core and trigger ``Model_NotAlive`` mid-launch (PR review
+    r3813611879).
     """
-    if getattr(args, "batch_size", None) is not None and int(args.batch_size) > 1:
+    effective_batch = _resolve_effective_batch_size_pre_launch(
+        args,
+        model=getattr(args, "model", None),
+        task=getattr(args, "task", None),
+        trust_remote_code=getattr(args, "trust_remote_code", True),
+        revision=getattr(args, "revision", None),
+    )
+    if effective_batch > 1:
         return None
     if isinstance(getattr(args, "dev_no", None), (list, tuple)):
         return None
@@ -2492,6 +2721,11 @@ def _cmd_measure(args: argparse.Namespace) -> int:
 def _run_text_measure(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
+    # ``core_mode=args.core_mode`` and ``max_batch_size=args.batch_size`` are
+    # intentional raw pass-through: the Mobilint config layer normalizes the
+    # aggregate downstream. See the "Batch and core-mode resolution" doc
+    # block near :func:`_resolve_cli_batch_size` for the canonical entry
+    # points if a new CLI-vs-config decision is needed here.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -2837,6 +3071,9 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             stacklevel=2,
         )
         args.print_output = False
+    # Raw pass-through of ``args.core_mode`` / ``args.batch_size`` — see the
+    # "Batch and core-mode resolution" doc block near
+    # :func:`_resolve_cli_batch_size` for the canonical resolvers.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -3402,6 +3639,9 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     """Run a text-generation TPS prefill/decode sweep."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
+    # Raw pass-through of ``args.core_mode`` / ``args.batch_size`` — see the
+    # "Batch and core-mode resolution" doc block near
+    # :func:`_resolve_cli_batch_size` for the canonical resolvers.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -3892,6 +4132,9 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     """Run a VLM TPS sweep including vision encoder and LLM phases."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
+    # Raw pass-through of ``args.core_mode`` / ``args.batch_size`` — see the
+    # "Batch and core-mode resolution" doc block near
+    # :func:`_resolve_cli_batch_size` for the canonical resolvers.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
