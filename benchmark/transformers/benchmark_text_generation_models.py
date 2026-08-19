@@ -1542,6 +1542,10 @@ def _rebuild_combined_outputs(
     if combined_device_rows:
         device_csv = os.path.join(output_dir, "combined_device.csv")
         _write_device_combined_csv(device_csv, combined_device_rows)
+    else:
+        # No reconciled device rows; remove stale combined_device.csv from a
+        # prior rebuild so the on-disk view matches the reconciled state.
+        (output_dir / "combined_device.csv").unlink(missing_ok=True)
 
     _write_text_generation_summary(output_dir)
 

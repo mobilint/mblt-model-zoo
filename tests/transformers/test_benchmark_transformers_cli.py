@@ -2067,6 +2067,103 @@ def test_text_rebuild_sweep_removes_stale_sweep_png_when_all_superseded(tmp_path
         assert not (tmp_path / filename).exists(), f"stale PNG {filename} should be removed"
 
 
+def _write_sweep_result_json_with_device(path: Path, label: str) -> None:
+    """Write a sweep per-target JSON payload including a populated device section."""
+    payload = {
+        "model": label,
+        "benchmark": {
+            "prefill_sweep": {"x_values": [8], "tps_values": [10.0], "time_values": [0.8]},
+            "decode_sweep": {"x_values": [4], "tps_values": [20.0], "time_values": [0.2]},
+        },
+        "device": {
+            "avg_power_w": 12.5,
+            "p99_power_w": 15.0,
+            "avg_utilization_pct": 40.0,
+            "p99_utilization_pct": 80.0,
+            "avg_temperature_c": 55.0,
+            "p99_temperature_c": 65.0,
+            "avg_memory_used_mb": 2048.0,
+            "p99_memory_used_mb": 2200.0,
+            "total_memory_mb": 16384.0,
+            "avg_memory_used_pct": 12.5,
+            "p99_memory_used_pct": 13.4,
+            "total_energy_j": 42.0,
+            "prefill_tps_last": 10.0,
+            "decode_tps_last": 20.0,
+            "prefill_tps_per_w_last": 0.8,
+            "decode_tps_per_w_last": 1.6,
+            "prefill_j_per_tok_last": 1.25,
+            "decode_j_per_tok_last": 0.625,
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_text_rebuild_sweep_removes_stale_combined_device_csv_when_all_superseded(tmp_path) -> None:
+    """Stale combined_device.csv must be removed when every target is superseded by a newer skip.
+
+    Follow-up to PR #109 review comment r3813315883: the sibling PNG cleanup at
+    ``_rebuild_combined_outputs`` line 1526-1540 covers stale PNGs, but the
+    ``combined_device.csv`` writer at line 1542-1544 is gated on
+    ``combined_device_rows`` being non-empty. After reconciliation reduces every
+    successful payload to a skip row, the CSV writer branch is skipped and the
+    prior device metrics linger on disk, contradicting the fresh PNG-free and
+    skip-only markdown state.
+    """
+    _write_sweep_result_json_with_device(tmp_path / "sweep-x.json", "sweep-x")
+    _backdate(tmp_path / "sweep-x.json")
+    for filename in _SWEEP_CHART_FILENAMES:
+        (tmp_path / filename).write_bytes(b"stale-png")
+    (tmp_path / "combined_device.csv").write_text("model,avg_power_w\nsweep-x,12.5\n", encoding="utf-8")
+    text_bench._write_skipped_sidecar(
+        tmp_path,
+        [_sidecar_row_now(model="sweep-x", batch_size=16, phase="measure", skipped_reason="npu_alloc")],
+        "sweep",
+    )
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    assert not (tmp_path / "combined_device.csv").exists(), (
+        "stale combined_device.csv must be removed when all targets are superseded"
+    )
+    for filename in _SWEEP_CHART_FILENAMES:
+        assert not (tmp_path / filename).exists(), f"stale PNG {filename} should be removed"
+    rows = list(csv.DictReader((tmp_path / "combined.csv").open("r", encoding="utf-8")))
+    passing_rows = [row for row in rows if row.get("model") == "sweep-x" and row.get("skipped_reason", "") == ""]
+    assert passing_rows == []
+    skipped_rows = [row for row in rows if row.get("model") == "sweep-x" and row.get("skipped_reason") == "npu_alloc"]
+    assert len(skipped_rows) == 1
+    md_content = (tmp_path / "combined.md").read_text(encoding="utf-8")
+    assert "## Skipped Targets" in md_content
+    assert "npu_alloc" in md_content
+
+
+def test_text_rebuild_sweep_writes_combined_device_csv_on_clean_success(tmp_path) -> None:
+    """Regression guard: a clean success rebuild still emits combined_device.csv."""
+    _write_sweep_result_json_with_device(tmp_path / "sweep-x.json", "sweep-x")
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    device_csv = tmp_path / "combined_device.csv"
+    assert device_csv.exists()
+    rows = list(csv.DictReader(device_csv.open("r", encoding="utf-8")))
+    assert [row["model"] for row in rows] == ["sweep-x"]
+    assert rows[0]["avg_power_w"] == "12.5"
+
+
+def test_text_rebuild_sweep_writes_combined_device_csv_for_multiple_successes(tmp_path) -> None:
+    """Regression guard: multiple successes with device sections yield one row each."""
+    _write_sweep_result_json_with_device(tmp_path / "sweep-x.json", "sweep-x")
+    _write_sweep_result_json_with_device(tmp_path / "sweep-y.json", "sweep-y")
+
+    text_bench._rebuild_combined_outputs(tmp_path)
+
+    device_csv = tmp_path / "combined_device.csv"
+    assert device_csv.exists()
+    rows = list(csv.DictReader(device_csv.open("r", encoding="utf-8")))
+    assert sorted(row["model"] for row in rows) == ["sweep-x", "sweep-y"]
+
+
 def test_text_load_result_pads_missing_latency_arrays(tmp_path) -> None:
     """Verify old text sweep JSON without latency arrays still produces rows."""
     payload = {
