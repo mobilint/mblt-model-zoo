@@ -9,7 +9,7 @@ import torch
 from tqdm.auto import tqdm
 from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
 
-from .cache_utils import MobilintCache
+from .cache_utils import MobilintCache, build_mobilint_cache_from_model
 
 _NS_PER_SECOND = 1_000_000_000
 _SAMPLING_GENERATION_FLAGS = ("temperature", "top_p", "top_k")
@@ -64,15 +64,35 @@ class _GenerationPhaseCallbacks:
         on_prefill_end: Optional[Callable[[], None]] = None,
         on_decode_start: Optional[Callable[[], None]] = None,
         on_decode_end: Optional[Callable[[], None]] = None,
+        sync_before_timestamp: Optional[Callable[[], None]] = None,
     ) -> None:
         self._on_prefill_start = on_prefill_start
         self._on_prefill_end = on_prefill_end
         self._on_decode_start = on_decode_start
         self._on_decode_end = on_decode_end
+        self._sync_before_timestamp = sync_before_timestamp
         self._prefill_started = False
         self._prefill_finished = False
         self._decode_started = False
         self._decode_finished = False
+        self._first_token_ns: Optional[int] = None
+        self._decode_end_ns: Optional[int] = None
+
+    @property
+    def first_token_ns(self) -> Optional[int]:
+        """Return the perf-counter timestamp captured at the prefill/decode boundary."""
+        return self._first_token_ns
+
+    @property
+    def decode_end_ns(self) -> Optional[int]:
+        """Return the perf-counter timestamp captured when decode finished."""
+        return self._decode_end_ns
+
+    def _capture_now_ns(self) -> int:
+        """Sync the compute device (if configured) then read the perf counter."""
+        if self._sync_before_timestamp is not None:
+            self._sync_before_timestamp()
+        return time.perf_counter_ns()
 
     def start_prefill(self) -> None:
         """Mark the prefill phase as started."""
@@ -86,6 +106,9 @@ class _GenerationPhaseCallbacks:
         """Mark the first generated token boundary between prefill and decode."""
         self.start_prefill()
         if not self._prefill_finished:
+            # Capture the boundary timestamp before firing the external callback so
+            # the recorded phase durations align with what the tracker observes.
+            self._first_token_ns = self._capture_now_ns()
             self._prefill_finished = True
             if self._on_prefill_end is not None:
                 self._on_prefill_end()
@@ -100,6 +123,7 @@ class _GenerationPhaseCallbacks:
             return
         if not self._decode_started:
             self.finish_prefill_start_decode()
+        self._decode_end_ns = self._capture_now_ns()
         self._decode_finished = True
         if self._on_decode_end is not None:
             self._on_decode_end()
@@ -152,6 +176,32 @@ def _with_first_token_stopping_criteria(
         existing.append(marker)
         return
     gen_kwargs["stopping_criteria"] = StoppingCriteriaList([*list(existing), marker])
+
+
+def _make_device_sync_callable(device: object) -> Optional[Callable[[], None]]:
+    """Return a zero-arg callable that synchronizes ``device`` when it is CUDA-like.
+
+    Non-Mobilint compute backends (CUDA, XPU) dispatch generation ops asynchronously,
+    so wall-clock timestamps captured from ``StoppingCriteria`` on the CPU thread can
+    read before the corresponding device work has actually completed. Callers should
+    invoke the returned closure right before recording ``perf_counter_ns`` to close
+    that gap. Returns ``None`` when no sync is available or needed (e.g., CPU device
+    or an unsupported device string).
+    """
+    if not isinstance(device, torch.device):
+        try:
+            device = torch.device(device)
+        except (TypeError, ValueError):
+            return None
+    device_type = device.type
+    if device_type == "cuda" and torch.cuda.is_available():
+        return lambda: torch.cuda.synchronize(device)
+    xpu_module = getattr(torch, "xpu", None)
+    if device_type == "xpu" and xpu_module is not None:
+        is_available = getattr(xpu_module, "is_available", None)
+        if callable(is_available) and is_available():
+            return lambda: xpu_module.synchronize(device)
+    return None
 
 
 def _ns_to_seconds(value_ns: int) -> float:
@@ -295,6 +345,96 @@ def _is_mobilint_npu_model(model: object) -> bool:
 def _supports_fake_decode_prefill(model: object) -> bool:
     """Return whether decode TPS can use fake prefilled Mobilint cache state."""
     return _is_mobilint_npu_model(model) and _get_cache_mxq_model(model) is not None
+
+
+def _resolve_multi_slot_backend(model: object) -> object | None:
+    """Return the Mobilint NPU backend that owns one or more Model slots.
+
+    Prefers the backend attached directly to ``model``; falls back to the
+    nested language-model backend for VLM wrappers whose top-level object
+    delegates NPU dispatch to ``model.language_model``.
+    """
+    for candidate in (model, _get_language_model_candidate(model)):
+        if candidate is None:
+            continue
+        backend = getattr(candidate, "npu_backend", None)
+        if backend is None:
+            continue
+        if getattr(backend, "mxq_models", None):
+            return backend
+    return None
+
+
+def _resolve_mobilint_cache_class(model: object) -> type[MobilintCache]:
+    """Return the ``MobilintCache`` subclass ``model`` declares for its KV cache.
+
+    Reads :meth:`MobilintModelMixin.get_mobilint_cache_cls` when the model
+    exposes it so specialized decoders (e.g. Qwen3-VL text, which requires
+    :class:`MobilintDeepStackCache`) route the multi-slot builder to their
+    own cache subclass. Falls back to plain :class:`MobilintCache` for models
+    that do not override the classmethod and for lightweight test doubles.
+    """
+    resolver = getattr(model, "get_mobilint_cache_cls", None)
+    if callable(resolver):
+        resolved = resolver()
+        if isinstance(resolved, type) and issubclass(resolved, MobilintCache):
+            return resolved
+    return MobilintCache
+
+
+def _resolve_mobilint_cache_kwargs(model: object) -> dict[str, object]:
+    """Return the extra constructor kwargs ``model`` declares for its cache class.
+
+    Reads :meth:`MobilintModelMixin.get_mobilint_cache_kwargs` when the model
+    exposes it so a specialized cache subclass (e.g.
+    :class:`MobilintDeepStackCache`, whose ``__init__`` requires
+    ``num_deepstack_layers`` and ``hidden_size`` to allocate the deepstack
+    side-input tensor with the right shape) is constructed with the same
+    kwargs the model's own ``_get_cache`` supplies. Falls back to ``{}`` for
+    models that do not override the method and for lightweight test doubles.
+    """
+    resolver = getattr(model, "get_mobilint_cache_kwargs", None)
+    if callable(resolver):
+        resolved = resolver()
+        if isinstance(resolved, dict):
+            return resolved
+    return {}
+
+
+def _build_batched_mobilint_cache(
+    model: object,
+    batch_size: int,
+    *,
+    cache_cls: type[MobilintCache] | None = None,
+    cache_kwargs: dict[str, object] | None = None,
+) -> MobilintCache:
+    """Build a ``MobilintCache`` sized to route ``batch_size`` rows across every backend slot.
+
+    Thin wrapper around :func:`build_mobilint_cache_from_model` retained so
+    benchmark_utils callers keep a stable local entry point. When ``cache_cls``
+    is not supplied the class is resolved from ``model`` via
+    :func:`_resolve_mobilint_cache_class` so a Qwen3-VL text decoder (which
+    hard-fails on plain :class:`MobilintCache`) receives its declared
+    :class:`MobilintDeepStackCache` subclass automatically. Extra constructor
+    kwargs follow the same defaults-with-escape-hatch rule: with neither
+    ``cache_cls`` nor ``cache_kwargs`` supplied the kwargs are resolved via
+    :func:`_resolve_mobilint_cache_kwargs` so the specialized cache is
+    instantiated with the same side-input dimensions the model's own
+    ``_get_cache`` uses (deepstack layers, hidden size, ...), rather than the
+    zero-shaped defaults the cache class exposes for signature compatibility.
+    An explicit ``cache_cls`` opts out of the auto-resolved kwargs (they may
+    not match the overridden class's constructor); pass ``cache_kwargs``
+    explicitly alongside ``cache_cls`` when the override needs specific
+    side-input dimensions.
+    """
+    resolved_cls = cache_cls if cache_cls is not None else _resolve_mobilint_cache_class(model)
+    if cache_kwargs is not None:
+        resolved_kwargs: dict[str, object] = cache_kwargs
+    elif cache_cls is None:
+        resolved_kwargs = _resolve_mobilint_cache_kwargs(model)
+    else:
+        resolved_kwargs = {}
+    return build_mobilint_cache_from_model(model, batch_size, cache_cls=resolved_cls, **resolved_kwargs)
 
 
 def _is_eagle3_model(model: object) -> bool:
@@ -661,8 +801,17 @@ class BenchmarkResult:
 
     @staticmethod
     def write_combined_csv(
-        path: str, rows: Iterable[dict[str, Union[float, int, str, None]]]
+        path: str,
+        rows: Iterable[dict[str, Union[float, int, str, None]]],
+        *,
+        skipped_records: Optional[Iterable[dict[str, Union[float, int, str, None]]]] = None,
     ) -> None:
+        """Write combined benchmark rows and optionally skipped-target markers.
+
+        Skipped records surface CUDA OOM or Mobilint NPU allocation failures with empty
+        numeric fields and a populated ``skipped_reason`` column so downstream comparison
+        tools do not silently drop the target.
+        """
         import csv
 
         with open(path, "w", encoding="utf-8", newline="") as f:
@@ -678,11 +827,29 @@ class BenchmarkResult:
                     "avg_npu_token_latency_ms",
                     "avg_npu_token_latency_pct",
                     "decode_prefill_mode",
+                    "skipped_reason",
                 ],
+                extrasaction="ignore",
             )
             writer.writeheader()
             for row in rows:
                 writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+            if skipped_records:
+                for record in skipped_records:
+                    writer.writerow(
+                        {
+                            "model": record.get("model", "") or "",
+                            "phase": "",
+                            "tokens": "",
+                            "tps": "",
+                            "time_ms": "",
+                            "avg_total_token_latency_ms": "",
+                            "avg_npu_token_latency_ms": "",
+                            "avg_npu_token_latency_pct": "",
+                            "decode_prefill_mode": "",
+                            "skipped_reason": record.get("skipped_reason", "") or "",
+                        }
+                    )
 
     @staticmethod
     def write_combined_markdown(
@@ -908,6 +1075,13 @@ class TPSMeasurer:
             gen_kwargs["temperature"] = float(temperature)
         else:
             gen_kwargs["do_sample"] = False
+        # Real-prefill path (past_key_values is None) still needs a multi-slot
+        # cache when the backend hosts ``N > 1`` Model slots — otherwise HF's
+        # ``_prepare_cache_for_generation`` falls back to the legacy
+        # ``MobilintCache(slot_0_model, batch_size=B)`` constructor that pins
+        # every logical row to slot 0 and defeats the sw-batch dispatch.
+        if past_key_values is None and _is_mobilint_npu_model(self.model):
+            past_key_values = _build_batched_mobilint_cache(self.model, batch_size)
         if past_key_values is not None:
             gen_kwargs["past_key_values"] = past_key_values
         if npu_prefill_chunk_size is not None:
@@ -917,17 +1091,21 @@ class TPSMeasurer:
             _reset_npu_timing(npu_timing_target)
         _apply_eagle3_gen_kwargs(gen_kwargs, self.model)
 
+        device_sync = _make_device_sync_callable(self.device)
         phase_callbacks = _GenerationPhaseCallbacks(
             on_prefill_start=on_prefill_start,
             on_prefill_end=on_prefill_end,
             on_decode_start=on_decode_start,
             on_decode_end=on_decode_end,
+            sync_before_timestamp=device_sync,
         )
         _with_first_token_stopping_criteria(
             gen_kwargs,
             prompt_length=int(input_ids.shape[1]),
             phase_callbacks=phase_callbacks,
         )
+        if device_sync is not None:
+            device_sync()
         t_start_ns = time.perf_counter_ns()
         phase_callbacks.start_prefill()
         if fake_prefill:
@@ -935,6 +1113,8 @@ class TPSMeasurer:
         try:
             with torch.no_grad(), _temporarily_sanitize_generation_config(self.model):
                 outputs = self.model.generate(**gen_kwargs)
+            if device_sync is not None:
+                device_sync()
             t_end_ns = time.perf_counter_ns()
             phase_callbacks.finish_decode()
         except Exception:
@@ -960,6 +1140,7 @@ class TPSMeasurer:
         total_time_ns = t_end_ns - t_start_ns
         total_time = _ns_to_seconds(total_time_ns)
         has_npu_time, npu_prefill_time, npu_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+        first_token_ns = phase_callbacks.first_token_ns
         if fake_prefill:
             prefill_latency = 0.0
             decode_duration = total_time
@@ -967,9 +1148,16 @@ class TPSMeasurer:
         elif has_npu_time and (npu_prefill_time > 0 or npu_decode_time > 0):
             prefill_latency = npu_prefill_time if npu_prefill_time > 0 else total_time
             decode_duration = npu_decode_time if npu_decode_time > 0 else max(total_time - prefill_latency, 0.0)
+        elif first_token_ns is not None and t_start_ns <= first_token_ns <= t_end_ns:
+            # Non-NPU compute backends (e.g., CUDA GPU) do not expose aggregate phase timing.
+            # Derive the phase boundary from the first-generated-token callback that fires
+            # inside the ``StoppingCriteria`` after the first decode step completes.
+            prefill_latency = _ns_to_seconds(first_token_ns - t_start_ns)
+            decode_duration = _ns_to_seconds(t_end_ns - first_token_ns)
         else:
-            # When aggregate phase timing is unavailable, keep total-throughput semantics by assigning
-            # the same wall time to both phase metrics.
+            # Callback boundary unavailable (e.g., generation ended before the first token).
+            # Fall back to attributing the full wall clock to both phases so downstream
+            # total-throughput math stays consistent.
             prefill_latency = total_time
             decode_duration = total_time
 
@@ -1284,7 +1472,7 @@ class TPSMeasurer:
             vocab_size = _resolve_config_vocab_size(self.model.config)
             low = 100 if vocab_size > 100 else 0
             input_ids = torch.randint(low, vocab_size, (batch_size, cache_len + 1), device=self.device)
-            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
+            past_key_values = _build_batched_mobilint_cache(self.model, batch_size)
             past_key_values.fake_prefill(cache_len)
 
             if batch_size > 1:
@@ -1810,21 +1998,50 @@ class VLMTPSMeasurer:
                 gen_kwargs["count_npu_time"] = True
                 _reset_npu_timing(npu_timing_target)
             _apply_eagle3_gen_kwargs(gen_kwargs, gen_model)
+            device_sync = _make_device_sync_callable(inputs_embeds.device)
+            phase_callbacks = _GenerationPhaseCallbacks(sync_before_timestamp=device_sync)
+            # HF ``generate`` seeds bookkeeping ``input_ids`` at shape ``(batch, 0)`` when only
+            # ``inputs_embeds`` is passed, so the first-generated-token marker must compare
+            # against zero rather than the embedding-prompt length.
+            _with_first_token_stopping_criteria(
+                gen_kwargs,
+                prompt_length=0,
+                phase_callbacks=phase_callbacks,
+            )
+            if device_sync is not None:
+                device_sync()
             t_start_ns = time.perf_counter_ns()
-            with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
-                outputs = gen_model.generate(**gen_kwargs)
-            t_end_ns = time.perf_counter_ns()
+            phase_callbacks.start_prefill()
+            try:
+                with torch.no_grad(), _temporarily_sanitize_generation_config(gen_model):
+                    outputs = gen_model.generate(**gen_kwargs)
+                if device_sync is not None:
+                    device_sync()
+                t_end_ns = time.perf_counter_ns()
+                phase_callbacks.finish_decode()
+            except Exception:
+                phase_callbacks.close_on_error()
+                raise
             if isinstance(outputs, torch.Tensor) and outputs.ndim >= 2:
-                generated_per_row = max(int(outputs.shape[1]) - seq_len, 0)
+                # HF ``generate`` returns only the generated token IDs when it was invoked
+                # with ``inputs_embeds`` (no ``input_ids``), so ``outputs.shape[1]`` already
+                # equals the per-row generated-token count — do not subtract ``seq_len``.
+                generated_per_row = max(int(outputs.shape[1]), 0)
             else:
                 generated_per_row = num_decode + 1
             decode_count = max(generated_per_row - 1, 0)
             total_time_ns = t_end_ns - t_start_ns
             total_time = _ns_to_seconds(total_time_ns)
             has_npu_time, npu_prefill_time, npu_decode_time = _read_aggregate_npu_timing(npu_timing_target)
+            first_token_ns = phase_callbacks.first_token_ns
             if has_npu_time and (npu_prefill_time > 0 or npu_decode_time > 0):
                 prefill_latency = npu_prefill_time if npu_prefill_time > 0 else total_time
                 decode_duration = npu_decode_time if npu_decode_time > 0 else max(total_time - prefill_latency, 0.0)
+            elif first_token_ns is not None and t_start_ns <= first_token_ns <= t_end_ns:
+                # Non-NPU compute backends (e.g., CUDA GPU) lack aggregate phase timing;
+                # derive the phase boundary from the first-generated-token callback.
+                prefill_latency = _ns_to_seconds(first_token_ns - t_start_ns)
+                decode_duration = _ns_to_seconds(t_end_ns - first_token_ns)
             else:
                 prefill_latency = total_time
                 decode_duration = total_time
@@ -2038,11 +2255,20 @@ class VLMTPSMeasurer:
         low = 100 if vocab_size > 100 else 0
         input_ids = torch.randint(low, vocab_size, (batch_size, 1), device=device)
         inputs_embeds = lm_for_npu.get_input_embeddings()(input_ids)
-        cache_factory = getattr(lm_for_npu, "_get_cache", None) or getattr(gen_model, "_get_cache", None)
-        if callable(cache_factory):
-            past_key_values = cache_factory("mobilint", batch_size, cache_len)
+        # Prefer the multi-slot builder over the legacy ``_get_cache`` factory:
+        # ``_get_cache`` still builds a single-Model cache from slot 0, which
+        # loses ``slot_of`` routing on multi-slot backends. Fall back to the
+        # factory (or the legacy constructor) only when no NPU backend is
+        # resolvable, matching test doubles that do not expose ``npu_backend``.
+        multi_slot_backend = _resolve_multi_slot_backend(lm_for_npu) or _resolve_multi_slot_backend(gen_model)
+        if multi_slot_backend is not None:
+            past_key_values = _build_batched_mobilint_cache(lm_for_npu, batch_size)
         else:
-            past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
+            cache_factory = getattr(lm_for_npu, "_get_cache", None) or getattr(gen_model, "_get_cache", None)
+            if callable(cache_factory):
+                past_key_values = cache_factory("mobilint", batch_size, cache_len)
+            else:
+                past_key_values = MobilintCache(cast(Any, mxq_model), batch_size=batch_size)
         past_key_values.fake_prefill(cache_len)
 
         npu_timing_target = _get_npu_timing_target(lm_for_npu)

@@ -484,3 +484,1603 @@ def test_default_single_target_cores_for_args_disables_explicit_batch_size() -> 
     assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=2)) is None
     assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=1)) == ("0:0",)
     assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=None)) == ("0:0",)
+
+
+def test_default_single_target_cores_for_args_disables_list_dev_no() -> None:
+    """List-shaped ``--dev-no`` skips the ``"0:0"`` sentinel so dev_no sugar drives expansion.
+
+    The sentinel is a legacy 2-part core string that would migrate to a single-device
+    canonical target under the backend setter's ``_fallback_dev()``. Combined with a
+    multi-device ``--dev-no 0,1``, the resulting mismatch used to trigger a silent
+    single-device pin; leaving ``target_cores`` unset lets sugar expansion cover both.
+    """
+    assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=1, dev_no=[0, 1])) is None
+    # Scalar dev_no keeps the sentinel; the initial CLI default remains stable.
+    assert tps_cli._default_single_target_cores_for_args(argparse.Namespace(batch_size=1, dev_no=0)) == ("0:0",)
+
+
+def test_cli_tps_measure_dev_no_defaults_none() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct"])
+    assert args.dev_no is None
+    assert args.base_dev_no is None
+    assert args.draft_dev_no is None
+    assert args.fc_dev_no is None
+    assert args.vision_dev_no is None
+    assert args.text_dev_no is None
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("0", 0), ("1", 1), ("0,1", [0, 1]), ("2,3,4", [2, 3, 4])],
+)
+def test_cli_tps_measure_dev_no_accepts_scalar_and_list(value, expected) -> None:
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--dev-no", value])
+    assert args.dev_no == expected
+
+
+@pytest.mark.parametrize("value", ["-1", "abc", "0,-1", "1,foo"])
+def test_cli_tps_measure_dev_no_rejects_invalid(value) -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["tps", "measure", "--model", "mobilint/Llama-3.2-1B-Instruct", "--dev-no", value])
+    assert excinfo.value.code == 2
+
+
+def test_cli_tps_sweep_dev_no_accepts_scalar() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        ["tps", "sweep", "--model", "mobilint/Llama-3.2-1B-Instruct", "--dev-no", "1", "--no-plot"]
+    )
+    assert args.dev_no == 1
+
+
+def test_extract_eagle3_pipeline_kwargs_includes_dev_no() -> None:
+    args = argparse.Namespace(
+        base_embedding_path=None,
+        draft_embedding_path=None,
+        base_mxq_path=None,
+        draft_mxq_path=None,
+        fc_mxq_path=None,
+        base_core_mode=None,
+        draft_core_mode=None,
+        fc_core_mode=None,
+        base_target_cores=None,
+        draft_target_cores=None,
+        fc_target_cores=None,
+        base_target_clusters=None,
+        draft_target_clusters=None,
+        fc_target_clusters=None,
+        base_dev_no=1,
+        draft_dev_no=[0, 1],
+        fc_dev_no=0,
+    )
+    options = tps_cli._extract_eagle3_pipeline_kwargs(args)
+    assert options.base_dev_no == 1
+    assert options.draft_dev_no == [0, 1]
+    assert options.fc_dev_no == 0
+
+
+def test_extract_subconfig_pipeline_kwargs_includes_dev_no() -> None:
+    args = argparse.Namespace(
+        vision_core_mode=None,
+        text_core_mode=None,
+        vision_target_cores=None,
+        text_target_cores=None,
+        vision_target_clusters=None,
+        text_target_clusters=None,
+        vision_mxq_path=None,
+        text_mxq_path=None,
+        vision_dev_no=2,
+        text_dev_no=[3, 4],
+    )
+    options = tps_cli._extract_subconfig_pipeline_kwargs(args)
+    assert options.vision_dev_no == 2
+    assert options.text_dev_no == [3, 4]
+
+
+def test_build_pipeline_plain_sets_dev_no_when_scalar(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    # Forcing the Mobilint gate to True isolates this test to dev_no forwarding
+    # so it does not incidentally depend on ``AutoConfig`` resolving ``dummy/model``.
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=1,
+    )
+    assert pipe.model_kwargs == {"dev_no": 1}
+
+
+def test_build_pipeline_plain_sets_dev_no_when_list(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=[0, 1],
+    )
+    assert pipe.model_kwargs == {"dev_no": [0, 1]}
+
+
+def test_build_pipeline_plain_skips_dev_no_for_non_mobilint(monkeypatch) -> None:
+    """A non-Mobilint model target must not receive backend-only ``dev_no``.
+
+    Regression guard for PR #109 review: stock upstream configs reject unknown
+    kwargs before measurement starts, so ``--dev-no`` on ``Qwen/Qwen2.5-1.5B-Instruct``
+    (or any non-Mobilint target) must be a silent no-op — matching how
+    ``--batch-size`` behaves under the same gate.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="Qwen/Qwen2.5-1.5B-Instruct",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=0,
+    )
+    assert "model_kwargs" not in vars(pipe) or "dev_no" not in pipe.model_kwargs
+
+
+def test_build_pipeline_vlm_expands_dev_no_to_both_subconfigs(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=2,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+    )
+    assert pipe.model_kwargs == {"vision_dev_no": 2, "text_dev_no": 2}
+
+
+def test_build_pipeline_vlm_skips_dev_no_for_non_mobilint(monkeypatch) -> None:
+    """A non-Mobilint VLM target must not receive prefixed ``vision_dev_no`` / ``text_dev_no``."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="Qwen/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=0,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+    )
+    model_kwargs = getattr(pipe, "model_kwargs", {})
+    assert "vision_dev_no" not in model_kwargs
+    assert "text_dev_no" not in model_kwargs
+
+
+def test_build_pipeline_vlm_text_dev_no_override_takes_precedence(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="dummy/model",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=0,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(text_dev_no=3),
+    )
+    assert pipe.model_kwargs == {"vision_dev_no": 0, "text_dev_no": 3}
+
+
+def test_build_pipeline_eagle3_dev_no_prefix_warns_and_coalesces(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    with pytest.warns(UserWarning, match="Conflicting options detected"):
+        pipe = tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/model",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(base_dev_no=5),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            dev_no=1,
+        )
+
+    assert pipe.model_kwargs["base_dev_no"] == 5
+    assert pipe.model_kwargs["draft_dev_no"] == 1
+    assert pipe.model_kwargs["fc_dev_no"] == 1
+
+
+def test_build_pipeline_eagle3_skips_prefixed_dev_no_for_non_mobilint(monkeypatch) -> None:
+    """Non-Mobilint EAGLE-3-shaped targets do not exist in practice, but the gate is symmetric."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pipe = tps_cli._build_pipeline(
+            task="text-generation",
+            model="upstream/eagle3-shaped",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(base_dev_no=5),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            dev_no=1,
+        )
+
+    model_kwargs = getattr(pipe, "model_kwargs", {})
+    assert "base_dev_no" not in model_kwargs
+    assert "draft_dev_no" not in model_kwargs
+    assert "fc_dev_no" not in model_kwargs
+    assert "dev_no" not in model_kwargs
+
+
+def test_is_mobilint_model_target_fast_path_repo_prefix(monkeypatch) -> None:
+    """The ``mobilint/`` HuggingFace namespace short-circuits config resolution."""
+
+    def _fail_autoconfig(*args, **kwargs):
+        raise AssertionError("AutoConfig should not be consulted on the mobilint/* fast path")
+
+    monkeypatch.setattr(importlib.import_module("transformers").AutoConfig, "from_pretrained", _fail_autoconfig)
+
+    assert tps_cli._is_mobilint_model_target(
+        "mobilint/Qwen3-4B-W4V8-Anything",
+        trust_remote_code=True,
+        revision=None,
+    )
+
+
+def test_is_mobilint_model_target_returns_false_when_config_load_fails(monkeypatch) -> None:
+    """Any AutoConfig error (offline, wrong path, missing extras) is a safe non-Mobilint signal."""
+
+    def _raise_from_pretrained(*args, **kwargs):
+        raise OSError("simulated network failure")
+
+    monkeypatch.setattr(importlib.import_module("transformers").AutoConfig, "from_pretrained", _raise_from_pretrained)
+
+    assert not tps_cli._is_mobilint_model_target(
+        "Qwen/Qwen2.5-1.5B-Instruct",
+        trust_remote_code=True,
+        revision=None,
+    )
+
+
+def test_is_mobilint_model_target_isinstance_check(monkeypatch) -> None:
+    """A resolved config that is a Mobilint mixin subclass triggers injection."""
+    mixins = tps_cli._resolve_mobilint_config_mixins()
+    if mixins is None:
+        pytest.skip("mblt_model_zoo.hf_transformers is not importable in this environment")
+    mobilint_mixin = mixins[0]
+
+    class _StubMobilintConfig(mobilint_mixin):
+        pass
+
+    def _fake_from_pretrained(*args, **kwargs):
+        # Skip full config __init__ so the stub does not require an NPU backend to construct.
+        return _StubMobilintConfig.__new__(_StubMobilintConfig)
+
+    monkeypatch.setattr(importlib.import_module("transformers").AutoConfig, "from_pretrained", _fake_from_pretrained)
+
+    assert tps_cli._is_mobilint_model_target(
+        "some-non-namespaced-checkpoint",
+        trust_remote_code=True,
+        revision=None,
+    )
+
+
+def _capture_pipeline_kwargs(monkeypatch) -> dict[str, object]:
+    """Replace ``transformers.pipeline`` with a stub that records its kwargs."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    captured: dict[str, object] = {}
+
+    def _fake(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        return types.SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", _fake)
+    return captured
+
+
+def test_build_pipeline_skips_max_batch_size_for_non_mobilint(monkeypatch) -> None:
+    """A non-Mobilint model target must not receive backend-only ``max_batch_size``."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="Qwen/Qwen2.5-1.5B-Instruct",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    # No Mobilint-only kwargs were requested and the target is non-Mobilint, so
+    # backend-only fields must not reach the model constructor. --batch-size
+    # still becomes the measurement batch size via the CLI's synthetic-input
+    # path (verified by dedicated tests elsewhere).
+    model_kwargs = captured.get("model_kwargs", {})
+    assert "max_batch_size" not in model_kwargs
+    assert "text_max_batch_size" not in model_kwargs
+    assert "base_max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_injects_max_batch_size_for_mobilint(monkeypatch) -> None:
+    """A Mobilint model target continues to receive ``max_batch_size``."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/Qwen3-4B-W4V8",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("max_batch_size") == 4
+
+
+def test_build_pipeline_vlm_gates_text_max_batch_size(monkeypatch) -> None:
+    """VLM path uses ``text_max_batch_size`` and must gate on the Mobilint check."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    # The Qwen3-VL non-batch text MXQ guard also runs on this path; stub the
+    # detection to keep this test focused on ``text_max_batch_size`` forwarding.
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="google/gemma-3-vlm",  # placeholder non-Mobilint VLM string
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=2,
+    )
+
+    assert "text_max_batch_size" not in captured.get("model_kwargs", {})
+
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=2,
+    )
+
+    assert captured.get("model_kwargs", {}).get("text_max_batch_size") == 2
+
+
+def test_build_pipeline_eagle3_gates_base_max_batch_size(monkeypatch) -> None:
+    """EAGLE-3 path uses ``base_max_batch_size`` and must gate on the Mobilint check.
+
+    Uses ``max_batch_size=1`` because EAGLE-3 releases reject batch > 1 upstream
+    (see ``test_build_pipeline_eagle3_rejects_bare_max_batch_size_gt_one``); the
+    forwarding path itself must still route the single-slot capacity through the
+    prefixed ``base_max_batch_size`` setter.
+    """
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/EAGLE3-Qwen3-4B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(base_mxq_path="base.mxq"),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=1,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("base_max_batch_size") == 1
+    assert "max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_eagle3_broadcasts_bare_dev_no(monkeypatch) -> None:
+    """A global --dev-no on an EAGLE-3 release must broadcast to base_/draft_/fc_ prefixes.
+
+    MobilintEagle3ConfigMixin exposes only prefixed dev_no setters, so an unprefixed
+    ``dev_no`` model kwarg would otherwise be silently dropped by HF ``from_pretrained``.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/eagle3",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=1,
+    )
+
+    assert "dev_no" not in pipe.model_kwargs
+    assert pipe.model_kwargs["base_dev_no"] == 1
+    assert pipe.model_kwargs["draft_dev_no"] == 1
+    assert pipe.model_kwargs["fc_dev_no"] == 1
+
+
+def test_build_pipeline_eagle3_bare_dev_no_respects_explicit_prefix(monkeypatch) -> None:
+    """Explicit --draft-dev-no still wins when the global --dev-no is broadcast for EAGLE-3."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    # Explicit prefixed option already triggers the EAGLE-3 branch; no need to detect the config.
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda *args, **kwargs: pytest.fail("_detect_eagle3_model should not run when prefixed options are set"),
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    with pytest.warns(UserWarning, match="Conflicting options detected"):
+        pipe = tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/eagle3",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(draft_dev_no=7),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            dev_no=1,
+        )
+
+    assert "dev_no" not in pipe.model_kwargs
+    assert pipe.model_kwargs["base_dev_no"] == 1
+    assert pipe.model_kwargs["draft_dev_no"] == 7
+    assert pipe.model_kwargs["fc_dev_no"] == 1
+
+
+def test_build_pipeline_non_eagle3_keeps_unprefixed_dev_no(monkeypatch) -> None:
+    """A non-EAGLE-3 Mobilint model must continue to receive an unprefixed ``dev_no`` model kwarg."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/plain",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        dev_no=1,
+    )
+
+    assert pipe.model_kwargs == {"dev_no": 1}
+
+
+def test_build_pipeline_eagle3_forwards_bare_max_batch_size_at_one(monkeypatch) -> None:
+    """A ``--batch-size 1`` on an EAGLE-3 release still routes through ``base_max_batch_size``.
+
+    ``MobilintEagle3ConfigMixin`` only exposes prefixed max_batch_size setters, so an
+    unprefixed ``max_batch_size`` model kwarg would otherwise be silently dropped.
+    Batch > 1 is rejected upstream (EAGLE-3 ``generate`` hard-fails); the single-slot
+    forwarding path itself must still land on the prefixed setter.
+    """
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/eagle3",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=1,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("base_max_batch_size") == 1
+    assert "max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_eagle3_rejects_bare_max_batch_size_gt_one(monkeypatch) -> None:
+    """A bare ``--batch-size B > 1`` on an EAGLE-3 release fails fast before pipeline construction.
+
+    ``MobilintEagle3GenerationMixin.generate`` hard-fails on ``input_ids.shape[0] != 1``
+    (see ``mblt_model_zoo/hf_transformers/utils/generation_utils.py``), so allocating a
+    larger base backend would waste device memory for a run that cannot succeed.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"),
+        "pipeline",
+        lambda **kwargs: pytest.fail("pipeline() should not be reached when EAGLE-3 rejection fires"),
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._build_pipeline(
+            task="text-generation",
+            model="dummy/eagle3",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            max_batch_size=4,
+        )
+
+    message = str(excinfo.value)
+    assert "EAGLE-3 releases only support batch size 1" in message
+    assert "--batch-size=4" in message
+    assert "dummy/eagle3" in message
+
+
+def test_build_pipeline_eagle3_rejects_prefixed_sugar_with_batch_gt_one(monkeypatch) -> None:
+    """Prefixed EAGLE-3 sugar plus ``--batch-size B > 1`` is rejected without loading the config."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"),
+        "pipeline",
+        lambda **kwargs: pytest.fail("pipeline() should not be reached when EAGLE-3 rejection fires"),
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda *args, **kwargs: pytest.fail(
+            "_detect_eagle3_model should not run when prefixed EAGLE-3 options are set"
+        ),
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._build_pipeline(
+            task="text-generation",
+            model="mobilint/EAGLE3-Qwen3-4B",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(base_mxq_path="base.mxq"),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            max_batch_size=2,
+        )
+
+    assert "EAGLE-3 releases only support batch size 1" in str(excinfo.value)
+
+
+def test_build_pipeline_eagle3_accepts_batch_size_one(monkeypatch) -> None:
+    """``--batch-size 1`` (or unset) on an EAGLE-3 release must not be rejected."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="dummy/eagle3",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=1,
+    )
+
+
+def test_build_pipeline_qwen3_vl_rejects_batch_gt_one_on_non_batch_text_mxq(monkeypatch) -> None:
+    """A Qwen3-VL release with a locally-probed K=1 text MXQ must reject ``--batch-size > 1``.
+
+    ``MobilintQwen3VLTextModel._llm_forward_batch_deepstack`` only accepts the Batch16
+    3-input ``[inputs, rope, deepstack]`` MXQ signature. Non-batch (K=1) releases either
+    ship the static 2-input layout (raises mid-benchmark) or the dynamic 3-input layout
+    with ``[inputs, deepstack, rope]`` order (silently corrupts outputs when packed as
+    ``[rope, deepstack]``). Reject early so users see a clear message and neither pay
+    the model-load cost nor get wrong throughput.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"),
+        "pipeline",
+        lambda **kwargs: pytest.fail("pipeline() should not be reached when Qwen3-VL rejection fires"),
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(tps_cli, "_probe_mxq_artifact_k", lambda path: 1 if path == "/tmp/text-k1.mxq" else None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._build_pipeline(
+            task="image-text-to-text",
+            model="mobilint/Qwen3-VL-8B",
+            tokenizer=None,
+            device="cpu",
+            trust_remote_code=True,
+            dtype=None,
+            device_map=None,
+            revision=None,
+            embedding_weight=None,
+            eagle3_options=tps_cli.Eagle3PipelineOptions(),
+            mxq_path=None,
+            core_mode=None,
+            target_cores=None,
+            target_clusters=None,
+            default_single_target_cores=None,
+            subconfig_options=tps_cli.SubconfigPipelineOptions(text_mxq_path="/tmp/text-k1.mxq"),
+            max_batch_size=2,
+        )
+
+    message = str(excinfo.value)
+    assert "batched Qwen3-VL sw-batch requires a batched text MXQ" in message
+    assert "--batch-size=2" in message
+    assert "mobilint/Qwen3-VL-8B" in message
+
+
+def test_build_pipeline_qwen3_vl_accepts_batch_gt_one_on_batched_text_mxq(monkeypatch) -> None:
+    """A Qwen3-VL Batch16 release (locally probed K=16) with ``--batch-size 2`` must not be rejected."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(tps_cli, "_probe_mxq_artifact_k", lambda path: 16 if path == "/tmp/text-k16.mxq" else None)
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B-Batch16",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(text_mxq_path="/tmp/text-k16.mxq"),
+        max_batch_size=2,
+    )
+
+    assert pipe.model_kwargs.get("text_max_batch_size") == 2
+
+
+def test_build_pipeline_qwen3_vl_accepts_batch_size_one(monkeypatch) -> None:
+    """``--batch-size 1`` (or unset) on a Qwen3-VL non-batch release must not be rejected."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda *args, **kwargs: pytest.fail("_detect_qwen3_vl_model should not run when max_batch_size <= 1"),
+    )
+
+    tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=1,
+    )
+
+
+def test_build_pipeline_non_qwen3_vl_vlm_allows_batch_gt_one_on_k1(monkeypatch) -> None:
+    """A non-Qwen3-VL VLM release (BLIP-style) with K=1 keeps ``--batch-size > 1`` unchanged.
+
+    Regression guard: the Qwen3-VL rejection must not fire on other VLM families because
+    only Qwen3-VL routes batched sw-batch through the Batch16-only
+    ``_llm_forward_batch_deepstack`` path.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+    # Even if the probe would report K=1, non-Qwen3-VL detection short-circuits before
+    # the probe runs, so this fail is a belt-and-suspenders check.
+    monkeypatch.setattr(
+        tps_cli,
+        "_probe_mxq_artifact_k",
+        lambda path: pytest.fail("_probe_mxq_artifact_k should not run when Qwen3-VL detection is False"),
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/BLIP-something",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=2,
+    )
+
+    assert pipe.model_kwargs.get("text_max_batch_size") == 2
+
+
+def test_build_pipeline_qwen3_vl_defers_when_no_text_mxq_override(monkeypatch) -> None:
+    """Without ``--text-mxq-path``, the pre-launch guard defers to the post-launch verifier.
+
+    The release config's ``text_config.max_batch_size`` reflects the shipped
+    artifact — not the (potentially Hub-relative) override — so the pre-launch
+    guard must not consult it. Post-launch verification against the launched
+    text backend's ``k_per_model`` is the authoritative check.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    # If the pre-launch fallback ever reintroduces a config probe, this fails.
+    monkeypatch.setattr(
+        tps_cli,
+        "_probe_config_max_batch_size",
+        lambda *a, **kw: pytest.fail("pre-launch Qwen3-VL guard must not consult the release config"),
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=4,
+    )
+
+    assert pipe.model_kwargs.get("text_max_batch_size") == 4
+
+
+def test_build_pipeline_qwen3_vl_defers_when_text_mxq_probe_returns_none(monkeypatch) -> None:
+    """A Hub-relative ``--text-mxq-path`` (probe returns None) must NOT fall back to the config.
+
+    Reviewer's concrete case: a Batch16 release config declares K=16, but the
+    caller overrides the shipped text MXQ with a Hub-relative artifact whose
+    K might be 1. The pre-launch guard cannot resolve K cheaply, so it must
+    defer instead of false-approving based on the unselected config's K=16.
+    """
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(tps_cli, "_probe_mxq_artifact_k", lambda path: None)  # non-local
+    monkeypatch.setattr(
+        tps_cli,
+        "_probe_config_max_batch_size",
+        lambda *a, **kw: pytest.fail("pre-launch Qwen3-VL guard must not consult the release config"),
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B-Batch16",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(text_mxq_path="text-k1.mxq"),
+        max_batch_size=2,
+    )
+
+    assert pipe.model_kwargs.get("text_max_batch_size") == 2
+
+
+def _make_qwen3_vl_measure_args(**overrides) -> argparse.Namespace:
+    """Parse a ``tps measure --task image-text-to-text`` args namespace for post-launch tests."""
+    parser = build_parser()
+    argv = [
+        "tps",
+        "measure",
+        "--task",
+        "image-text-to-text",
+        "--model",
+        "mobilint/Qwen3-VL-8B",
+    ]
+    for key, value in overrides.items():
+        argv.extend([key, str(value)])
+    return parser.parse_args(argv)
+
+
+class _FakeQwen3VLBackend:
+    """Minimal ``MobilintNPUBackend`` stand-in exposing ``k_per_model`` and optional aggregate."""
+
+    def __init__(self, k: int, max_batch_size: int | None = None) -> None:
+        self.k_per_model = k
+        if max_batch_size is not None:
+            self.max_batch_size = max_batch_size
+
+
+def _fake_qwen3_vl_pipeline(
+    k: int,
+    max_batch_size: int | None = None,
+    config: object | None = None,
+) -> SimpleNamespace:
+    """Return a pipeline whose ``.model.model.language_model.npu_backend`` mimics Qwen3-VL."""
+    language_model = SimpleNamespace(npu_backend=_FakeQwen3VLBackend(k, max_batch_size=max_batch_size))
+    inner = SimpleNamespace(language_model=language_model)
+    outer = SimpleNamespace(model=inner)
+    if config is not None:
+        outer.config = config
+    return SimpleNamespace(model=outer)
+
+
+def test_verify_qwen3_vl_post_launch_rejects_k1_on_hub_relative_override(monkeypatch) -> None:
+    """Hub-relative --text-mxq-path (probe returns None) + K=1 backend must reject post-launch."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = _fake_qwen3_vl_pipeline(k=1)
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+    message = str(excinfo.value)
+    assert "batched Qwen3-VL sw-batch requires a batched text MXQ" in message
+    assert "--batch-size=2" in message
+    assert "mobilint/Qwen3-VL-8B" in message
+
+
+def test_verify_qwen3_vl_post_launch_accepts_k_gt_1_on_batched_release(monkeypatch) -> None:
+    """Reviewer's Batch16 case: config K=16 stale, actual launched K=16 must not reject."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = _fake_qwen3_vl_pipeline(k=16)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_skips_non_qwen3_vl_release(monkeypatch) -> None:
+    """Non-Qwen3-VL VLM release: post-launch guard falls through (regression guard)."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = _fake_qwen3_vl_pipeline(k=1)  # would reject if detection said yes
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_skips_effective_batch_one(monkeypatch) -> None:
+    """Effective batch <= 1 (no CLI flag, no config-driven aggregate): guard falls through."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=1)  # no backend.max_batch_size, no config
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_rejects_config_driven_batch_on_k1(monkeypatch) -> None:
+    """Batch16 release + Hub-relative K=1 override + no --batch-size: guard fires on N*K aggregate."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=1, max_batch_size=16)
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+    message = str(excinfo.value)
+    assert "batched Qwen3-VL sw-batch requires a batched text MXQ" in message
+    assert "--batch-size=16" in message
+    assert "mobilint/Qwen3-VL-8B" in message
+
+
+def test_verify_qwen3_vl_post_launch_skips_config_driven_batch_one(monkeypatch) -> None:
+    """Non-batch release (backend.max_batch_size == 1) + no --batch-size: no fan-out, guard skips."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=1, max_batch_size=1)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_accepts_batched_mxq_on_config_driven_batch(monkeypatch) -> None:
+    """Batched MXQ (K=16) servicing the config-driven aggregate (16): hardware batch handles it."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    pipeline = _fake_qwen3_vl_pipeline(k=16, max_batch_size=16)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_reads_text_config_when_backend_lacks_aggregate(monkeypatch) -> None:
+    """Config-driven aggregate falls back to ``pipeline.model.config.text_config.max_batch_size``."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args()  # no --batch-size → default None
+    config = _DummyConfig(text_config=SimpleNamespace(max_batch_size=16))
+    pipeline = _fake_qwen3_vl_pipeline(k=1, config=config)  # no backend.max_batch_size
+
+    with pytest.raises(SystemExit) as excinfo:
+        tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+    assert "--batch-size=16" in str(excinfo.value)
+
+
+def test_verify_qwen3_vl_post_launch_skips_non_vlm_task(monkeypatch) -> None:
+    """Non-VLM task: post-launch guard falls through even when detection would say yes."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda *a, **kw: pytest.fail("detection should not run on non-VLM tasks"),
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--task",
+            "text-generation",
+            "--model",
+            "mobilint/Qwen3-4B",
+            "--batch-size",
+            "2",
+        ]
+    )
+    pipeline = _fake_qwen3_vl_pipeline(k=1)
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_verify_qwen3_vl_post_launch_skips_when_backend_missing(monkeypatch) -> None:
+    """No text-side ``npu_backend`` (non-Mobilint pipeline): fall through silently."""
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    args = _make_qwen3_vl_measure_args(**{"--batch-size": "2"})
+    pipeline = SimpleNamespace(model=SimpleNamespace())  # no npu_backend
+
+    tps_cli._verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
+
+
+def test_is_qwen3_vl_config_detects_model_type_marker() -> None:
+    """``_is_qwen3_vl_config`` recognizes ``qwen3_vl`` in ``model_type`` and ``architectures``."""
+
+    assert tps_cli._is_qwen3_vl_config(SimpleNamespace(model_type="mobilint-qwen3_vl"))
+    assert tps_cli._is_qwen3_vl_config(
+        SimpleNamespace(model_type="qwen3", architectures=["MobilintQwen3VLForConditionalGeneration"])
+    )
+    assert not tps_cli._is_qwen3_vl_config(SimpleNamespace(model_type="qwen3", architectures=["Qwen3ForCausalLM"]))
+
+
+def test_build_pipeline_non_eagle3_allows_batch_gt_one(monkeypatch) -> None:
+    """A ``--batch-size B > 1`` on a non-EAGLE-3 release must NOT be rejected (regression guard)."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/Qwen3-4B-W4V8",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    assert pipe.model_kwargs.get("max_batch_size") == 4
+    assert "base_max_batch_size" not in pipe.model_kwargs
+
+
+def test_build_pipeline_vlm_allows_batch_gt_one_with_eagle3_detected(monkeypatch) -> None:
+    """VLM path is on ``text_max_batch_size``; the EAGLE-3 rejection must not fire for VLM tasks."""
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"), "pipeline", lambda **kwargs: types.SimpleNamespace(**kwargs)
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    # VLM path skips EAGLE-3 detection (``_eagle3_broadcast_needed`` short-circuits on VLM),
+    # but even if it somehow ran, the guard must exclude VLM tasks.
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    # The Qwen3-VL non-batch text MXQ guard also runs on this path; stub the
+    # detection off so this test stays focused on the EAGLE-3-vs-VLM interaction.
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_qwen3_vl_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    pipe = tps_cli._build_pipeline(
+        task="image-text-to-text",
+        model="mobilint/Qwen3-VL-8B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        subconfig_options=tps_cli.SubconfigPipelineOptions(),
+        max_batch_size=2,
+    )
+
+    assert pipe.model_kwargs.get("text_max_batch_size") == 2
+
+
+def test_build_pipeline_non_eagle3_keeps_unprefixed_max_batch_size(monkeypatch) -> None:
+    """A bare ``--batch-size`` on a non-EAGLE-3 Mobilint release keeps the unprefixed kwarg."""
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda model, *, trust_remote_code, revision: False,
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/Qwen3-4B-W4V8",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=4,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("max_batch_size") == 4
+    assert "base_max_batch_size" not in model_kwargs
+
+
+def test_build_pipeline_eagle3_prefixed_option_skips_eagle3_detection(monkeypatch) -> None:
+    """Explicit prefixed sugar already targets the EAGLE-3 branch — skip the AutoConfig probe.
+
+    Uses ``max_batch_size=1`` because EAGLE-3 releases reject batch > 1 upstream; the
+    detection-skip behavior itself is orthogonal to that rejection.
+    """
+    captured = _capture_pipeline_kwargs(monkeypatch)
+    monkeypatch.setattr(
+        tps_cli,
+        "_is_mobilint_model_target",
+        lambda model, *, trust_remote_code, revision: True,
+    )
+    monkeypatch.setattr(
+        tps_cli,
+        "_detect_eagle3_model",
+        lambda *args, **kwargs: pytest.fail(
+            "_detect_eagle3_model should not run when prefixed EAGLE-3 options are set"
+        ),
+    )
+
+    tps_cli._build_pipeline(
+        task="text-generation",
+        model="mobilint/EAGLE3-Qwen3-4B",
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=tps_cli.Eagle3PipelineOptions(base_mxq_path="base.mxq"),
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+        default_single_target_cores=None,
+        max_batch_size=1,
+    )
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs.get("base_max_batch_size") == 1
+    assert "max_batch_size" not in model_kwargs
+
+
+def test_is_eagle3_config_detects_model_type_marker() -> None:
+    """`_is_eagle3_config` recognizes the ``eagle3`` marker in ``model_type`` and ``architectures``."""
+
+    assert tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3_eagle3"))
+    assert tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3", architectures=["Qwen3ForCausalLMEagle3"]))
+    assert not tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3", architectures=["Qwen3ForCausalLM"]))

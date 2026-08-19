@@ -1,0 +1,647 @@
+"""Regression tests for :class:`MobilintNPUBackend` multi-slot lifecycle.
+
+These tests stub out ``qbruntime.Accelerator`` / ``Model`` / ``ModelConfig`` so
+we can exercise the multi-slot ``create`` / ``launch`` / rollback paths without
+booting an NPU. They cover:
+
+* ``N == 1``: single slot on a single device (the historical shape).
+* ``N == 2``: two slots spread across two devices in round-robin order.
+* ``BadAlloc`` mid-``create``: the failure surfaces as
+  :class:`MobilintBackendAllocError` and every previously loaded slot is
+  disposed and forgotten.
+* ``BadAlloc`` mid-``launch``: same rollback semantics for the launch phase.
+"""
+
+from __future__ import annotations
+
+from typing import List
+
+import pytest
+from qbruntime import QbRuntimeError
+
+from mblt_model_zoo.utils import npu_backend as npu_backend_module
+from mblt_model_zoo.utils.npu_backend import (
+    MobilintBackendAllocError,
+    MobilintNPUBackend,
+    _is_qbruntime_bad_alloc,
+)
+
+
+class _FakeAccelerator:
+    """Records the device number an accelerator was opened for."""
+
+    def __init__(self, dev_no: int) -> None:
+        self.dev_no = int(dev_no)
+
+
+class _FakeModelConfig:
+    """Records the core-mode selection so tests can assert per-slot config."""
+
+    def __init__(self) -> None:
+        self.mode: str | None = None
+        self.cores: object | None = None
+        self.clusters: object | None = None
+
+    def set_single_core_mode(self, _batch_size: object, cores: object) -> None:
+        self.mode = "single"
+        self.cores = cores
+
+    def set_multi_core_mode(self, clusters: object) -> None:
+        self.mode = "multi"
+        self.clusters = clusters
+
+    def set_global4_core_mode(self, clusters: object) -> None:
+        self.mode = "global4"
+        self.clusters = clusters
+
+    def set_global8_core_mode(self) -> None:
+        self.mode = "global8"
+
+
+class _FakeCacheInfo:
+    """qbruntime CacheInfo stand-in exposing the fields the K probe reads."""
+
+    def __init__(self, num_batches: int) -> None:
+        self.num_batches = int(num_batches)
+
+
+class _FakeModel:
+    """qbruntime.Model stand-in that always succeeds and records lifecycle events."""
+
+    def __init__(
+        self,
+        path: str,
+        mc: _FakeModelConfig,
+        k: int = 1,
+        n_layers: int = 32,
+        output_shape: tuple[int, ...] = (1, 1, 32000),
+    ) -> None:
+        self.path = path
+        self.mc = mc
+        self.launched_on: _FakeAccelerator | None = None
+        self.disposed = False
+        self._cache_infos = [_FakeCacheInfo(k)] * int(n_layers)
+        self._output_shape = tuple(output_shape)
+
+    def get_cache_infos(self):
+        return self._cache_infos
+
+    def get_model_output_shape(self):
+        return [self._output_shape]
+
+    def launch(self, acc: _FakeAccelerator) -> None:
+        self.launched_on = acc
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+class _StubQbRuntime:
+    """Container tracking every fake Model created via :func:`stub_qbruntime`."""
+
+    def __init__(self) -> None:
+        self.models: List[_FakeModel] = []
+        self.create_should_fail_at: int | None = None
+        self.launch_should_fail_at: int | None = None
+        # Default create/launch failure messages mimic the qbruntime BadAlloc
+        # text so the historical BadAlloc-only test cases still exercise the
+        # allocation path. Non-alloc tests override these to a benign message.
+        self.create_failure_message: str = "BadAlloc: device out of memory"
+        self.launch_failure_message: str = "BadAlloc: device out of memory"
+        self.k_per_model: int = 1
+
+
+@pytest.fixture
+def stub_qbruntime(monkeypatch: pytest.MonkeyPatch) -> _StubQbRuntime:
+    """Replace qbruntime symbols with fakes and return a tracker."""
+    stub = _StubQbRuntime()
+
+    def _model_factory(path: str, mc: _FakeModelConfig) -> _FakeModel:
+        idx = len(stub.models)
+        if stub.create_should_fail_at is not None and idx == stub.create_should_fail_at:
+            raise QbRuntimeError(stub.create_failure_message)
+        model = _FakeModel(path, mc, k=stub.k_per_model)
+        if stub.launch_should_fail_at is not None:
+            slot_idx = idx
+
+            def _failing_launch(acc: _FakeAccelerator, slot_idx: int = slot_idx) -> None:
+                if slot_idx == stub.launch_should_fail_at:
+                    raise QbRuntimeError(stub.launch_failure_message)
+                model.launched_on = acc
+
+            model.launch = _failing_launch  # type: ignore[assignment]
+        stub.models.append(model)
+        return model
+
+    monkeypatch.setattr(npu_backend_module, "Accelerator", _FakeAccelerator)
+    monkeypatch.setattr(npu_backend_module, "ModelConfig", _FakeModelConfig)
+    monkeypatch.setattr(npu_backend_module, "Model", _model_factory)
+    monkeypatch.setattr(npu_backend_module, "log_model_details", lambda *_a, **_k: None)
+    return stub
+
+
+def _make_backend_at(tmp_path, **kwargs) -> MobilintNPUBackend:
+    """Build a backend whose ``mxq_path`` points at a stub file in ``tmp_path``."""
+    mxq_path = tmp_path / "model.mxq"
+    if not mxq_path.exists():
+        mxq_path.write_bytes(b"stub")
+    kwargs.setdefault("mxq_path", str(mxq_path))
+    kwargs.setdefault("core_mode", "single")
+    return MobilintNPUBackend(**kwargs)
+
+
+def test_backend_create_n1_single_slot_single_device(tmp_path, stub_qbruntime) -> None:
+    """max_batch_size=1 with a K=1 model yields exactly one slot on the target device."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0", "0:0:1"],
+    )
+
+    backend.create()
+
+    assert backend.n_models == 1
+    assert backend.k_per_model == 1
+    assert len(backend.mxq_models) == 1
+    assert backend.model_dev_no == [0]
+    assert list(backend.accs.keys()) == [0]
+    assert backend.mxq_model is backend.mxq_models[0]  # compat shim
+
+
+def test_backend_create_n2_round_robins_across_two_devices(tmp_path, stub_qbruntime) -> None:
+    """max_batch_size=2 K=1 with two devices opens one slot per device in RR order."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+
+    backend.create()
+
+    assert backend.n_models == 2
+    assert backend.k_per_model == 1
+    assert len(backend.mxq_models) == 2
+    assert backend.model_dev_no == [0, 1]
+    assert sorted(backend.accs.keys()) == [0, 1]
+
+
+def test_backend_launch_forwards_each_slot_to_its_own_accelerator(tmp_path, stub_qbruntime) -> None:
+    """launch() must hand every slot the accelerator opened for its assigned device."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+    backend.create()
+    backend.launch()
+
+    assert backend.mxq_models[0].launched_on is backend.accs[0]
+    assert backend.mxq_models[1].launched_on is backend.accs[1]
+
+
+def test_backend_create_badalloc_rolls_back_earlier_slots(tmp_path, stub_qbruntime) -> None:
+    """A create-phase QbRuntimeError disposes every previously loaded slot."""
+    stub_qbruntime.create_should_fail_at = 1  # slot 0 succeeds, slot 1 fails
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+
+    with pytest.raises(MobilintBackendAllocError) as excinfo:
+        backend.create()
+
+    err = excinfo.value
+    assert err.phase == "create"
+    assert err.slot == 1
+    assert err.dev == 1
+    assert err.succeeded_so_far == 1
+    assert err.n_total >= 2
+    assert err.max_batch_size == 2
+    assert isinstance(err.original, QbRuntimeError)
+    # Rollback drops every slot / accelerator handle so callers can retry.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    # The first slot must have been disposed on rollback.
+    assert stub_qbruntime.models[0].disposed is True
+
+
+def test_backend_launch_badalloc_rolls_back_earlier_slots(tmp_path, stub_qbruntime) -> None:
+    """A launch-phase QbRuntimeError disposes every previously loaded slot."""
+    stub_qbruntime.launch_should_fail_at = 1  # slot 0 launches, slot 1 fails
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+    backend.create()
+
+    with pytest.raises(MobilintBackendAllocError) as excinfo:
+        backend.launch()
+
+    err = excinfo.value
+    assert err.phase == "launch"
+    assert err.slot == 1
+    assert err.dev == 1
+    assert err.succeeded_so_far == 1
+    assert err.n_total == 2
+    assert isinstance(err.original, QbRuntimeError)
+    # Rollback disposes every slot including the one that already launched.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert all(m.disposed for m in stub_qbruntime.models)
+
+
+def test_is_qbruntime_bad_alloc_predicate_matches_common_variants() -> None:
+    """The predicate must ignore case and interior whitespace on the ``BadAlloc`` token."""
+    assert _is_qbruntime_bad_alloc(QbRuntimeError("BadAlloc: device out of memory"))
+    assert _is_qbruntime_bad_alloc(QbRuntimeError("qbruntime: badalloc"))
+    assert _is_qbruntime_bad_alloc(QbRuntimeError("Bad Alloc: OOM"))
+    assert not _is_qbruntime_bad_alloc(QbRuntimeError("invalid mxq artifact"))
+    assert not _is_qbruntime_bad_alloc(QbRuntimeError("target core does not exist"))
+    assert not _is_qbruntime_bad_alloc(QbRuntimeError(""))
+
+
+def test_backend_create_non_alloc_error_reraises_unchanged(tmp_path, stub_qbruntime) -> None:
+    """A create-phase non-BadAlloc QbRuntimeError must propagate raw and clean up state.
+
+    Regression: previously every ``QbRuntimeError`` was wrapped as
+    :class:`MobilintBackendAllocError`, so an invalid MXQ / incompatible target
+    config surfaced as a memory-pressure skip and the caller was told to lower
+    ``max_batch_size`` — misleading and useless. Non-alloc errors must instead
+    be re-raised unchanged so the caller can act on the real failure.
+    """
+    stub_qbruntime.create_should_fail_at = 1
+    stub_qbruntime.create_failure_message = "invalid mxq artifact: mismatched compile target"
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+
+    with pytest.raises(QbRuntimeError) as excinfo:
+        backend.create()
+
+    assert not isinstance(excinfo.value, MobilintBackendAllocError)
+    assert "invalid mxq artifact" in str(excinfo.value)
+    # Partial state must still be cleaned up so a retry does not double-load.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert stub_qbruntime.models[0].disposed is True
+
+
+def test_backend_launch_non_alloc_error_reraises_unchanged(tmp_path, stub_qbruntime) -> None:
+    """A launch-phase non-BadAlloc QbRuntimeError must propagate raw and clean up state."""
+    stub_qbruntime.launch_should_fail_at = 1
+    stub_qbruntime.launch_failure_message = "cannot bind cores: driver refused target"
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+    backend.create()
+
+    with pytest.raises(QbRuntimeError) as excinfo:
+        backend.launch()
+
+    assert not isinstance(excinfo.value, MobilintBackendAllocError)
+    assert "cannot bind cores" in str(excinfo.value)
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert all(m.disposed for m in stub_qbruntime.models)
+
+
+def test_backend_dispose_is_idempotent(tmp_path, stub_qbruntime) -> None:
+    """dispose() may be called multiple times without raising."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+    backend.dispose()
+    backend.dispose()
+
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+
+
+def test_backend_probes_k_from_cache_infos_for_batched_llm(tmp_path, stub_qbruntime) -> None:
+    """Batched-LLM MXQ (K=16) must be probed via get_cache_infos, not input shape.
+
+    Regression: the previous input-shape-based probe read ``(1, -1, hidden)``
+    for both batched and non-batched LLM MXQs and always returned K=1, so
+    ``max_batch_size=16`` was expanded into 16 slots and hit BadAlloc.
+    """
+    stub_qbruntime.k_per_model = 16
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+
+    backend.create()
+
+    assert backend.k_per_model == 16
+    assert backend.n_models == 1
+    assert len(backend.mxq_models) == 1
+
+
+def test_probe_k_per_model_falls_back_to_one_for_empty_cache_infos(tmp_path, stub_qbruntime) -> None:
+    """Vision-style MXQs without KV cache layers must default to K=1."""
+
+    class _NoCacheModel(_FakeModel):
+        def get_cache_infos(self):
+            return []
+
+    k = MobilintNPUBackend._probe_k_per_model(_NoCacheModel("stub", _FakeModelConfig()))
+    assert k == 1
+
+
+def test_probe_k_per_model_falls_back_on_missing_api(tmp_path, stub_qbruntime) -> None:
+    """Old qbruntime releases without ``get_cache_infos`` must safely default to K=1.
+
+    :class:`AttributeError` is a version signal (the API is missing), not an
+    artifact signal, so falling back to ``K=1`` is safe. The caller cannot
+    ask the runtime any better question on that release.
+    """
+
+    class _NoApiModel(_FakeModel):
+        def get_cache_infos(self):
+            raise AttributeError("get_cache_infos")
+
+    k = MobilintNPUBackend._probe_k_per_model(_NoApiModel("stub", _FakeModelConfig()))
+    assert k == 1
+
+
+def test_probe_k_per_model_propagates_qbruntime_error(tmp_path, stub_qbruntime) -> None:
+    """A qbruntime runtime error while probing must propagate rather than silently return K=1.
+
+    Regression: the probe previously swallowed :class:`QbRuntimeError` and
+    returned ``K=1``, so :meth:`create` misclassified a batched LLM MXQ as
+    non-batch and launched ``N = max_batch_size`` slots, hitting a misleading
+    ``BadAlloc``. The probe must instead surface the real runtime signal.
+    """
+
+    class _BrokenModel(_FakeModel):
+        def get_cache_infos(self):
+            raise QbRuntimeError("driver unhappy")
+
+    with pytest.raises(QbRuntimeError) as excinfo:
+        MobilintNPUBackend._probe_k_per_model(_BrokenModel("stub", _FakeModelConfig()))
+    assert "driver unhappy" in str(excinfo.value)
+
+
+def test_backend_create_probe_bad_alloc_disposes_slot0_and_wraps(tmp_path, stub_qbruntime, monkeypatch) -> None:
+    """A device-memory ``BadAlloc`` during the K probe must wrap as ``probe_k_per_model``.
+
+    A ``BadAlloc`` at probe time is a real allocation ceiling: the compiled
+    MXQ signals that slot 0 cannot fit within the caller's target budget.
+    Wrapping as :class:`MobilintBackendAllocError` lets the benchmark record
+    ``skipped_reason=npu_alloc`` and suggest lowering ``max_batch_size``.
+    """
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+
+    def _raising_probe(_mxq_model):
+        raise QbRuntimeError("BadAlloc: device out of memory during K probe")
+
+    monkeypatch.setattr(MobilintNPUBackend, "_probe_k_per_model", staticmethod(_raising_probe))
+
+    with pytest.raises(MobilintBackendAllocError) as excinfo:
+        backend.create()
+
+    err = excinfo.value
+    assert err.phase == "probe_k_per_model"
+    assert err.slot == 0
+    assert err.dev == 0
+    assert err.succeeded_so_far == 1
+    assert err.n_total == 0
+    assert err.max_batch_size == 16
+    assert err.k_per_model == 1
+    assert isinstance(err.original, QbRuntimeError)
+    assert "BadAlloc" in str(err.original)
+    # Slot 0 must have been disposed on rollback so a retry does not double-load.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert stub_qbruntime.models[0].disposed is True
+
+
+def test_backend_create_probe_non_alloc_error_reraises_unchanged(tmp_path, stub_qbruntime, monkeypatch) -> None:
+    """A non-``BadAlloc`` K-probe failure must propagate raw and clean up state.
+
+    Regression: a prior revision unconditionally wrapped every K-probe
+    :class:`QbRuntimeError` as :class:`MobilintBackendAllocError`, so an
+    invalid MXQ / corrupted artifact / incompatible target configuration
+    surfaced with ``skipped_reason=npu_alloc`` and told the user to lower
+    ``max_batch_size`` — misleading. Non-alloc probe errors must instead be
+    re-raised unchanged so the benchmark records ``skipped_reason=npu_runtime``
+    with the actionable detail.
+    """
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+
+    def _raising_probe(_mxq_model):
+        raise QbRuntimeError("invalid mxq artifact: cannot read cache infos")
+
+    monkeypatch.setattr(MobilintNPUBackend, "_probe_k_per_model", staticmethod(_raising_probe))
+
+    with pytest.raises(QbRuntimeError) as excinfo:
+        backend.create()
+
+    assert not isinstance(excinfo.value, MobilintBackendAllocError)
+    assert "invalid mxq artifact" in str(excinfo.value)
+    # Partial state must still be cleaned up so a retry does not double-load.
+    assert backend.mxq_models == []
+    assert backend.accs == {}
+    assert stub_qbruntime.models[0].disposed is True
+
+
+def test_output_layout_probe_returns_n_items_for_static_token_axis(tmp_path, stub_qbruntime) -> None:
+    """A static token-axis compiled MXQ (``(1, 1, vocab)``) probes as ``n_items``."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    assert backend.output_layout == "n_items"
+    # Result is cached on the backend for the rest of the process.
+    assert backend._output_layout_cached == "n_items"
+
+
+def test_output_layout_probe_returns_n_tokens_for_dynamic_token_axis(tmp_path, stub_qbruntime, monkeypatch) -> None:
+    """A ``-1`` sentinel on the token axis flags the MXQ as per-token flat."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    # Rewire slot 0's compiled output shape to the dynamic-axis form.
+    backend.mxq_models[0]._output_shape = (1, -1, 32000)
+    # Clear the cache so the next read forces a re-probe.
+    backend._output_layout_cached = None
+
+    assert backend.output_layout == "n_tokens"
+
+
+def test_output_layout_probe_defers_when_dynamic_axis_meets_batched_mxq(tmp_path, stub_qbruntime) -> None:
+    """A ``K > 1`` batched MXQ with a dynamic ``-2`` axis must probe as ambiguous.
+
+    Regression: the compiled batch axis of a batched MXQ (e.g. Batch16) can
+    occupy position ``-2`` and be reported ``-1`` by ``get_model_output_shape``.
+    The shape metadata alone cannot distinguish "token axis dynamic" from
+    "batch axis dynamic," and pinning ``"n_tokens"`` in that case caused
+    :meth:`MultiSlotDispatcher._merge_group_outputs` to slice per-item last-row
+    outputs as if they were per-token flat, producing a shape-broadcast error
+    on multi-slot dispatch. The probe must defer to the runtime fallback here.
+    """
+    stub_qbruntime.k_per_model = 16
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=16,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    # Simulate the compiled shape that fires the bug: dynamic at position ``-2``.
+    backend.mxq_models[0]._output_shape = (1, -1, 128256)
+    backend._output_layout_cached = None
+
+    assert backend.k_per_model == 16
+    assert backend.output_layout is None
+    # The dispatcher's runtime fallback will pin the answer from an
+    # unambiguous group; nothing should be cached at probe time.
+    assert backend._output_layout_cached is None
+
+
+def test_output_layout_probe_returns_none_when_probe_raises(tmp_path, stub_qbruntime) -> None:
+    """Missing/erroring ``get_model_output_shape`` yields ``None`` so callers fall back."""
+    from qbruntime import QbRuntimeError
+
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    class _BrokenShape:
+        def get_model_output_shape(self):
+            raise QbRuntimeError("probe unavailable")
+
+    backend.mxq_models[0] = _BrokenShape()
+    backend._output_layout_cached = None
+    assert backend.output_layout is None
+
+
+def test_output_layout_setter_pins_backend_state(tmp_path, stub_qbruntime) -> None:
+    """The runtime fallback pins the answer via ``_set_output_layout``."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+    # Force an override to prove the setter caches.
+    backend._set_output_layout("n_tokens")
+    assert backend.output_layout == "n_tokens"
+
+
+def test_output_layout_cache_is_invalidated_across_dispose_and_recreate(tmp_path, stub_qbruntime) -> None:
+    """dispose() + create() must clear the cached layout so the new artifact re-probes.
+
+    Regression: the cache was pinned once by the first probe and lived on the
+    backend instance. Swapping ``mxq_path`` and re-running ``create()`` left the
+    stale ``"n_items"`` reading in place, and ``MultiSlotDispatcher`` then
+    merged the new per-token artifact's outputs with the wrong layout.
+    """
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+    assert backend.output_layout == "n_items"
+    assert backend._output_layout_cached == "n_items"
+
+    backend.dispose()
+    backend.create()
+    # Simulate a swapped MXQ whose compiled shape declares the dynamic
+    # (per-token) axis. The freshly created slot must re-probe on the next
+    # read rather than return the previous artifact's cached value.
+    backend.mxq_models[0]._output_shape = (1, -1, 32000)
+
+    assert backend._output_layout_cached is None
+    assert backend.output_layout == "n_tokens"
+
+
+def test_backend_dispatcher_property_wires_multi_slot_dispatcher(tmp_path, stub_qbruntime) -> None:
+    """``backend.dispatcher`` returns a live :class:`MultiSlotDispatcher`."""
+    from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=0,
+        max_batch_size=1,
+        target_cores=["0:0:0"],
+    )
+    backend.create()
+
+    dispatcher = backend.dispatcher
+    assert isinstance(dispatcher, MultiSlotDispatcher)
+    # Cached: a second read returns the same instance.
+    assert backend.dispatcher is dispatcher
+
+
+def test_backend_infer_slot_dispatches_to_the_selected_model(
+    tmp_path, stub_qbruntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """infer_slot(i, x) must call ``.infer`` on ``mxq_models[i]``."""
+    backend = _make_backend_at(
+        tmp_path,
+        dev_no=[0, 1],
+        max_batch_size=2,
+        target_cores=["0:0:0", "1:0:0"],
+    )
+    backend.create()
+
+    calls: list[tuple[int, object]] = []
+    for idx, model in enumerate(backend.mxq_models):
+        monkeypatch.setattr(
+            model,
+            "infer",
+            lambda x, _idx=idx: (calls.append((_idx, x)), x)[-1],
+            raising=False,
+        )
+
+    backend.infer_slot(0, "payload-0")
+    backend.infer_slot(1, "payload-1")
+
+    assert calls == [(0, "payload-0"), (1, "payload-1")]

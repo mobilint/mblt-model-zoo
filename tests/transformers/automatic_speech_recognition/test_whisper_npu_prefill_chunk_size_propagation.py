@@ -22,6 +22,7 @@ from mblt_model_zoo.hf_transformers.models.whisper.modeling_whisper import (
     MobilintWhisperModel,
 )
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintWhisperCache
+from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
 
 
 class _ChunkTrackingMxqModel:
@@ -38,9 +39,25 @@ class _ChunkTrackingMxqModel:
         return [np.zeros((suffix_length, 4), dtype=np.float32)]
 
 
-def _make_decoder(mxq_model: _ChunkTrackingMxqModel) -> MobilintWhisperDecoder:
+def _make_backend(mxq_model: _ChunkTrackingMxqModel, *, n_slots: int = 1) -> SimpleNamespace:
+    """Build a minimal ``npu_backend`` with a real ``MultiSlotDispatcher``.
+
+    Duplicating ``mxq_model`` across ``n_slots`` positions in ``mxq_models`` lets
+    the dispatcher read its ``n_slots`` topology from the live backend without
+    requiring a real qbruntime setup. Only the shared ``assert_single_slot``
+    entry point is exercised in these tests; other dispatcher paths are unused.
+    """
+    backend = SimpleNamespace(
+        mxq_model=mxq_model,
+        mxq_models=[mxq_model] * n_slots,
+    )
+    backend.dispatcher = MultiSlotDispatcher(backend)
+    return backend
+
+
+def _make_decoder(mxq_model: _ChunkTrackingMxqModel, *, n_slots: int = 1) -> MobilintWhisperDecoder:
     decoder = object.__new__(MobilintWhisperDecoder)
-    decoder.npu_backend = SimpleNamespace(mxq_model=mxq_model)
+    decoder.npu_backend = _make_backend(mxq_model, n_slots=n_slots)
 
     def embed_token_suffix(
         self: MobilintWhisperDecoder,
@@ -105,8 +122,7 @@ def test_decoder_forward_without_chunk_size_uses_single_infer() -> None:
 def test_decoder_forward_no_cache_honors_chunk_size() -> None:
     """With past_key_values=None, chunk_size should still split the pre-embedded sequence."""
     mxq_model = _ChunkTrackingMxqModel()
-    decoder = object.__new__(MobilintWhisperDecoder)
-    decoder.npu_backend = SimpleNamespace(mxq_model=mxq_model)
+    decoder = _make_decoder(mxq_model)
 
     # Whisper wraps the decoder input as (batch=1, extra_dim=1, seq, dim).
     seq_length = 5
@@ -129,8 +145,7 @@ def test_decoder_forward_no_cache_honors_chunk_size() -> None:
 def test_decoder_forward_no_cache_short_input_uses_single_infer() -> None:
     """No-cache path with seq <= chunk_size stays on the single-shot super().decoder_forward call."""
     mxq_model = _ChunkTrackingMxqModel()
-    decoder = object.__new__(MobilintWhisperDecoder)
-    decoder.npu_backend = SimpleNamespace(mxq_model=mxq_model)
+    decoder = _make_decoder(mxq_model)
 
     hidden_states = torch.ones((1, 1, 3, 2), dtype=torch.float32)
     encoder_hidden_states = torch.ones((1, 1, 1, 2), dtype=torch.float32)
@@ -149,6 +164,47 @@ def test_decoder_forward_no_cache_short_input_uses_single_infer() -> None:
     assert mxq_model.calls[0]["prefix_length"] == 0
 
 
+def test_decoder_forward_no_cache_short_input_rejects_multi_slot() -> None:
+    """N>1 backend must reject the short-input fall-through-to-super branch."""
+    mxq_model = _ChunkTrackingMxqModel()
+    decoder = _make_decoder(mxq_model, n_slots=2)
+
+    hidden_states = torch.ones((1, 1, 3, 2), dtype=torch.float32)
+    encoder_hidden_states = torch.ones((1, 1, 1, 2), dtype=torch.float32)
+
+    with pytest.raises(NotImplementedError, match=r"N=2"):
+        decoder.decoder_forward(
+            hidden_states,
+            encoder_hidden_states,
+            past_key_values=None,
+            cache_position=torch.arange(3, dtype=torch.long),
+            input_ids=torch.tensor([[10, 20, 30]], dtype=torch.long),
+            npu_prefill_chunk_size=4,
+        )
+    assert mxq_model.calls == []
+
+
+def test_decoder_forward_no_cache_long_input_rejects_multi_slot() -> None:
+    """N>1 backend must reject the chunked cacheless branch before dispatching slot 0."""
+    mxq_model = _ChunkTrackingMxqModel()
+    decoder = _make_decoder(mxq_model, n_slots=2)
+
+    seq_length = 5
+    hidden_states = torch.ones((1, 1, seq_length, 2), dtype=torch.float32)
+    encoder_hidden_states = torch.ones((1, 1, 1, 2), dtype=torch.float32)
+
+    with pytest.raises(NotImplementedError, match=r"N=2"):
+        decoder.decoder_forward(
+            hidden_states,
+            encoder_hidden_states,
+            past_key_values=None,
+            cache_position=torch.arange(seq_length, dtype=torch.long),
+            input_ids=torch.tensor([[10, 20, 30, 40, 50]], dtype=torch.long),
+            npu_prefill_chunk_size=2,
+        )
+    assert mxq_model.calls == []
+
+
 def test_decoder_forward_signature_declares_npu_prefill_chunk_size() -> None:
     """MobilintWhisperDecoder.forward must accept the kwarg so callers below can pass it down."""
     import inspect
@@ -159,9 +215,7 @@ def test_decoder_forward_signature_declares_npu_prefill_chunk_size() -> None:
         MobilintWhisperForConditionalGeneration,
     ):
         params = inspect.signature(cls.forward).parameters
-        assert "npu_prefill_chunk_size" in params, (
-            f"{cls.__name__}.forward must accept npu_prefill_chunk_size"
-        )
+        assert "npu_prefill_chunk_size" in params, f"{cls.__name__}.forward must accept npu_prefill_chunk_size"
 
 
 def test_decoder_wrapper_forward_threads_npu_prefill_chunk_size(monkeypatch: pytest.MonkeyPatch) -> None:

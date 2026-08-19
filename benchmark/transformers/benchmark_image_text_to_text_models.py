@@ -1765,7 +1765,20 @@ def _run_sweep(args: argparse.Namespace) -> int:
 def _collect_vlm_run_targets(
     args: argparse.Namespace,
 ) -> tuple[Path, bool, list[tuple[str, str | None, str, str, str | None, str | None, int, str]]]:
-    """Resolve image-text-to-text benchmark targets and core-mode expansion."""
+    """Resolve image-text-to-text benchmark targets and core-mode expansion.
+
+    The text-generation benchmark carries per-target ``disable_npu_specific_args`` and
+    ``is_mobilint`` provenance on :class:`TextBenchmarkTarget` so ``--original-models`` mixed
+    runs can keep Mobilint siblings on the NPU while their upstream parents route to CUDA.
+    VLM does not currently retain Mobilint siblings alongside their parents under
+    ``--original-models`` (see ``model_ids = _resolve_original_model_ids(model_ids)`` above,
+    which replaces every Mobilint id with its parent), so the mixed-run bug does not reproduce
+    here and the run-wide ``disable_npu_specific_args`` remains sufficient. When VLM grows the
+    same retention semantics, mirror the text-generation refactor: extend ``VLMBenchmarkTarget``
+    with ``is_mobilint`` / ``role`` / ``disable_npu_specific_args``, populate them here from
+    caller-listed ids and mxq_dir, and switch the run tuple + measurement loop to per-target
+    reads.
+    """
     script_dir = Path(__file__).resolve().parent
     output_dir = Path(args.output_dir).resolve() if args.output_dir else script_dir / "results" / "image_text_to_text"
     output_dir.mkdir(parents=True, exist_ok=True)

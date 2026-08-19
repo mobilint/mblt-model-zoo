@@ -5,9 +5,13 @@ from __future__ import annotations
 from types import MethodType, SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 
-from mblt_model_zoo.hf_transformers.models.whisper.modeling_whisper import MobilintWhisperDecoder
+from mblt_model_zoo.hf_transformers.models.whisper.modeling_whisper import (
+    MobilintWhisperDecoder,
+    MobilintWhisperForConditionalGeneration,
+)
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintWhisperCache
 
 
@@ -213,3 +217,102 @@ def test_whisper_embeds_only_decoder_does_not_create_default_cache() -> None:
 
     assert outputs.past_key_values is None
     assert outputs.last_hidden_state.shape == (1, 1, 2, 4)
+
+
+# ---------------------------------------------------------------------------
+# _get_cache backend-relaunch revalidation
+#
+# The N==1 backend-topology guard on ``MobilintBeamCache`` / ``MobilintWhisperCache``
+# runs only in the constructor. When ``_get_cache`` reuses a cached beam cache
+# via ``reset()`` instead of rebuilding, the guard is never re-invoked and can
+# silently retain a stale slot handle from a disposed backend. These tests pin
+# the fix: the reuse guard must revalidate the live decoder-backend topology on
+# every call, rebuild on any change (fresh slot 0 or expanded slot count), and
+# preserve the reset fast-path when the topology still matches.
+# ---------------------------------------------------------------------------
+
+
+def _make_whisper_generation_stub(
+    mxq_models: list[object], max_batch_size: int = 1
+) -> MobilintWhisperForConditionalGeneration:
+    """Create a minimal Whisper generation instance for exercising ``_get_cache`` directly."""
+    model = object.__new__(MobilintWhisperForConditionalGeneration)
+    decoder = SimpleNamespace(
+        npu_backend=SimpleNamespace(
+            mxq_model=mxq_models[0],
+            mxq_models=list(mxq_models),
+        ),
+    )
+
+    def get_mxq_model(self: object) -> object:
+        del self
+        return decoder.npu_backend.mxq_model
+
+    decoder.get_mxq_model = MethodType(get_mxq_model, decoder)
+
+    def get_decoder(self: MobilintWhisperForConditionalGeneration) -> object:
+        del self
+        return decoder
+
+    model.get_decoder = MethodType(get_decoder, model)
+    model.config = SimpleNamespace(max_batch_size=max_batch_size)
+    return model
+
+
+def test_whisper_get_cache_resets_when_topology_matches() -> None:
+    """Reuse the existing Whisper cache via ``reset()`` when slot 0 is unchanged."""
+    slot_0 = object()
+    model = _make_whisper_generation_stub(mxq_models=[slot_0], max_batch_size=2)
+
+    first_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert isinstance(first_cache, MobilintWhisperCache)
+    assert first_cache.mxq_models == [slot_0]
+
+    second_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert second_cache is first_cache
+
+
+def test_whisper_get_cache_rebuilds_when_slot_handle_changes() -> None:
+    """Reuse must invalidate when the decoder was relaunched with a fresh slot 0.
+
+    Regression for PR #109 review: after the decoder backend was disposed and
+    re-created with the same ``N=1`` topology but a new ``qbruntime.Model``
+    handle, the reset fast-path would silently retain the stale handle and
+    dispatch would hit a disposed slot.
+    """
+    slot_0_v1 = object()
+    model = _make_whisper_generation_stub(mxq_models=[slot_0_v1], max_batch_size=2)
+
+    first_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert first_cache.mxq_models == [slot_0_v1]
+
+    slot_0_v2 = object()
+    decoder = model.get_decoder()
+    decoder.npu_backend.mxq_models = [slot_0_v2]
+    decoder.npu_backend.mxq_model = slot_0_v2
+
+    second_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert second_cache is not first_cache
+    assert second_cache.mxq_models == [slot_0_v2]
+
+
+def test_whisper_get_cache_rebuilds_and_raises_on_multi_slot_relaunch() -> None:
+    """A relaunch that grows the decoder to ``N > 1`` must go through rebuild.
+
+    The reset fast-path would retain a Whisper cache built for ``N=1``,
+    silently breaking the beam contract; instead the reuse guard rebuilds so
+    the constructor-time ``n_slots>1`` guard fires with a clear
+    ``NotImplementedError``.
+    """
+    slot_0_v1 = object()
+    model = _make_whisper_generation_stub(mxq_models=[slot_0_v1], max_batch_size=2)
+
+    model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+
+    new_slot_0, new_slot_1 = object(), object()
+    decoder = model.get_decoder()
+    decoder.npu_backend.mxq_models = [new_slot_0, new_slot_1]
+    decoder.npu_backend.mxq_model = new_slot_0
+
+    with pytest.raises(NotImplementedError, match="multi-slot dispatch"):
+        model._get_cache("mobilint", batch_size=2, max_cache_len=1)

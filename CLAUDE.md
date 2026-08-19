@@ -65,6 +65,72 @@
   checking taxonomy-specific layout, required metadata and targets, and the complete official split.
 - Validate complete staged ImageNet, COCO, and WiderFace roots before atomic replacement, preserving
   an existing cache on failure; match WiderFace event/image identities exactly to `wider_face_val.mat`.
+- `MobilintNPUBackend` hosts `N` `qbruntime.Model` slots; `max_batch_size` is the aggregate `N*K`
+  capacity where `K` is the compiled MXQ batch axis. Slots are distributed round-robin across the
+  unique devices referenced by the canonical target strings. A non-batch MXQ (`K==1`) with `B>1`
+  fans out into `N=B` slots dispatched in parallel via `MobilintNPUBackend.infer_slot`.
+- `dev_no` is syntactic sugar for the device-prefix component of the canonical target strings.
+  Scalar pins one device; a list expands to multiple. Do not read `dev_no` at dispatch time —
+  read `_target_cores_serialized` / `_target_clusters_serialized` (or the public
+  `target_cores` / `target_clusters` accessors). The aggregate `target_cores` / `target_clusters`
+  return the union across every covered device with device prefix dropped; use
+  `target_cores_by_device` / `target_clusters_by_device` for per-device provenance.
+- Backend target topology is accumulated on `NPUTargetSpecPending` at
+  `MobilintNPUBackend._pending`. Each per-field setter records its raw override without
+  normalizing and invalidates `MobilintNPUBackend._finalized`; the canonical `NPUTargetSpec` is
+  materialized lazily on the next `_spec` read via `NPUTargetSpecPending.finalize`, which runs the
+  single ordered pipeline (legacy migration → sibling drop → grain unification → off-mode drop →
+  device-set consistency → `global8` coverage) once every accumulated override is visible.
+  Setter order is irrelevant — the resolved spec depends on the *set* of overrides, not the
+  sequence. `NPUTargetSpec.from_kwargs` remains the config-layer entry (JSON load) where eager
+  normalization is unambiguous. Target-only override syncs `dev_no` to the target device set;
+  `dev_no`-only override clears stale targets and re-expands sugar; both overridden → device-set
+  consistency check surfaces mismatches on the next canonical read (not on the setter). Override
+  intent flags are scoped to a single setter chain: every canonical read promotes
+  `MobilintNPUBackend._pending` to a fresh `NPUTargetSpecPending` baseline (via
+  `NPUTargetSpecPending.from_baseline`) so a subsequent setter chain — or any standalone runtime
+  mutation — never inherits stale intent flags from the previous chain. Within a single chain
+  (no mid-chain accessor read) accumulated overrides finalize as one atomic decision; across
+  chains each chain sees a clean intent slate.
+- Canonical NPU target wire form: `target_cores` items are `"d:c:k"` strings and
+  `target_clusters` items are `"d:c"` strings. Legacy 2-part `c:k` cores, bare integer clusters,
+  and `qbruntime.CoreId` / `Cluster` objects are silently migrated by
+  `NPUTargetSpec.from_kwargs` (and its `_normalize_npu_target_kwargs` config-layer wrapper)
+  using `dev_no` as the fallback prefix. Under `single`, `target_clusters` unfolds into every
+  core of each cluster; under `multi` / `global4` / `global8`, `target_cores` folds up to
+  `"d:c"` cluster prefixes and warns on partial coverage. `global8` requires both clusters on
+  every covered device.
+- `MobilintCache([m0, m1, ...], per_model_batch=K)` dualizes KV along `(model_idx, cache_id)`
+  with total capacity `N*K` rows. Row `i` maps to `(i // K, i % K)`. Use `slot_of`, `model_of`,
+  `group_by_model` for dispatch. `ensure_batch_size` beyond `N*K` is only allowed on the legacy
+  single-Model hardware-batch path (`N==1`). `MobilintCache(model, batch_size=K)` is the shim
+  for the historical `N=1, K=K` case.
+- `MobilintBeamCache` enforces `N==1` — beam search bookkeeping tracks one active qbruntime
+  cache. Multi-Model dispatch is a `MobilintCache`-only feature.
+- Shared `MobilintModelMixin.decoder_forward` (BLIP text head) is `N==1` only — one blocking
+  `mxq_model.infer` on slot 0 with no cross-slot routing / beam-cache reorder. `N>1` (e.g.
+  `text_max_batch_size>K` on a `K==1` text MXQ) hard-fails with `NotImplementedError`; drop
+  `--batch-size` or compile a `K>1` text MXQ. Guard is routed through
+  `MultiSlotDispatcher.assert_single_slot` so every `N==1` caller shares one enforcement site.
+- `MobilintNPUBackend.dispatcher` (`multi_slot_dispatch.MultiSlotDispatcher`) is the sole entry
+  point for batched NPU dispatch. Owns `slot_of` routing, single-group fast path, multi-group
+  `ThreadPoolExecutor` fan-out with worker-exception re-raise, NPU-time accounting (elapsed for
+  single-group; wall time for multi-group so parallel work is not double-counted), and per-group
+  merge. `modeling_utils._llm_forward_batch` collapses to a thin delegation.
+- `MobilintNPUBackend.output_layout` (`"n_items"` / `"n_tokens"`) probed once from slot 0's
+  `get_model_output_shape` (index `-2`: static -> `"n_items"`; `-1` -> `"n_tokens"` only when
+  `k_per_model == 1`; `-1` + `K > 1` is ambiguous — the compiled batch axis can occupy
+  position `-2` — so the probe returns `None` and defers to the runtime fallback). Consumed in
+  `MultiSlotDispatcher._merge_group_outputs`; the old per-dispatch shape inference is gone.
+  Ambiguous or missing shape probe falls back to inspecting an unambiguous runtime group and
+  pins the answer via `_set_output_layout`; a wholly-ambiguous dispatch (every group is
+  `n_rows == n_items == n_tokens`) hard-fails rather than silently defaulting to layout A.
+  The dispatcher also cross-checks the cached layout against each dispatch's observed row
+  count and re-pins the backend cache on disagreement, so a stale probe self-heals.
+- On HBM `BadAlloc`, `MobilintNPUBackend.create` / `.launch` disposes every previously loaded
+  slot and re-raises as `MobilintBackendAllocError` with `phase`, `slot`, `dev`,
+  `succeeded_so_far`, `n_total`, `max_batch_size`, `k_per_model` context. Callers should lower
+  `max_batch_size` or spread across more devices via `dev_no`.
 - Keep TPS table and JSON output synchronized through `mblt_model_zoo/cli/tps_table.py`.
 - Keep VLM non-batch tests under `image_text_to_text/non_batch`; matrix-runner Phase B owns the
   batch text-generation and image-text-to-text suites.

@@ -53,7 +53,9 @@ class StaticLastOnlyMxq:
         active_batch = len(batch_params)
         payload = np.stack(
             [
-                np.full((self.vocab_size,), fill_value=float(p.cache_id * 100 + self._batched_counter), dtype=np.float32)
+                np.full(
+                    (self.vocab_size,), fill_value=float(p.cache_id * 100 + self._batched_counter), dtype=np.float32
+                )
                 for p in batch_params
             ],
             axis=0,
@@ -92,16 +94,12 @@ class DynamicAxisMxq:
             chunk_len = int(chunk.shape[2])
             offset = int(cache_size) * self.vocab_size
             values = np.arange(chunk_len * self.vocab_size, dtype=np.float32) + offset
-            self.calls.append(
-                {"shape": tuple(chunk.shape), "cache_size": int(cache_size), "chunk_len": chunk_len}
-            )
+            self.calls.append({"shape": tuple(chunk.shape), "cache_size": int(cache_size), "chunk_len": chunk_len})
             return [values.reshape(1, chunk_len, self.vocab_size)]
 
         self._batched_counter += 1
         total_tokens = sum(int(p.sequence_length) for p in batch_params)
-        flat = np.arange(total_tokens * self.vocab_size, dtype=np.float32).reshape(
-            total_tokens, self.vocab_size
-        )
+        flat = np.arange(total_tokens * self.vocab_size, dtype=np.float32).reshape(total_tokens, self.vocab_size)
         # Encode per-item id into the payload so batched tests can spot mixups.
         offset = 0
         for p in batch_params:
@@ -119,6 +117,44 @@ class DynamicAxisMxq:
 class FakeBackend:
     def __init__(self, mxq_model):
         self.mxq_model = mxq_model
+        # ``_llm_forward_batch`` uses ``npu_backend.mxq_models`` for
+        # per-group dispatch; single-Model fakes still land on the
+        # single-group fast path.
+        self.mxq_models = [mxq_model]
+        # Compiled batch axis probed off slot 0 in the real backend; the
+        # cacheless dispatch path reads this to derive ``(row // K, row % K)``
+        # routing when ``past_key_values`` is absent.
+        self.k_per_model = 1
+        self._output_layout_cached = None
+        self._dispatcher = None
+
+    @property
+    def output_layout(self):
+        cached = self._output_layout_cached
+        if cached is not None:
+            return cached
+        try:
+            shapes = self.mxq_models[0].get_model_output_shape()
+        except Exception:
+            return None
+        if not shapes:
+            return None
+        first_shape = tuple(shapes[0])
+        if len(first_shape) < 2:
+            return None
+        token_axis = int(first_shape[-2])
+        return "n_tokens" if token_axis == -1 else "n_items"
+
+    def _set_output_layout(self, layout):
+        self._output_layout_cached = layout
+
+    @property
+    def dispatcher(self):
+        if self._dispatcher is None:
+            from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+
+            self._dispatcher = MultiSlotDispatcher(self)
+        return self._dispatcher
 
 
 def make_model(mxq, *, max_batch_size: int = 1) -> MobilintModelMixin:

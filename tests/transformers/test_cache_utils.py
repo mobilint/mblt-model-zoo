@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
+
 import pytest
 import torch
 
@@ -12,6 +16,7 @@ from mblt_model_zoo.hf_transformers.utils.cache_utils import (
     MobilintEagle3Cache,
     MobilintWhisperCache,
     append_whisper_beam_debug_event,
+    build_mobilint_cache_from_model,
     is_whisper_beam_debug_trace_enabled,
 )
 
@@ -264,6 +269,158 @@ def test_deepstack_cache_reset_clears_deepstack_tensor() -> None:
     assert torch.count_nonzero(chunk).item() == 0
 
 
+def test_deepstack_cache_multi_model_routes_rows_across_slots() -> None:
+    """Multi-slot deepstack cache should route flat rows to their owning ``qbruntime.Model``."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    cache = MobilintDeepStackCache(
+        models,
+        per_model_batch=1,
+        num_deepstack_layers=1,
+        hidden_size=2,
+    )
+
+    assert cache.n_models == 2
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 2
+    assert cache.slot_of(0) == (0, 0)
+    assert cache.slot_of(1) == (1, 0)
+    assert cache.model_of(0) is models[0]
+    assert cache.model_of(1) is models[1]
+    # The deepstack payload plumbing is preserved end-to-end on a multi-slot cache.
+    cache.set_deepstack_tensor(torch.ones(1, 4, 2))
+    chunk = cache.get_deepstack_chunk(0, 2, device=torch.device("cpu"), dtype=torch.float32)
+    assert chunk.shape == (1, 2, 2)
+
+
+def test_build_mobilint_cache_from_model_dispatches_deepstack_cache_to_slots() -> None:
+    """``build_mobilint_cache_from_model`` must forward ``MobilintDeepStackCache`` extras to slots.
+
+    Regression for PR #109 Codex P1: ``MobilintQwen3VLTextModel._get_cache`` used to build the
+    deepstack cache from ``get_cache_mxq_model()`` (slot 0), so a multi-slot text backend never
+    received rows ``1..B-1``. The shared factory now handles ``cache_cls=MobilintDeepStackCache``
+    plus its keyword-only ``num_deepstack_layers`` / ``hidden_size`` extras.
+    """
+
+    class _StubBackend:
+        def __init__(self, models: list) -> None:
+            self.mxq_models = models
+            self.k_per_model = 1
+
+    class _StubModel:
+        def __init__(self, models: list) -> None:
+            self.npu_backend = _StubBackend(models)
+
+    models = [_FakeMxqModel() for _ in range(3)]
+    stub_model = _StubModel(models)
+    cache = build_mobilint_cache_from_model(
+        stub_model,
+        batch_size=3,
+        cache_cls=MobilintDeepStackCache,
+        num_deepstack_layers=2,
+        hidden_size=4,
+    )
+    assert isinstance(cache, MobilintDeepStackCache)
+    assert cache.n_models == 3
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 3
+    assert cache.num_deepstack_layers == 2
+    assert cache.hidden_size == 4
+    for row in range(3):
+        assert cache.model_of(row) is models[row]
+
+
+class _CapacityStubBackend:
+    """Minimal :class:`MobilintNPUBackend` stand-in for capacity-check regression tests."""
+
+    def __init__(self, models: list, k_per_model: int) -> None:
+        self.mxq_models = models
+        self.k_per_model = int(k_per_model)
+
+
+class _CapacityStubModel:
+    """Model wrapper that exposes a stub NPU backend for cache-building tests."""
+
+    def __init__(self, models: list, k_per_model: int) -> None:
+        self.npu_backend = _CapacityStubBackend(models, k_per_model)
+
+
+def test_build_mobilint_cache_from_model_n1_k1_batch1_fits_backend_capacity() -> None:
+    """Backend N=1, K=1 with batch_size=1 must build a size-1 cache (regression)."""
+    stub_model = _CapacityStubModel([_FakeMxqModel()], k_per_model=1)
+
+    cache = build_mobilint_cache_from_model(stub_model, batch_size=1)
+
+    assert cache.n_models == 1
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 1
+
+
+def test_build_mobilint_cache_from_model_rejects_n1_k1_batch_over_capacity() -> None:
+    """Backend N=1, K=1 with batch_size=2 must raise instead of legacy growth (bug fix).
+
+    The pre-fix helper called :meth:`MobilintCache.ensure_batch_size` here, which
+    took the legacy single-Model growth branch (``n_models == 1``) and expanded
+    ``k_per_model`` on the client side without launching a second Model. Downstream
+    dispatch then routed row 1 back to slot 0 whose compiled batch axis was still
+    ``K = 1``, silently corrupting inference. The multi-slot resolved-backend path
+    now rejects any request beyond ``N * K``.
+    """
+    stub_model = _CapacityStubModel([_FakeMxqModel()], k_per_model=1)
+
+    with pytest.raises(ValueError, match=r"N\*K = 1\*1 = 1"):
+        build_mobilint_cache_from_model(stub_model, batch_size=2)
+
+
+def test_build_mobilint_cache_from_model_n2_k2_batch_at_capacity_builds_cache() -> None:
+    """Backend N=2, K=2 with batch_size=4 must build a size-4 cache (regression)."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    stub_model = _CapacityStubModel(models, k_per_model=2)
+
+    cache = build_mobilint_cache_from_model(stub_model, batch_size=4)
+
+    assert cache.n_models == 2
+    assert cache.k_per_model == 2
+    assert cache.batch_size == 4
+    assert cache.model_of(0) is models[0]
+    assert cache.model_of(3) is models[1]
+
+
+def test_build_mobilint_cache_from_model_rejects_n2_k2_batch_over_capacity() -> None:
+    """Multi-slot rejection must extend to N>1 too: N=2, K=2, batch_size=5 raises."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    stub_model = _CapacityStubModel(models, k_per_model=2)
+
+    with pytest.raises(ValueError, match=r"N\*K = 2\*2 = 4"):
+        build_mobilint_cache_from_model(stub_model, batch_size=5)
+
+
+def test_build_mobilint_cache_from_model_backend_less_legacy_grows_via_batch_size() -> None:
+    """Backend-less legacy path must still forward ``batch_size`` to ``cache_cls`` (regression).
+
+    Preserves the pre-fix behavior for callers without a discoverable Mobilint NPU
+    backend — single-Model wrappers and unit-test stubs that only carry
+    ``get_cache_mxq_model``. Those callers may still grow via
+    :meth:`MobilintCache.ensure_batch_size`.
+    """
+
+    class _LegacyStubModel:
+        def __init__(self, mxq_model: _FakeMxqModel) -> None:
+            self._mxq_model = mxq_model
+
+        def get_cache_mxq_model(self) -> _FakeMxqModel:
+            return self._mxq_model
+
+    mxq_model = _FakeMxqModel()
+    stub_model = _LegacyStubModel(mxq_model)
+
+    cache = build_mobilint_cache_from_model(stub_model, batch_size=2)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2
+    assert cache.k_per_model == 2
+    assert cache.mxq_model is mxq_model
+
+
 def test_eagle3_cache_tracks_base_and_draft_lengths_independently() -> None:
     """EAGLE-3 cache should track base and draft MXQ sequence lengths separately."""
     cache = MobilintEagle3Cache(_FakeMxqModel(), _FakeMxqModel())
@@ -330,3 +487,232 @@ def test_eagle3_cache_dump_load_roundtrip_restores_base_and_draft_seq_lengths() 
     assert cache.get_draft_seq_length() == 7
     assert base_mxq.loaded == [(0, [b"cache-0"])]
     assert draft_mxq.loaded == [(0, [b"cache-0"])]
+
+
+def test_mobilint_cache_legacy_batch_size_promotes_single_model_to_n1_k8() -> None:
+    """Legacy ``batch_size=8`` on a single Model should build one N=1, K=8 cache."""
+    mxq_model = _FakeMxqModel()
+    cache = MobilintCache(mxq_model, batch_size=8)
+
+    assert cache.n_models == 1
+    assert cache.k_per_model == 8
+    assert cache.batch_size == 8
+    assert len(cache.layers) == 8
+    assert all(layer.mxq_model is mxq_model for layer in cache.layers)
+    assert cache.mxq_model is mxq_model
+    assert cache.slot_of(0) == (0, 0)
+    assert cache.slot_of(7) == (0, 7)
+
+
+def test_mobilint_cache_two_models_per_model_batch_one_yields_flat_row_layout() -> None:
+    """Two Models with ``per_model_batch=1`` should map row i to model i, slot 0."""
+    model_0 = _FakeMxqModel()
+    model_1 = _FakeMxqModel()
+    cache = MobilintCache([model_0, model_1], per_model_batch=1)
+
+    assert cache.n_models == 2
+    assert cache.k_per_model == 1
+    assert cache.batch_size == 2
+    assert cache.slot_of(0) == (0, 0)
+    assert cache.slot_of(1) == (1, 0)
+    assert cache.model_of(0) is model_0
+    assert cache.model_of(1) is model_1
+    assert cache.layers[0].mxq_model is model_0
+    assert cache.layers[0].cache_id == 0
+    assert cache.layers[1].mxq_model is model_1
+    assert cache.layers[1].cache_id == 0
+
+
+def test_mobilint_cache_four_models_per_model_batch_sixteen_slot_math() -> None:
+    """Four Models × K=16 should produce 64 flat rows with the divmod slot layout."""
+    models = [_FakeMxqModel() for _ in range(4)]
+    cache = MobilintCache(models, per_model_batch=16)
+
+    assert cache.n_models == 4
+    assert cache.k_per_model == 16
+    assert cache.batch_size == 64
+    assert len(cache.layers) == 64
+    assert cache.slot_of(17) == (1, 1)
+    assert cache.model_of(17) is models[1]
+    assert cache.slot_of(63) == (3, 15)
+    assert cache.model_of(63) is models[3]
+
+
+def test_mobilint_cache_group_by_model_preserves_row_order_per_model() -> None:
+    """group_by_model should bucket flat rows by owning Model in insertion order."""
+    models = [_FakeMxqModel() for _ in range(3)]
+    cache = MobilintCache(models, per_model_batch=4)
+
+    grouped = cache.group_by_model([9, 0, 5, 2, 4])
+
+    assert grouped == {
+        2: [(9, 1)],
+        0: [(0, 0), (2, 2)],
+        1: [(5, 1), (4, 0)],
+    }
+
+
+def test_mobilint_cache_update_seen_tokens_per_row_routes_via_slot_of() -> None:
+    """update_seen_tokens with a dict should route to the correct (model, cache_id) layer."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    cache = MobilintCache(models, per_model_batch=1)
+
+    cache.update_seen_tokens({0: 5, 1: 3})
+
+    assert cache.get_seq_length(0) == 5
+    assert cache.get_seq_length(1) == 3
+
+
+def test_mobilint_cache_ensure_batch_size_rejects_multi_model_growth() -> None:
+    """ensure_batch_size beyond N*K must fail for multi-Model caches."""
+    cache = MobilintCache([_FakeMxqModel(), _FakeMxqModel()], per_model_batch=1)
+
+    with pytest.raises(ValueError, match="multi-Model"):
+        cache.ensure_batch_size(4)
+
+
+def test_mobilint_cache_ensure_batch_size_grows_single_model_hardware_batch() -> None:
+    """ensure_batch_size on an N=1 cache should keep the legacy hardware-batch growth."""
+    mxq_model = _FakeMxqModel()
+    cache = MobilintCache(mxq_model, per_model_batch=2)
+
+    cache.ensure_batch_size(5)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 5
+    assert cache.k_per_model == 5
+    assert [layer.cache_id for layer in cache.layers] == [0, 1, 2, 3, 4]
+    assert all(layer.mxq_model is mxq_model for layer in cache.layers)
+
+
+def test_mobilint_cache_rejects_conflicting_batch_size_and_per_model_batch() -> None:
+    """Passing both per_model_batch and legacy batch_size should raise."""
+    with pytest.raises(TypeError, match="not both"):
+        MobilintCache(_FakeMxqModel(), per_model_batch=2, batch_size=3)
+
+
+def test_mobilint_cache_rejects_legacy_batch_size_with_multi_model_list() -> None:
+    """Multi-Model list + legacy batch_size must raise; it silently misroutes slots.
+
+    ``MobilintCache([m0, m1], batch_size=B)`` was previously accepted as ``K = B``,
+    producing ``2 * B`` rows where the first ``B`` rows landed entirely on model 0
+    and the second ``B`` rows entirely on model 1 — defeating the caller's intended
+    "batch of B distributed across 2 slots". Reject at construction with a clear
+    pointer at ``per_model_batch``.
+    """
+    with pytest.raises(TypeError, match="per_model_batch"):
+        MobilintCache([_FakeMxqModel(), _FakeMxqModel()], batch_size=4)
+
+
+def test_mobilint_cache_copy_preserves_multi_model_layout_and_seq_lengths() -> None:
+    """copy() should keep the same Model list identity and layer sequence lengths."""
+    models = [_FakeMxqModel() for _ in range(2)]
+    cache = MobilintCache(models, per_model_batch=3)
+    cache.set_seq_length({0: 4, 5: 7})
+
+    copied = cache.copy()
+
+    assert copied.n_models == 2
+    assert copied.k_per_model == 3
+    assert copied.batch_size == 6
+    assert copied.mxq_models[0] is models[0]
+    assert copied.mxq_models[1] is models[1]
+    assert copied.get_seq_length(0) == 4
+    assert copied.get_seq_length(5) == 7
+    assert copied.slot_of(5) == (1, 2)
+
+
+def test_mobilint_beam_cache_rejects_multi_model_dispatch() -> None:
+    """Beam cache should refuse N > 1 because encoder-decoder tracking is N=1 only."""
+    with pytest.raises(NotImplementedError, match="multi-Model"):
+        MobilintBeamCache([_FakeMxqModel(), _FakeMxqModel()])
+
+
+def test_mobilint_beam_cache_accepts_single_element_list() -> None:
+    """Beam cache should accept a length-1 list because it stays N=1."""
+    cache = MobilintBeamCache([_FakeMxqModel()], batch_size=2)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2
+
+
+def test_mobilint_beam_cache_defaults_are_backwards_compatible() -> None:
+    """A single mxq_model without n_slots must construct cleanly (backwards compat)."""
+    cache = MobilintBeamCache(_FakeMxqModel(), batch_size=2)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2
+
+
+def test_mobilint_beam_cache_rejects_multi_slot_backend_topology() -> None:
+    """Beam cache should refuse N > 1 owning-backend topology even when only slot 0 is passed.
+
+    Production call sites (Whisper, Qwen3-ASR) pass ``get_cache_mxq_model()`` — a
+    single ``qbruntime.Model`` handle — so the existing list-vs-single guard
+    would silently admit a backend that launched N > 1 slots. The ``n_slots``
+    kwarg is what makes the guard reflect the real topology.
+    """
+    with pytest.raises(NotImplementedError, match="multi-slot"):
+        MobilintBeamCache(_FakeMxqModel(), batch_size=1, n_slots=2)
+
+
+def test_mobilint_beam_cache_accepts_single_slot_topology() -> None:
+    """Beam cache should accept ``n_slots=1`` because the backend stayed at N=1."""
+    cache = MobilintBeamCache(_FakeMxqModel(), batch_size=2, n_slots=1)
+
+    assert cache.n_models == 1
+    assert cache.batch_size == 2
+
+
+def test_mobilint_whisper_cache_rejects_multi_slot_backend_topology() -> None:
+    """MobilintWhisperCache should propagate the beam-cache multi-slot guard."""
+    with pytest.raises(NotImplementedError, match="multi-slot"):
+        MobilintWhisperCache(_FakeMxqModel(), batch_size=1, n_slots=2)
+
+
+def test_cache_utils_imports_when_cache_layer_mixin_is_missing() -> None:
+    """cache_utils should import cleanly when transformers<4.54 (no CacheLayerMixin).
+
+    Simulates the transformers<4.54 environment by removing ``CacheLayerMixin``
+    from ``transformers.cache_utils`` in a fresh subprocess before importing the
+    Mobilint cache module. The subprocess isolates the module-reload dance so
+    downstream tests keep their cached references to the real transformers class.
+    Also verifies :mod:`mblt_model_zoo.hf_transformers.utils.benchmark_utils`
+    imports cleanly under the stub because it participates in the same top-level
+    import chain that GPU-only benchmark runs traverse.
+    """
+    script = textwrap.dedent(
+        """
+        import transformers.cache_utils as tf_cache_utils
+
+        if hasattr(tf_cache_utils, "CacheLayerMixin"):
+            del tf_cache_utils.CacheLayerMixin
+
+        from mblt_model_zoo.hf_transformers.utils import cache_utils as mblt_cache_utils
+
+        assert mblt_cache_utils.CacheLayerMixin.__module__ == mblt_cache_utils.__name__, (
+            "Compat stub should be defined inside mblt cache_utils, not imported from transformers"
+        )
+        assert mblt_cache_utils.CacheLayerMixin in mblt_cache_utils.MobilintLayer.__mro__, (
+            "MobilintLayer must subclass the compat stub when transformers<4.54"
+        )
+
+        from mblt_model_zoo.hf_transformers.utils import benchmark_utils
+
+        assert benchmark_utils.MobilintCache is mblt_cache_utils.MobilintCache, (
+            "benchmark_utils must resolve MobilintCache against the shim-based cache_utils"
+        )
+
+        print("OK")
+        """
+    ).strip()
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"subprocess exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+    assert "OK" in result.stdout, f"unexpected stdout: {result.stdout!r}"

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from mblt_model_zoo.hf_transformers.utils import modeling_utils
+from mblt_model_zoo.hf_transformers.utils import multi_slot_dispatch
 from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 
@@ -41,8 +41,44 @@ class _FakeMxqModel:
 
 
 class _FakeBackend:
-    def __init__(self, mxq_model: _FakeMxqModel):
+    def __init__(self, mxq_model: _FakeMxqModel, k_per_model: int = 2):
         self.mxq_model = mxq_model
+        # ``_llm_forward_batch`` now consults ``npu_backend.mxq_models``
+        # directly so per-group dispatch can address specific Model slots.
+        # A single-Model fake still exercises the fast path. ``k_per_model``
+        # defaults to ``2`` so the ``batch=2`` cacheless dispatch below stays
+        # within ``N*K`` after ``MultiSlotDispatcher.dispatch`` grew a capacity
+        # guard for cacheless requests.
+        self.mxq_models = [mxq_model]
+        self.k_per_model = int(k_per_model)
+        self._output_layout_cached = None
+        self._dispatcher = None
+
+    @property
+    def output_layout(self):
+        cached = self._output_layout_cached
+        if cached is not None:
+            return cached
+        try:
+            shapes = self.mxq_models[0].get_model_output_shape()
+        except Exception:
+            return None
+        if not shapes:
+            return None
+        first_shape = tuple(shapes[0])
+        if len(first_shape) < 2:
+            return None
+        token_axis = int(first_shape[-2])
+        return "n_tokens" if token_axis == -1 else "n_items"
+
+    def _set_output_layout(self, layout):
+        self._output_layout_cached = layout
+
+    @property
+    def dispatcher(self):
+        if self._dispatcher is None:
+            self._dispatcher = multi_slot_dispatch.MultiSlotDispatcher(self)
+        return self._dispatcher
 
 
 def test_validate_batch_cache_accepts_matching_size():
@@ -60,7 +96,10 @@ def test_validate_batch_cache_rejects_smaller_size():
 
 def test_llm_forward_batch_updates_npu_time_and_preserves_tensor_attributes(monkeypatch: pytest.MonkeyPatch):
     perf_counter_values = iter([1.0, 1.2, 2.0, 2.3])
-    monkeypatch.setattr(modeling_utils.time, "perf_counter", lambda: next(perf_counter_values))
+    # NPU timing accounting lives inside ``MultiSlotDispatcher.dispatch`` — the
+    # ``perf_counter`` samples that feed ``npu_time`` are read from
+    # ``multi_slot_dispatch.time``, not ``modeling_utils.time``.
+    monkeypatch.setattr(multi_slot_dispatch.time, "perf_counter", lambda: next(perf_counter_values))
 
     model = MobilintModelMixin.__new__(MobilintModelMixin)
     model.npu_backend = _FakeBackend(_FakeMxqModel())

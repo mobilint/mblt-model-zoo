@@ -112,9 +112,7 @@ class _LastOnlyMxqModel:
         self.infer_calls += 1
         chunk_len = int(row_embeds.shape[2])
         last_position = int(cache_size) + chunk_len - 1
-        return [
-            torch.full((1, self.vocab_size), float(last_position), dtype=torch.float32).numpy()
-        ]
+        return [torch.full((1, self.vocab_size), float(last_position), dtype=torch.float32).numpy()]
 
 
 class _DummyCache:
@@ -1042,3 +1040,96 @@ def test_beam_forward_last_only_backend_warns_only_once_per_instance() -> None:
 
     last_only_warnings = [w for w in caught if "last-only MXQ" in str(w.message)]
     assert len(last_only_warnings) == 1
+
+
+# ---------------------------------------------------------------------------
+# Text-model _get_cache backend-relaunch revalidation
+#
+# The N==1 backend-topology guard on ``MobilintBeamCache`` runs only in the
+# constructor. When ``_get_cache`` reuses a cached beam cache via ``reset()``
+# instead of rebuilding, the guard is never re-invoked and can silently retain
+# a stale slot handle from a disposed backend. These tests pin the fix: the
+# reuse guard must revalidate the live backend topology on every call, rebuild
+# on any change (fresh slot 0 or expanded slot count), and preserve the reset
+# fast-path when the topology still matches.
+# ---------------------------------------------------------------------------
+
+
+class _DummyQwen3ASRGetCacheTextModel(MobilintQwen3ASRTextModel):
+    """Minimal Qwen3-ASR text model for exercising ``_get_cache`` directly."""
+
+    def __init__(self, mxq_models: list[object], max_batch_size: int = 1) -> None:
+        torch.nn.Module.__init__(self)
+        self.config = SimpleNamespace(
+            max_batch_size=max_batch_size,
+            use_cache=True,
+            vocab_size=8,
+            hidden_size=2,
+            pad_token_id=0,
+        )
+        self.embed_tokens = torch.nn.Embedding(
+            self.config.vocab_size,
+            self.config.hidden_size,
+            self.config.pad_token_id,
+        )
+        self.npu_backend = SimpleNamespace(
+            mxq_model=mxq_models[0],
+            mxq_models=list(mxq_models),
+        )
+
+
+def test_qwen3_asr_get_cache_resets_when_topology_matches() -> None:
+    """Reuse the existing beam cache via ``reset()`` when slot 0 is unchanged."""
+    slot_0 = object()
+    model = _DummyQwen3ASRGetCacheTextModel(mxq_models=[slot_0], max_batch_size=2)
+
+    first_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert isinstance(first_cache, MobilintBeamCache)
+    assert first_cache.mxq_models == [slot_0]
+
+    second_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert second_cache is first_cache
+
+
+def test_qwen3_asr_get_cache_rebuilds_when_slot_handle_changes() -> None:
+    """Reuse must invalidate when the owning backend was relaunched with a fresh slot 0.
+
+    Regression for PR #109 review: after the backend was disposed and re-created
+    with the same ``N=1`` topology but a new ``qbruntime.Model`` handle, the
+    reset fast-path would silently retain the stale handle and dispatch would
+    hit a disposed slot.
+    """
+    slot_0_v1 = object()
+    model = _DummyQwen3ASRGetCacheTextModel(mxq_models=[slot_0_v1], max_batch_size=2)
+
+    first_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert first_cache.mxq_models == [slot_0_v1]
+
+    slot_0_v2 = object()
+    model.npu_backend.mxq_models = [slot_0_v2]
+    model.npu_backend.mxq_model = slot_0_v2
+
+    second_cache = model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+    assert second_cache is not first_cache
+    assert second_cache.mxq_models == [slot_0_v2]
+
+
+def test_qwen3_asr_get_cache_rebuilds_and_raises_on_multi_slot_relaunch() -> None:
+    """A relaunch that grows the backend to ``N > 1`` must go through rebuild.
+
+    The reset fast-path would retain a beam cache built for ``N=1``, silently
+    breaking the beam contract; instead the reuse guard rebuilds so the
+    constructor-time ``n_slots>1`` guard fires with a clear
+    ``NotImplementedError``.
+    """
+    slot_0_v1 = object()
+    model = _DummyQwen3ASRGetCacheTextModel(mxq_models=[slot_0_v1], max_batch_size=2)
+
+    model._get_cache("mobilint", batch_size=2, max_cache_len=1)
+
+    new_slot_0, new_slot_1 = object(), object()
+    model.npu_backend.mxq_models = [new_slot_0, new_slot_1]
+    model.npu_backend.mxq_model = new_slot_0
+
+    with pytest.raises(NotImplementedError, match="multi-slot dispatch"):
+        model._get_cache("mobilint", batch_size=2, max_cache_len=1)

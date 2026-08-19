@@ -19,7 +19,11 @@ from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 
 from ...utils.base_utils import PretrainedOnlyMixin
-from ...utils.cache_utils import MobilintDeepStackCache
+from ...utils.cache_utils import (
+    MobilintDeepStackCache,
+    build_mobilint_cache_from_model,
+    cache_matches_backend_topology,
+)
 from ...utils.generation_utils import (
     MobilintGenerationMixin,
     build_loss_kwargs_dynamic,
@@ -760,6 +764,35 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
 
+    @classmethod
+    def get_mobilint_cache_cls(cls) -> type[MobilintDeepStackCache]:
+        """Qwen3-VL text decoder requires the deepstack-augmented KV cache.
+
+        :meth:`llm_forward` hard-fails on any ``past_key_values`` that is not
+        a :class:`MobilintDeepStackCache`. The default multi-slot builder in
+        :mod:`benchmark_utils` reads this override to construct the deepstack
+        cache directly rather than the plain :class:`MobilintCache`, so
+        fake-prefill VLM decode measurements do not trip that guard on
+        multi-slot backends.
+        """
+        return MobilintDeepStackCache
+
+    def get_mobilint_cache_kwargs(self) -> dict[str, Any]:
+        """Forward the deepstack side-input shape to :class:`MobilintDeepStackCache`.
+
+        :class:`MobilintDeepStackCache` defaults ``num_deepstack_layers`` and
+        ``hidden_size`` to ``0`` so its ``__init__`` stays compatible with
+        callers that build a KV-only cache; the text MXQ, however, expects a
+        deepstack decoder input shaped ``(num_deepstack_layers, chunk_len,
+        hidden_size)`` on every invocation. This override supplies the same
+        values the model's own :meth:`_get_cache` uses so the multi-slot
+        benchmark builder never constructs a zero-shaped deepstack cache.
+        """
+        return {
+            "num_deepstack_layers": self.num_deepstack_layers,
+            "hidden_size": int(self.config.hidden_size),
+        }
+
     def _get_cache(
         self,
         cache_implementation: str,
@@ -767,22 +800,33 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         max_cache_len: int,
         *args: object,
     ) -> MobilintDeepStackCache:
-        """Return a Qwen3-VL cache that also supplies deepstack decoder chunks."""
+        """Return a Qwen3-VL cache that also supplies deepstack decoder chunks.
+
+        Delegates cache construction to :func:`build_mobilint_cache_from_model` so a
+        multi-slot text backend (``N`` Model slots × ``K`` per-model cache IDs) routes
+        each flat row to its owning ``qbruntime.Model``. The legacy single-Model path
+        still falls back to ``MobilintDeepStackCache(slot_0_model, batch_size=B)``
+        through the same helper.
+        """
         del cache_implementation, batch_size, max_cache_len, args
-        configured_batch_size = max(1, getattr(self.config, "max_batch_size", 1))
+        configured_batch_size = max(1, int(getattr(self.config, "max_batch_size", 1)))
+        existing_cache = getattr(self, "_cache", None)
         needs_new_cache = (
-            not hasattr(self, "_cache")
-            or not isinstance(self._cache, MobilintDeepStackCache)
-            or getattr(self._cache, "batch_size", 1) != configured_batch_size
-            or self._cache.num_deepstack_layers != self.num_deepstack_layers
-            or self._cache.hidden_size != int(self.config.hidden_size)
+            not isinstance(existing_cache, MobilintDeepStackCache)
+            or getattr(existing_cache, "batch_size", 1) < configured_batch_size
+            or existing_cache.num_deepstack_layers != self.num_deepstack_layers
+            or existing_cache.hidden_size != int(self.config.hidden_size)
+            # A dispose+relaunch of the text backend can swap the (mxq_models,
+            # k_per_model) topology while preserving the aggregate row capacity;
+            # the cached slot routing must be rebuilt from the current slots.
+            or not cache_matches_backend_topology(existing_cache, self)
         )
         if needs_new_cache:
-            self._cache = MobilintDeepStackCache(
-                self.get_cache_mxq_model(),
-                batch_size=configured_batch_size,
-                num_deepstack_layers=self.num_deepstack_layers,
-                hidden_size=int(self.config.hidden_size),
+            self._cache = build_mobilint_cache_from_model(
+                self,
+                configured_batch_size,
+                cache_cls=MobilintDeepStackCache,
+                **self.get_mobilint_cache_kwargs(),
             )
         else:
             self._cache.reset()

@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -83,6 +84,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     extract_device_time_series as _extract_device_time_series_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
+    is_mobilint_target as _is_mobilint_target_common,
+)
+from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     iter_core_modes as _iter_core_modes_common,
 )
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
@@ -116,9 +120,458 @@ _SWEEP_WARMUP_PREFILL = 128
 _SWEEP_WARMUP_DECODE = 32
 
 
+class _UnreachableAllocError(BaseException):
+    """Sentinel exception that is never raised, used when the NPU extra is absent."""
+
+
+def _resolve_npu_alloc_error_type() -> type[BaseException]:
+    """Return :class:`MobilintBackendAllocError` when the extra is installed.
+
+    Falls back to :class:`_UnreachableAllocError` so ``except _NPU_ALLOC_ERROR_TYPE``
+    is a no-op when ``mblt_model_zoo.utils.npu_backend`` cannot be imported.
+    """
+    try:
+        from mblt_model_zoo.utils.npu_backend import MobilintBackendAllocError
+    except Exception:
+        return _UnreachableAllocError
+    return MobilintBackendAllocError
+
+
+def _resolve_npu_runtime_error_type() -> type[BaseException]:
+    """Return :class:`qbruntime.QbRuntimeError` when ``qbruntime`` is importable.
+
+    Falls back to :class:`_UnreachableAllocError` so
+    ``except _NPU_RUNTIME_ERROR_TYPE`` is a no-op on hosts without the
+    NPU runtime installed. Used to catch non-alloc ``QbRuntimeError``
+    failures (invalid MXQ, bad target config, corrupted artifact, ...)
+    surfaced by :meth:`MobilintNPUBackend.create` / ``.launch`` after the
+    BadAlloc split — those errors would otherwise fall into the generic
+    ``except Exception`` handler and never be persisted to the skipped
+    sidecar.
+    """
+    try:
+        from qbruntime import QbRuntimeError
+    except Exception:
+        return _UnreachableAllocError
+    return QbRuntimeError
+
+
+_NPU_ALLOC_ERROR_TYPE: type[BaseException] = _resolve_npu_alloc_error_type()
+_NPU_RUNTIME_ERROR_TYPE: type[BaseException] = _resolve_npu_runtime_error_type()
+
+_SKIPPED_SIDECAR_MODES: tuple[str, ...] = ("measure", "sweep")
+
+
+def _skipped_sidecar_filename(benchmark_type: str) -> str:
+    """Return the mode-specific skipped-records sidecar filename.
+
+    Splitting the sidecar by mode keeps ``sweep`` and ``measure`` runs sharing an
+    output directory from overwriting each other's persisted skips.
+    """
+    if benchmark_type not in _SKIPPED_SIDECAR_MODES:
+        raise ValueError(f"benchmark_type must be one of {_SKIPPED_SIDECAR_MODES}, got {benchmark_type!r}")
+    return f"skipped_records_{benchmark_type}.json"
+
+
+def _is_skipped_sidecar_name(name: str) -> bool:
+    """Return whether ``name`` matches any known skipped-records sidecar file."""
+    return name in {_skipped_sidecar_filename(mode) for mode in _SKIPPED_SIDECAR_MODES}
+
+
+def _skipped_sidecar_path(output_dir: str | Path, benchmark_type: str) -> Path:
+    """Return the mode-specific skipped-records sidecar path for ``output_dir``."""
+    return Path(output_dir) / _skipped_sidecar_filename(benchmark_type)
+
+
+def _read_skipped_sidecar(output_dir: str | Path, benchmark_type: str) -> list[dict[str, Any]]:
+    """Return skipped records persisted for ``benchmark_type`` at ``output_dir``.
+
+    A missing, unreadable, or malformed sidecar returns an empty list so callers
+    stay backward compatible with older runs that predate the sidecar. Legacy
+    unified ``skipped_records.json`` files from before the mode-specific split
+    are ignored intentionally; those records are transient CI data and rerunning
+    the benchmark repopulates them.
+    """
+    path = _skipped_sidecar_path(output_dir, benchmark_type)
+    if not path.is_file():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _write_skipped_sidecar(output_dir: str | Path, records: Sequence[dict[str, Any]], benchmark_type: str) -> None:
+    """Atomically persist ``records`` to the ``benchmark_type`` sidecar at ``output_dir``.
+
+    The sidecar mirrors the in-memory ``skipped_records`` list so a subsequent
+    ``--rebuild-charts`` pass reconstructs the same failed-target rows even when
+    the current process crashes mid-run.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = _skipped_sidecar_path(output_dir, benchmark_type)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(list(records), f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _skip_record_timestamp(record: Mapping[str, Any]) -> float:
+    """Return ``record["recorded_at"]`` as a float, treating anything invalid as ``0.0``.
+
+    Records written before the timestamp refactor (or by an older process) do
+    not carry ``recorded_at``. Treating those as epoch 0 makes any on-disk
+    result JSON with a real mtime authoritative for the same label, which is
+    the safe backward-compatible default.
+    """
+    value = record.get("recorded_at")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
+
+
+def _load_result_jsons_with_mtime(
+    output_dir: str | Path,
+    benchmark_type: str,
+) -> dict[str, tuple[dict[str, Any], float]]:
+    """Return per-label on-disk result payloads keyed by label with filesystem mtime.
+
+    Filters by ``benchmark_type``: measure reads ``*_measure.json`` payloads
+    that declare ``benchmark_type == "measure"``; sweep reads ``*.json``
+    payloads that lack that marker, excluding the mode-specific skip sidecars
+    and the ``host_pc_info`` file. Missing directories and unreadable or
+    malformed JSON files are treated as absent. When multiple payloads share a
+    label, the newest mtime wins.
+    """
+    if benchmark_type not in _SKIPPED_SIDECAR_MODES:
+        raise ValueError(f"benchmark_type must be one of {_SKIPPED_SIDECAR_MODES}, got {benchmark_type!r}")
+    output_dir = Path(output_dir)
+    if not output_dir.is_dir():
+        return {}
+    result: dict[str, tuple[dict[str, Any], float]] = {}
+    pattern = "*_measure.json" if benchmark_type == "measure" else "*.json"
+    for path in sorted(output_dir.glob(pattern)):
+        if _is_skipped_sidecar_name(path.name):
+            continue
+        if benchmark_type == "sweep" and path.name == _HOST_PC_INFO_FILENAME:
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload_bench = payload.get("benchmark_type")
+        if benchmark_type == "measure":
+            if payload_bench != "measure":
+                continue
+        else:
+            if payload_bench == "measure":
+                continue
+        label = payload.get("model")
+        if not (isinstance(label, str) and label):
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        prior = result.get(label)
+        if prior is None or mtime > prior[1]:
+            result[label] = (payload, mtime)
+    return result
+
+
+def reconcile_sidecar_and_disk(
+    output_dir: str | Path,
+    benchmark_type: str,
+    *,
+    sidecar_rows: Sequence[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return the reconciled ``(skips, successes)`` view for ``benchmark_type``.
+
+    Reconciliation attaches a timestamp to every fact and takes the newer one:
+
+    * Sidecar rows carry ``recorded_at`` (seconds since the epoch, populated by
+      each skip handler). Rows missing the field are treated as epoch 0.
+    * On-disk per-target JSONs use their filesystem mtime.
+
+    For a given model label:
+
+    * only sidecar → the row is a skip.
+    * only disk → the payload is a success.
+    * both present → whichever timestamp is larger wins. A newer sidecar row
+      supersedes the older disk payload (the JSON stays on disk for manual
+      inspection but is excluded from combined output). A newer disk payload
+      supersedes the older sidecar row (the row is dropped).
+    * both timestamps missing / zero → the sidecar row is preserved as the
+      safe default (the payload's mtime is at least present, so this branch
+      is only reached when both readers hit the epoch fallback).
+
+    When ``sidecar_rows`` is provided the caller's authoritative in-memory list
+    is used instead of re-reading the sidecar file; this lets the run-loop
+    pass its current skip list without a redundant read of the file it just
+    wrote through the handlers.
+    """
+    if sidecar_rows is None:
+        sidecar_rows = _read_skipped_sidecar(output_dir, benchmark_type)
+    disk_payloads = _load_result_jsons_with_mtime(output_dir, benchmark_type)
+    row_by_label: dict[str, dict[str, Any]] = {}
+    for row in sidecar_rows:
+        if not isinstance(row, dict):
+            continue
+        label = row.get("model")
+        if not (isinstance(label, str) and label):
+            continue
+        row_by_label[label] = row
+    labels = sorted(set(row_by_label) | set(disk_payloads))
+    skips: list[dict[str, Any]] = []
+    successes: list[dict[str, Any]] = []
+    for label in labels:
+        row = row_by_label.get(label)
+        payload_entry = disk_payloads.get(label)
+        if row is not None and payload_entry is None:
+            skips.append(row)
+            continue
+        if payload_entry is not None and row is None:
+            successes.append(payload_entry[0])
+            continue
+        assert row is not None and payload_entry is not None
+        row_ts = _skip_record_timestamp(row)
+        payload_ts = payload_entry[1]
+        if row_ts > payload_ts:
+            skips.append(row)
+        elif payload_ts > row_ts:
+            successes.append(payload_entry[0])
+        else:
+            skips.append(row)
+    return skips, successes
+
+
+def _replace_skip_record(skipped_records: list[dict[str, Any]], new_record: dict[str, Any]) -> None:
+    """Insert ``new_record`` replacing any prior entry with the same target identity.
+
+    Target identity is the model label; a later failure for the same model
+    replaces the earlier record so retries do not accumulate duplicate rows in
+    the sidecar or rebuilt combined outputs. The list is mutated in place.
+    """
+    label = new_record.get("model")
+    if label:
+        skipped_records[:] = [record for record in skipped_records if record.get("model") != label]
+    skipped_records.append(new_record)
+
+
+def _handle_cuda_oom(
+    exc: BaseException,
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    pipeline: Any,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+    output_dir: str | Path,
+    benchmark_type: str,
+) -> None:
+    """Log a structured CUDA OOM skip record and clear GPU state."""
+    reason = "cuda_oom"
+    print(f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase}: {exc}")
+    _release_pipeline(pipeline, device)
+    _clear_cuda_memory(device)
+    _replace_skip_record(
+        skipped_records,
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": _format_exception(exc),
+            "recorded_at": time.time(),
+        },
+    )
+    _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
+
+
+def _handle_cuda_precheck_skip(
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    free_bytes: int,
+    required_bytes: int,
+    estimated_bytes: int,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+    output_dir: str | Path,
+    benchmark_type: str,
+) -> None:
+    """Log a structured CUDA pre-check VRAM skip record and clear GPU state.
+
+    Mirrors :func:`_handle_cuda_oom` for the pre-load VRAM check so a target that
+    fails the pre-check is persisted to ``skipped_records_<mode>.json`` and shown
+    in the combined output with ``skipped_reason="cuda_precheck"``. Without this
+    handler the pre-check rejection would only print and ``continue``, producing
+    an asymmetric record: an actual runtime OOM would appear as a skip row while
+    the safer pre-check skip would be silently dropped from the combined output,
+    breaking one-pass NPU-vs-GPU comparisons where the GPU parent is pre-checked
+    out.
+    """
+    reason = "cuda_precheck"
+    print(
+        f"SKIP model={label} device={device} batch_size={batch_size} "
+        f"reason={reason} phase={phase}: "
+        f"free={_format_gib(free_bytes)} required~={_format_gib(required_bytes)} "
+        f"estimated_weights={_format_gib(estimated_bytes)}"
+    )
+    _clear_cuda_memory(device)
+    _replace_skip_record(
+        skipped_records,
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": (
+                f"CUDA pre-check VRAM insufficient: "
+                f"free={int(free_bytes)} required={int(required_bytes)} "
+                f"estimated_weights={int(estimated_bytes)}"
+            ),
+            "free_bytes": int(free_bytes),
+            "required_bytes": int(required_bytes),
+            "estimated_weights_bytes": int(estimated_bytes),
+            "recorded_at": time.time(),
+        },
+    )
+    _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
+
+
+def _handle_npu_alloc_error(
+    exc: BaseException,
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    debug_errors: bool,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+    output_dir: str | Path,
+    benchmark_type: str,
+) -> None:
+    """Log a structured Mobilint NPU allocation skip record."""
+    reason = "npu_alloc"
+    context = {
+        "phase": getattr(exc, "phase", None),
+        "slot": getattr(exc, "slot", None),
+        "dev": getattr(exc, "dev", None),
+        "succeeded_so_far": getattr(exc, "succeeded_so_far", None),
+        "n_total": getattr(exc, "n_total", None),
+        "max_batch_size": getattr(exc, "max_batch_size", None),
+        "k_per_model": getattr(exc, "k_per_model", None),
+    }
+    context_str = " ".join(f"{k}={v}" for k, v in context.items() if v is not None)
+    print(
+        f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase} {context_str}: {exc}"
+    )
+    if debug_errors:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+    _replace_skip_record(
+        skipped_records,
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": _format_exception(exc),
+            **{f"npu_{k}": v for k, v in context.items() if v is not None},
+            "recorded_at": time.time(),
+        },
+    )
+    _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
+
+
+def _handle_npu_runtime_error(
+    exc: BaseException,
+    *,
+    label: str,
+    device: str | None,
+    batch_size: int,
+    debug_errors: bool,
+    skipped_records: list[dict[str, Any]],
+    phase: str,
+    output_dir: str | Path,
+    benchmark_type: str,
+) -> None:
+    """Log a structured Mobilint NPU non-alloc runtime skip record.
+
+    Distinct from :func:`_handle_npu_alloc_error`: the alloc handler wraps
+    device-memory ``BadAlloc`` failures with slot/dev/n_total context and
+    tells the user to lower ``max_batch_size``. This handler catches every
+    other :class:`~qbruntime.QbRuntimeError` (invalid MXQ, bad target
+    configuration, corrupted artifact, missing runtime dependency, ...) so
+    the failure is persisted with ``skipped_reason="npu_runtime"`` instead
+    of being lost in the generic ``except Exception`` catch-all.
+    """
+    reason = "npu_runtime"
+    print(f"SKIP model={label} device={device} batch_size={batch_size} reason={reason} phase={phase}: {exc}")
+    if debug_errors:
+        traceback.print_exception(type(exc), exc, exc.__traceback__)
+    _replace_skip_record(
+        skipped_records,
+        {
+            "model": label,
+            "device": device,
+            "batch_size": batch_size,
+            "phase": phase,
+            "skipped_reason": reason,
+            "detail": _format_exception(exc),
+            "recorded_at": time.time(),
+        },
+    )
+    _write_skipped_sidecar(output_dir, skipped_records, benchmark_type)
+
+
+_ROLE_MOBILINT = "mobilint"
+_ROLE_CALLER_MOBILINT_RETAINED = "caller_mobilint_retained"
+_ROLE_RESOLVED_UPSTREAM = "resolved_upstream"
+_ROLE_CALLER_UPSTREAM = "caller_upstream"
+
+# The sibling image-text-to-text and automatic-speech-recognition benchmarks do not currently
+# retain Mobilint siblings alongside their resolved upstream parents under ``--original-models``
+# (both call ``_resolve_original_model_ids`` and use the returned list verbatim), so the mixed-run
+# bug that motivated this refactor does not reproduce there. If either sibling grows the same
+# retention semantics, mirror the refactor: extend their target dataclass with ``is_mobilint`` /
+# ``role`` / ``disable_npu_specific_args``, populate them from caller-listed ids and mxq_dir at
+# collection time, and switch the measurement loop to per-target reads.
+
+
 @dataclass(frozen=True)
 class TextBenchmarkTarget:
-    """Resolved text-generation benchmark target with batch metadata."""
+    """Resolved text-generation benchmark target with batch and provenance metadata.
+
+    The ``is_mobilint``, ``role``, and ``disable_npu_specific_args`` fields are populated
+    once at target collection time. Downstream helpers must read these fields instead of
+    re-checking ``args.original_models``; that flag is a global run-mode selector, and per-target
+    behavior in ``--original-models`` mixed runs (where Mobilint siblings are retained alongside
+    their upstream parents) requires per-target provenance the flag alone cannot express.
+
+    Roles:
+        ``mobilint``: A caller-listed or ``--mxq-dir``-discovered Mobilint target in a run without
+            ``--original-models``.
+        ``caller_mobilint_retained``: A caller-listed ``mobilint/*`` target that survived a
+            ``--original-models`` mixed run alongside its resolved upstream parent.
+        ``resolved_upstream``: A parent id produced by ``_resolve_original_model_ids`` from a
+            Mobilint sibling under ``--original-models``.
+        ``caller_upstream``: A caller-listed non-Mobilint target, with or without
+            ``--original-models``.
+    """
 
     model_id: str
     revision_candidates: list[str | None]
@@ -127,6 +580,32 @@ class TextBenchmarkTarget:
     mxq_path: str | None
     max_batch_size: int
     batch_mode: str
+    is_mobilint: bool = False
+    role: str = _ROLE_CALLER_UPSTREAM
+    disable_npu_specific_args: bool = False
+
+
+def _classify_target_role(
+    *,
+    model_id: str,
+    is_mobilint: bool,
+    caller_model_ids: set[str],
+    caller_mobilint_ids: set[str],
+    original_models: bool,
+) -> str:
+    """Return the collection-time role string for one benchmark target.
+
+    ``caller_model_ids`` is the raw ``--model`` list (post-normalization) and lets the classifier
+    tell a caller-listed upstream apart from a parent that resolved out of a Mobilint sibling.
+    ``caller_mobilint_ids`` is the caller-listed Mobilint subset retained under ``--original-models``.
+    """
+    if is_mobilint:
+        if original_models and model_id in caller_mobilint_ids:
+            return _ROLE_CALLER_MOBILINT_RETAINED
+        return _ROLE_MOBILINT
+    if original_models and model_id not in caller_model_ids:
+        return _ROLE_RESOLVED_UPSTREAM
+    return _ROLE_CALLER_UPSTREAM
 
 
 def _safe_filename(model_id: str) -> str:
@@ -256,22 +735,65 @@ def _filter_text_targets_by_batch_mode(
     *,
     batch_mode: str | None = None,
     task: str = "text-generation",
+    override_batch_size: int | None = None,
+    original_models: bool = False,
+    caller_model_ids: Iterable[str] | None = None,
+    caller_mobilint_ids: Iterable[str] | None = None,
+    mxq_dir: str | None = None,
 ) -> list[TextBenchmarkTarget]:
-    """Filter unsupported targets and annotate each supported target with batch metadata."""
+    """Filter unsupported targets and annotate each supported target with batch + role metadata.
+
+    When ``original_models`` is set and ``override_batch_size`` is greater than one,
+    upstream/original targets that report ``config.max_batch_size == 1`` are still
+    admitted under the ``batch`` filter so a mixed Mobilint-vs-GPU sweep can share
+    one CLI. Outside ``--original-models`` the relaxation must not fire, otherwise
+    non-batch Mobilint MXQs (``K == 1``) would fan out into ``N == override_batch_size``
+    slots and exhaust device memory. In all cases ``override_batch_size`` becomes the
+    effective input batch dim for admitted targets, and it is later gated to Mobilint
+    targets when it is forwarded as a backend ``max_batch_size`` kwarg.
+
+    Populates per-target provenance (``is_mobilint``, ``role``, ``disable_npu_specific_args``)
+    here so downstream helpers never re-read ``args.original_models``. ``caller_model_ids`` is
+    the raw ``--model`` list and lets the classifier distinguish caller-listed upstream targets
+    from parents that resolved out of Mobilint siblings; ``caller_mobilint_ids`` is the caller
+    subset retained under ``--original-models`` mixed runs.
+    """
+    caller_model_ids_set: set[str] = set(caller_model_ids or ())
+    caller_mobilint_ids_set: set[str] = set(caller_mobilint_ids or ())
     filtered: list[TextBenchmarkTarget] = []
+    relax_original = (
+        original_models
+        and override_batch_size is not None
+        and int(override_batch_size) > 1
+        and batch_mode == _BATCH_MODE_BATCH
+    )
     for model_id, revision_candidates, label, base, mxq_path in targets:
         revision = _target_filter_revision(model_id, revision_candidates, mxq_path)
         if _is_gguf_model_id(model_id) or _has_gguf_artifact(model_id, revision):
             print(f"Skip {label}: GGUF/Llama.cpp model is not supported by Transformers benchmark.")
             continue
-        max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
-        if max_batch_size is None:
-            max_batch_size = 1
-        if max_batch_size is None:
-            continue
-        resolved_batch_mode = _batch_mode_from_max_batch_size(max_batch_size)
+        cfg_max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
+        if cfg_max_batch_size is None:
+            cfg_max_batch_size = 1
+        if override_batch_size is not None and int(override_batch_size) >= 1:
+            effective_max_batch_size = int(override_batch_size)
+        else:
+            effective_max_batch_size = cfg_max_batch_size
+        resolved_batch_mode = _batch_mode_from_max_batch_size(cfg_max_batch_size)
+        is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path, mxq_dir=mxq_dir)
+        forced_batch = relax_original and not is_mobilint
+        if forced_batch and cfg_max_batch_size == 1:
+            resolved_batch_mode = _BATCH_MODE_BATCH
         if batch_mode is not None and resolved_batch_mode != batch_mode:
             continue
+        role = _classify_target_role(
+            model_id=model_id,
+            is_mobilint=is_mobilint,
+            caller_model_ids=caller_model_ids_set,
+            caller_mobilint_ids=caller_mobilint_ids_set,
+            original_models=original_models,
+        )
+        disable_npu_specific_args = bool(original_models) and not mxq_dir and not is_mobilint
         filtered.append(
             TextBenchmarkTarget(
                 model_id=model_id,
@@ -279,8 +801,11 @@ def _filter_text_targets_by_batch_mode(
                 label=label,
                 base=base,
                 mxq_path=mxq_path,
-                max_batch_size=max_batch_size,
+                max_batch_size=effective_max_batch_size,
                 batch_mode=resolved_batch_mode,
+                is_mobilint=is_mobilint,
+                role=role,
+                disable_npu_specific_args=disable_npu_specific_args,
             )
         )
     return filtered
@@ -321,6 +846,8 @@ def _build_pipeline(
     core_mode: str | None = None,
     mxq_path: str | None = None,
     default_single_target_cores: Sequence[str] | None = ("0:0",),
+    dev_no: int | list[int] | None = None,
+    max_batch_size: int | None = None,
 ):
     kwargs = {
         "task": "text-generation",
@@ -335,14 +862,21 @@ def _build_pipeline(
         kwargs["tokenizer"] = tokenizer
     if device_map:
         kwargs["device_map"] = device_map
+    is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path)
     model_kwargs: dict[str, Any] = {}
+    effective_dev_no = dev_no if is_mobilint else None
     model_kwargs = _apply_core_mode_model_kwargs_common(
         model_kwargs,
         core_mode,
         default_single_target_cores=default_single_target_cores,
+        dev_no=effective_dev_no,
     )
     if mxq_path:
         model_kwargs["mxq_path"] = mxq_path
+    if is_mobilint and effective_dev_no is not None:
+        model_kwargs["dev_no"] = effective_dev_no
+    if is_mobilint and max_batch_size is not None and int(max_batch_size) > 1:
+        model_kwargs["max_batch_size"] = int(max_batch_size)
     if model_kwargs:
         kwargs["model_kwargs"] = model_kwargs
     if dtype:
@@ -415,9 +949,39 @@ def _resolve_original_model_ids(model_ids: Iterable[str]) -> list[str]:
     return _resolve_original_model_ids_shared(model_ids)
 
 
-def _load_result(path: str) -> BenchmarkResult:
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
+def _caller_mobilint_model_ids(models: Sequence[str] | None) -> list[str]:
+    """Return caller-listed Mobilint ids in input order.
+
+    A caller-listed Mobilint id is a value passed via ``--model`` whose repo id
+    begins with ``mobilint/``. Used to detect the one-pass Mobilint-vs-GPU
+    intent that ``--original-models`` combined with an explicit Mobilint
+    ``--model`` request expresses.
+    """
+    if not models:
+        return []
+    return [str(item) for item in models if str(item).strip().startswith("mobilint/")]
+
+
+def _merge_resolved_parents_with_caller_mobilint(
+    resolved_parents: Sequence[str],
+    caller_mobilint_ids: Sequence[str],
+) -> list[str]:
+    """Return caller-listed Mobilint ids followed by resolved upstream parents.
+
+    Caller-listed Mobilint ids are placed first so their Mobilint MXQ rows lead
+    the run list. Resolved upstream parents follow, and duplicates are dropped
+    while preserving first occurrence.
+    """
+    merged: list[str] = []
+    seen: set[str] = set()
+    for candidate in list(caller_mobilint_ids) + list(resolved_parents):
+        if candidate not in seen:
+            merged.append(candidate)
+            seen.add(candidate)
+    return merged
+
+
+def _result_from_payload(payload: dict[str, Any]) -> BenchmarkResult:
     if "benchmark" in payload and isinstance(payload["benchmark"], dict):
         payload = payload["benchmark"]
     prefill = payload.get("prefill_sweep", {})
@@ -445,12 +1009,13 @@ def _load_result(path: str) -> BenchmarkResult:
     )
 
 
-def _load_device(path: str) -> dict[str, float | None] | None:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception:
-        return None
+def _load_result(path: str) -> BenchmarkResult:
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return _result_from_payload(payload)
+
+
+def _device_from_payload(payload: dict[str, Any]) -> dict[str, float | None] | None:
     device = payload.get("device")
     if not isinstance(device, dict):
         return None
@@ -478,6 +1043,15 @@ def _load_device(path: str) -> dict[str, float | None] | None:
         value = device.get(key)
         out[key] = float(value) if isinstance(value, (int, float)) else None
     return out
+
+
+def _load_device(path: str) -> dict[str, float | None] | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    return _device_from_payload(payload)
 
 
 def _aggregate_benchmark_results(results: Sequence[BenchmarkResult]) -> BenchmarkResult:
@@ -700,7 +1274,11 @@ def _token_sweep_plot_table(
 
 def _build_text_generation_plot_tables(output_dir: Path) -> dict[str, str]:
     """Build plot-specific Markdown tables for text-generation sweep summaries."""
-    metrics_by_model = collect_folder_metrics(output_dir)
+    _, successes = reconcile_sidecar_and_disk(output_dir, "sweep")
+    include_labels = {
+        payload.get("model") for payload in successes if isinstance(payload.get("model"), str) and payload.get("model")
+    }
+    metrics_by_model = collect_folder_metrics(output_dir, include_labels=include_labels)
     if not metrics_by_model:
         return {}
     models = sorted(metrics_by_model.keys())
@@ -750,8 +1328,37 @@ def _write_single_combined_markdown(
     path: str,
     tps_rows: Sequence[dict[str, Any]],
     device_rows: Sequence[dict[str, float | str | None]],
+    *,
+    skipped_records: Sequence[dict[str, Any]] | None = None,
 ) -> None:
-    _write_token_combined_markdown(path, tps_rows, device_rows)
+    if tps_rows:
+        _write_token_combined_markdown(path, tps_rows, device_rows)
+    else:
+        # Overwrite any stale success table left by a prior rebuild; the skip
+        # section (if any) is appended below.
+        Path(path).write_text("_No successful sweep results._\n", encoding="utf-8")
+    if skipped_records:
+        _append_skipped_markdown_section(path, skipped_records)
+
+
+def _append_skipped_markdown_section(path: str, skipped_records: Sequence[dict[str, Any]]) -> None:
+    """Append a "Skipped Targets" section to a combined benchmark Markdown table."""
+    header = "| model | device | batch_size | phase | skipped_reason | detail |"
+    separator = "| --- | --- | ---: | --- | --- | --- |"
+    lines = ["\n\n## Skipped Targets\n\n", header + "\n", separator + "\n"]
+    for record in skipped_records:
+        lines.append(
+            "| {model} | {device} | {batch_size} | {phase} | {reason} | {detail} |\n".format(
+                model=_escape_markdown_cell(str(record.get("model", ""))),
+                device=_escape_markdown_cell(str(record.get("device", ""))),
+                batch_size=record.get("batch_size", ""),
+                phase=_escape_markdown_cell(str(record.get("phase", ""))),
+                reason=_escape_markdown_cell(str(record.get("skipped_reason", ""))),
+                detail=_escape_markdown_cell(str(record.get("detail", ""))),
+            )
+        )
+    with open(path, "a", encoding="utf-8") as f:
+        f.writelines(lines)
 
 
 def _write_text_generation_summary(output_dir: str | Path, *, measure: bool = False) -> None:
@@ -776,27 +1383,44 @@ def _write_text_generation_summary(output_dir: str | Path, *, measure: bool = Fa
     )
 
 
-def _rebuild_combined_outputs(output_dir: str | Path) -> None:
+def _rebuild_combined_outputs(
+    output_dir: str | Path,
+    *,
+    skipped_records: Sequence[dict[str, Any]] | None = None,
+) -> None:
+    """Rebuild combined text-generation sweep CSV, Markdown, and charts.
+
+    Resolution rule for a given model label follows :func:`reconcile_sidecar_and_disk`:
+    the newer ``recorded_at`` sidecar row or on-disk JSON mtime wins. The
+    stale side is excluded from the combined output; the physical JSON file
+    on disk is preserved for manual inspection.
+
+    When ``skipped_records`` is supplied the caller's authoritative in-memory
+    list overrides the persisted sidecar for this rebuild; missing rows fall
+    back to the on-disk sidecar.
+    """
     output_dir = Path(output_dir)
+    skips, successes = reconcile_sidecar_and_disk(
+        output_dir,
+        "sweep",
+        sidecar_rows=None if skipped_records is None else list(skipped_records),
+    )
+    if list(skips) != _read_skipped_sidecar(output_dir, "sweep"):
+        _write_skipped_sidecar(output_dir, skips, "sweep")
+
     combined_results = []
     combined_rows = []
     combined_device_rows: list[dict[str, float | str | None]] = []
-    for path in sorted(output_dir.glob("*.json")):
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if payload.get("benchmark_type") == "measure" or path.name == _HOST_PC_INFO_FILENAME:
-            continue
+    success_labels: set[str] = set()
+    for payload in successes:
         label = payload.get("model")
         if not isinstance(label, str) or not label:
             continue
-        json_path = str(path)
-        result = _load_result(json_path)
+        result = _result_from_payload(payload)
         combined_results.append(result)
         combined_rows.extend(list(BenchmarkResult.iter_rows(label, result)))
-        device = _load_device(json_path)
+        success_labels.add(label)
+        device = _device_from_payload(payload)
         if device:
             combined_device_rows.append(
                 {
@@ -822,21 +1446,22 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
                 }
             )
 
-    if not combined_results:
+    if not combined_results and not skips:
         print("No existing JSON results matched the current target set. Nothing to aggregate.")
         _write_text_generation_summary(output_dir)
         return
 
     combined_csv = os.path.join(output_dir, "combined.csv")
     combined_md = os.path.join(output_dir, "combined.md")
-    BenchmarkResult.write_combined_csv(combined_csv, combined_rows)
+    BenchmarkResult.write_combined_csv(combined_csv, combined_rows, skipped_records=skips)
     _write_single_combined_markdown(
         combined_md,
         tps_rows=combined_rows,
         device_rows=combined_device_rows,
+        skipped_records=skips,
     )
 
-    folder_metrics = collect_folder_metrics(output_dir)
+    folder_metrics = collect_folder_metrics(output_dir, include_labels=success_labels)
     if folder_metrics:
         models = sorted(folder_metrics.keys())
         labels = ["benchmark"]
@@ -898,10 +1523,29 @@ def _rebuild_combined_outputs(output_dir: str | Path) -> None:
                 x_label=x_label,
                 output_path=output_dir / filename,
             )
+    else:
+        # No successful sweep data; remove stale PNGs from a prior rebuild so
+        # the on-disk view matches the reconciled state.
+        for filename in (
+            "prefill_tps.png",
+            "prefill_tps_per_w.png",
+            "decode_tps.png",
+            "decode_tps_per_w.png",
+            "avg_power_w.png",
+            "avg_temperature_c.png",
+            "avg_utilization_pct.png",
+            "avg_memory_used_mb.png",
+            "total_energy_j.png",
+        ):
+            (output_dir / filename).unlink(missing_ok=True)
 
     if combined_device_rows:
         device_csv = os.path.join(output_dir, "combined_device.csv")
         _write_device_combined_csv(device_csv, combined_device_rows)
+    else:
+        # No reconciled device rows; remove stale combined_device.csv from a
+        # prior rebuild so the on-disk view matches the reconciled state.
+        (output_dir / "combined_device.csv").unlink(missing_ok=True)
 
     _write_text_generation_summary(output_dir)
 
@@ -924,6 +1568,18 @@ def _add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
         action="store_const",
         const=_BATCH_MODE_NON_BATCH,
         help="benchmark only non-batch model targets (default)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=_parse_positive_int_optional,
+        default=None,
+        help=(
+            "Optional effective batch dim override. When set, overrides the config "
+            "max_batch_size for both the input batch dim and, on Mobilint targets, "
+            "the max_batch_size model kwarg. On original/upstream targets with "
+            "config max_batch_size=1, passing --batch --batch-size N>1 admits the "
+            "target under batch mode."
+        ),
     )
     parser.add_argument("--model", dest="models", nargs="+", default=None, help="model id list to benchmark (optional)")
     parser.add_argument("--tokenizer", default=None, help="tokenizer id or local path (optional)")
@@ -1163,14 +1819,27 @@ def _args_for_target_device_backend(
     *,
     model_id: str,
     mxq_path: str | None = None,
+    is_mobilint: bool | None = None,
 ) -> argparse.Namespace:
-    """Return an args copy with a device backend resolved for one benchmark target."""
+    """Return an args copy with a device backend resolved for one benchmark target.
+
+    ``--original-models`` mixed runs retain the caller's Mobilint IDs alongside the resolved
+    upstream parents. The retained Mobilint target keeps its NPU/CPU defaults via
+    ``original_models_override=False``, so the resolver does not short-circuit to ``cuda``/``gpu``
+    and colocate the Mobilint sibling on the same device as its parent. Callers should pass the
+    ``is_mobilint`` flag computed at collection time (``TextBenchmarkTarget.is_mobilint``); when
+    omitted, it is derived from the target identity for legacy call sites.
+    """
+    if is_mobilint is None:
+        is_mobilint = _is_mobilint_target_common(model_id, mxq_path=mxq_path, mxq_dir=args.mxq_dir)
+    original_models_override = False if is_mobilint else None
     return _args_for_target_device_backend_shared(
         args,
         model_id=model_id,
         mxq_path=mxq_path,
         resolve_default_device=_resolve_default_device_common,
         resolve_default_device_backend=_resolve_default_device_backend_common,
+        original_models_override=original_models_override,
     )
 
 
@@ -1203,12 +1872,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
         _rebuild_combined_outputs(output_dir)
         return 0
 
-    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
-    if disable_npu_specific_args:
-        print(
-            "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
-        )
-
     available_model_ids: list[str] | None = None
     if args.mxq_dir or not args.models:
         available_model_ids = list_default_model_ids(
@@ -1221,10 +1884,14 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
     _collect_host_pc_info(output_dir)
 
+    caller_model_ids: list[str] = []
+    caller_mobilint_ids: list[str] = []
+    resolved_mxq_dir_str: str | None = None
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
+        resolved_mxq_dir_str = str(mxq_dir)
         if args.models or args.original_models or args.all or args.revision or args.mxq_path:
             print(
                 "Note: --mxq-dir is set, so --model/--original-models/--all/--revision/--mxq-path are ignored "
@@ -1239,16 +1906,26 @@ def _run_sweep(args: argparse.Namespace) -> int:
         print(f"Using local mxq targets from {mxq_dir}: {len(targets)} files")
     else:
         model_ids = [str(item) for item in args.models] if args.models else (available_model_ids or [])
+        caller_model_ids = list(model_ids)
         if args.original_models:
             original_count = len(model_ids)
-            model_ids = _resolve_original_model_ids(model_ids)
-            print(
-                f"Using parent/original model ids: {len(model_ids)} unique models "
-                f"(from {original_count} listed models)."
-            )
+            caller_mobilint_ids = _caller_mobilint_model_ids(args.models)
+            resolved_parents = _resolve_original_model_ids(model_ids)
+            model_ids = _merge_resolved_parents_with_caller_mobilint(resolved_parents, caller_mobilint_ids)
+            if caller_mobilint_ids:
+                print(
+                    f"Using merged Mobilint + parent/original model ids: {len(model_ids)} unique ids "
+                    f"(from {original_count} listed models; keeping {len(caller_mobilint_ids)} caller-listed "
+                    f"Mobilint id(s) for one-pass Mobilint-vs-GPU)."
+                )
+            else:
+                print(
+                    f"Using parent/original model ids: {len(model_ids)} unique models "
+                    f"(from {original_count} listed models)."
+                )
             if args.all or args.revision:
                 print(
-                    "Note: --all/--revision are applied to resolved original model ids "
+                    "Note: --all/--revision are applied to resolved parent/original model ids "
                     "(requested revisions may not exist)."
                 )
         targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
@@ -1256,9 +1933,36 @@ def _run_sweep(args: argparse.Namespace) -> int:
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
+    filtered_targets = _filter_text_targets_by_batch_mode(
+        targets,
+        batch_mode=args.batch_mode,
+        override_batch_size=getattr(args, "batch_size", None),
+        original_models=bool(getattr(args, "original_models", False)),
+        caller_model_ids=caller_model_ids,
+        caller_mobilint_ids=caller_mobilint_ids,
+        mxq_dir=resolved_mxq_dir_str,
+    )
+    disabled_count = sum(1 for target in filtered_targets if target.disable_npu_specific_args)
+    if disabled_count:
+        print(
+            f"Note: --original-models mixed run; {disabled_count} upstream target(s) will skip NPU-specific "
+            "parameters (core_mode/npu_prefill_chunk_size); Mobilint sibling targets keep them."
+        )
     run_targets: list[
-        tuple[str, list[str | None], str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
+        tuple[
+            str,
+            list[str | None],
+            str,
+            str,
+            str | None,
+            str | None,
+            int,
+            str,
+            tuple[int, int, int],
+            list[int],
+            bool,
+            bool,
+        ]
     ] = []
     for target in filtered_targets:
         target_prefill_range, target_cache_lengths = _target_sweep_lengths(
@@ -1269,7 +1973,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
-            disable_npu_specific_args=disable_npu_specific_args,
+            disable_npu_specific_args=target.disable_npu_specific_args,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
@@ -1284,9 +1988,12 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     target.batch_mode,
                     target_prefill_range,
                     target_cache_lengths,
+                    target.disable_npu_specific_args,
+                    target.is_mobilint,
                 )
             )
 
+    skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "sweep")
     for (
         model_id,
         revision_candidates,
@@ -1298,13 +2005,20 @@ def _run_sweep(args: argparse.Namespace) -> int:
         batch_mode,
         prefill_range,
         cache_lengths,
+        target_disable_npu_specific_args,
+        target_is_mobilint,
     ) in tqdm(
         run_targets,
         desc="Benchmarking models",
         total=len(run_targets),
         unit="model-mode",
     ):
-        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
+        target_args = _args_for_target_device_backend(
+            args,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            is_mobilint=target_is_mobilint,
+        )
         # Ensure pre-check sees memory state after releasing previous model.
         if _is_cuda_device(target_args.device):
             _clear_cuda_memory(target_args.device)
@@ -1323,12 +2037,14 @@ def _run_sweep(args: argparse.Namespace) -> int:
         if args.skip_existing and os.path.isfile(json_path) and os.path.isfile(png_path):
             print("Skipping (results exist).")
             continue
+        run_npu_prefill_chunk_size = None if target_disable_npu_specific_args else args.npu_prefill_chunk_size
         print(
             "Run config: "
             f"batch_mode={batch_mode} batch_size={batch_size} core_mode={core_mode or 'default'} "
             f"revision={revision or 'main'} "
             f"device={target_args.device} device_backend={target_args.device_backend} "
-            f"npu_prefill_chunk_size={args.npu_prefill_chunk_size if args.npu_prefill_chunk_size is not None else 'auto'}"
+            "npu_prefill_chunk_size="
+            f"{run_npu_prefill_chunk_size if run_npu_prefill_chunk_size is not None else 'auto'}"
         )
         print(
             "Sweep config: "
@@ -1343,12 +2059,18 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
                 if free_b < required:
-                    print(
-                        "Skipping (pre-check VRAM insufficient): "
-                        f"free={_format_gib(free_b)} required~={_format_gib(required)} "
-                        f"estimated_weights={_format_gib(estimated)}"
+                    _handle_cuda_precheck_skip(
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        free_bytes=int(free_b),
+                        required_bytes=int(required),
+                        estimated_bytes=int(estimated),
+                        skipped_records=skipped_records,
+                        phase="load",
+                        output_dir=output_dir,
+                        benchmark_type="sweep",
                     )
-                    _clear_cuda_memory(target_args.device)
                     continue
 
         pipeline = None
@@ -1365,11 +2087,48 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     core_mode=core_mode,
                     mxq_path=mxq_path,
                     default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+                    dev_no=getattr(args, "dev_no", None),
+                    max_batch_size=batch_size,
                 )
+            except _NPU_ALLOC_ERROR_TYPE as e:
+                _handle_npu_alloc_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                    output_dir=output_dir,
+                    benchmark_type="sweep",
+                )
+                continue
+            except _NPU_RUNTIME_ERROR_TYPE as e:
+                _handle_npu_runtime_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                    output_dir=output_dir,
+                    benchmark_type="sweep",
+                )
+                continue
             except Exception as e:
                 if _is_cuda_oom_error(e):
-                    print(f"Skipping (CUDA OOM while loading model): {e}")
-                    _clear_cuda_memory(target_args.device)
+                    _handle_cuda_oom(
+                        e,
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        pipeline=None,
+                        skipped_records=skipped_records,
+                        phase="load",
+                        output_dir=output_dir,
+                        benchmark_type="sweep",
+                    )
                     continue
                 if args.all and not args.mxq_dir and _revision_exists(model_id, revision or "") is None:
                     _print_exception(
@@ -1384,7 +2143,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             measurer = TPSMeasurer(pipeline)
             tracker_prefill, tracker_decode = _build_phase_trackers(target_args, pipeline)
             _print_device_status(target_args, tracker_prefill)
-            resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
+            resolved_npu_prefill_chunk_size = run_npu_prefill_chunk_size
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=_SWEEP_WARMUP_PREFILL,
@@ -1428,10 +2187,47 @@ def _run_sweep(args: argparse.Namespace) -> int:
             finally:
                 stop_qbruntime_trace(trace_handle)
             result = _aggregate_benchmark_results(run_results)
+        except _NPU_ALLOC_ERROR_TYPE as e:
+            _handle_npu_alloc_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+                output_dir=output_dir,
+                benchmark_type="sweep",
+            )
+            _release_pipeline(pipeline, target_args.device)
+            continue
+        except _NPU_RUNTIME_ERROR_TYPE as e:
+            _handle_npu_runtime_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+                output_dir=output_dir,
+                benchmark_type="sweep",
+            )
+            _release_pipeline(pipeline, target_args.device)
+            continue
         except Exception as e:
             if _is_cuda_oom_error(e):
-                print(f"Skipping (CUDA OOM during benchmark): {e}")
-                _release_pipeline(pipeline, target_args.device)
+                _handle_cuda_oom(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    pipeline=pipeline,
+                    skipped_records=skipped_records,
+                    phase="measure",
+                    output_dir=output_dir,
+                    benchmark_type="sweep",
+                )
                 continue
             _print_exception("Skipping (benchmark failed)", e, debug_errors=args.debug_errors)
             _release_pipeline(pipeline, target_args.device)
@@ -1642,7 +2438,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
 
         _release_pipeline(pipeline, target_args.device)
 
-    _rebuild_combined_outputs(output_dir)
+    _rebuild_combined_outputs(output_dir, skipped_records=skipped_records)
 
     return 0
 
@@ -1760,6 +2556,9 @@ def _collect_measure_rows(payloads: Sequence[dict[str, Any]]) -> list[dict[str, 
 def _write_measure_markdown(path: Path, rows: Sequence[dict[str, Any]]) -> None:
     """Write combined measure rows as a Markdown table."""
     if not rows:
+        # Overwrite any stale success table left by a prior rebuild; the
+        # caller appends the skip section afterwards when applicable.
+        path.write_text("_No successful measure results._\n", encoding="utf-8")
         return
     headers = list(rows[0].keys())
     lines = ["| " + " | ".join(headers) + " |\n", "| " + " | ".join(["---"] + ["---:" for _ in headers[1:]]) + " |\n"]
@@ -1770,11 +2569,6 @@ def _write_measure_markdown(path: Path, rows: Sequence[dict[str, Any]]) -> None:
 
 def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
     """Create combined measure bar charts."""
-    if not rows:
-        return
-    import matplotlib.pyplot as plt
-
-    models = [str(row.get("model")) for row in rows]
     specs = [
         ("measure_prefill_tps.png", "prefill_tps_mean", "Prefill Tokens Per Second", "Tokens Per Second"),
         (
@@ -1796,6 +2590,15 @@ def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> No
         ("measure_avg_memory_used_mb.png", "avg_memory_used_mb", "Memory Used Megabytes", "Memory Used (Megabytes)"),
         ("measure_total_energy_j.png", "total_energy_j", "Total Energy", "Energy (Joules)"),
     ]
+    if not rows:
+        # No successful data to plot; remove stale PNGs from a prior rebuild
+        # so the on-disk view matches the reconciled state.
+        for filename, *_ in specs:
+            (output_dir / filename).unlink(missing_ok=True)
+        return
+    import matplotlib.pyplot as plt
+
+    models = [str(row.get("model")) for row in rows]
     for filename, key, title, xlabel in specs:
         values = [float(row.get(key) or 0.0) for row in rows]
         height = max(4.0, 0.35 * len(models) + 1.5)
@@ -1809,73 +2612,136 @@ def _plot_measure_charts(output_dir: Path, rows: Sequence[dict[str, Any]]) -> No
         plt.close(fig)
 
 
-def _rebuild_measure_outputs(output_dir: str | Path) -> None:
-    """Rebuild combined text-generation measure CSV, Markdown, and charts."""
+def _rebuild_measure_outputs(
+    output_dir: str | Path,
+    *,
+    skipped_records: Sequence[dict[str, Any]] | None = None,
+) -> None:
+    """Rebuild combined text-generation measure CSV, Markdown, and charts.
+
+    Resolution rule for a given model label follows :func:`reconcile_sidecar_and_disk`:
+    the newer ``recorded_at`` sidecar row or on-disk JSON mtime wins. The
+    stale side is excluded from the combined output; the physical JSON file
+    on disk is preserved for manual inspection.
+
+    When ``skipped_records`` is supplied the caller's authoritative in-memory
+    list overrides the persisted sidecar for this rebuild; missing rows fall
+    back to the on-disk sidecar.
+    """
     output_dir = Path(output_dir)
-    payloads: list[dict[str, Any]] = []
-    for path in sorted(output_dir.glob("*_measure.json")):
-        with path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if payload.get("benchmark_type") == "measure":
-            payloads.append(payload)
-    if not payloads:
+    skips, successes = reconcile_sidecar_and_disk(
+        output_dir,
+        "measure",
+        sidecar_rows=None if skipped_records is None else list(skipped_records),
+    )
+    if list(skips) != _read_skipped_sidecar(output_dir, "measure"):
+        _write_skipped_sidecar(output_dir, skips, "measure")
+    payloads = list(successes)
+    if not payloads and not skips:
         print("No measure JSON results found. Nothing to aggregate.")
         _write_text_generation_summary(output_dir, measure=True)
         return
     rows = _collect_measure_rows(payloads)
+    if rows:
+        fieldnames = list(rows[0].keys())
+    else:
+        fieldnames = [
+            "model",
+            "batch_mode",
+            "batch_size",
+            "prefill_tokens",
+            "decode_tokens",
+            "repeat",
+            "prefill_tps_mean",
+            "decode_tps_mean",
+        ]
+    if "skipped_reason" not in fieldnames:
+        fieldnames.append("skipped_reason")
     import csv
 
     with (output_dir / "combined_measure.csv").open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow({**row, "skipped_reason": ""})
+        for record in skips:
+            writer.writerow(
+                {
+                    "model": record.get("model", ""),
+                    "batch_size": record.get("batch_size", ""),
+                    "skipped_reason": record.get("skipped_reason", ""),
+                }
+            )
     _write_measure_markdown(output_dir / "combined_measure.md", rows)
+    if skips:
+        _append_skipped_markdown_section(str(output_dir / "combined_measure.md"), skips)
     _plot_measure_charts(output_dir, rows)
     _write_text_generation_summary(output_dir, measure=True)
 
 
 def _collect_text_run_targets(
     args: argparse.Namespace,
-) -> tuple[str, bool, list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]]]:
-    """Resolve text-generation benchmark targets and core-mode expansion."""
+) -> tuple[
+    str,
+    list[tuple[str, list[str | None], str, str, str | None, str | None, int, str, bool, bool]],
+]:
+    """Resolve text-generation benchmark targets and core-mode expansion.
+
+    Returns per-target run tuples carrying ``disable_npu_specific_args`` and ``is_mobilint``
+    provenance so downstream loops never re-derive them from ``args.original_models``.
+    """
     available_model_ids = list_default_model_ids(
         "text-generation",
         include_private=bool(getattr(args, "include_private", False)),
     )
     if not available_model_ids:
         print("No text-generation models found.")
-        return "", False, []
+        return "", []
     output_dir = str(
         Path(args.output_dir).resolve()
         if args.output_dir
         else Path(__file__).resolve().parent / "results" / "text_generation"
     )
     os.makedirs(output_dir, exist_ok=True)
-    disable_npu_specific_args = bool(args.original_models and not args.mxq_dir)
+    caller_model_ids: list[str] = []
+    caller_mobilint_ids: list[str] = []
+    resolved_mxq_dir_str: str | None = None
     targets: list[tuple[str, list[str | None], str, str, str | None]]
     if args.mxq_dir:
         mxq_dir = Path(args.mxq_dir).expanduser().resolve()
         if not mxq_dir.is_dir():
             raise SystemExit(f"--mxq-dir is not a directory: {mxq_dir}")
+        resolved_mxq_dir_str = str(mxq_dir)
         targets = _iter_targets_from_mxq_dir(mxq_dir=mxq_dir, available_model_ids=available_model_ids)
         if not targets:
             raise SystemExit("No valid mxq targets found. Expected files named <model_id>-<W8|W4V8>.mxq in --mxq-dir.")
     else:
         model_ids = [str(item) for item in args.models] if args.models else available_model_ids
+        caller_model_ids = list(model_ids)
         if args.original_models:
-            model_ids = _resolve_original_model_ids(model_ids)
+            caller_mobilint_ids = _caller_mobilint_model_ids(args.models)
+            resolved_parents = _resolve_original_model_ids(model_ids)
+            model_ids = _merge_resolved_parents_with_caller_mobilint(resolved_parents, caller_mobilint_ids)
         targets = list(_iter_targets(model_ids, revision=args.revision, all_revisions=args.all))
         if args.mxq_path:
             targets = [
                 (model_id, revisions, label, base, args.mxq_path) for model_id, revisions, label, base, _ in targets
             ]
-    filtered_targets = _filter_text_targets_by_batch_mode(targets, batch_mode=args.batch_mode)
-    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str]] = []
+    filtered_targets = _filter_text_targets_by_batch_mode(
+        targets,
+        batch_mode=args.batch_mode,
+        override_batch_size=getattr(args, "batch_size", None),
+        original_models=bool(getattr(args, "original_models", False)),
+        caller_model_ids=caller_model_ids,
+        caller_mobilint_ids=caller_mobilint_ids,
+        mxq_dir=resolved_mxq_dir_str,
+    )
+    run_targets: list[tuple[str, list[str | None], str, str, str | None, str | None, int, str, bool, bool]] = []
     for target in filtered_targets:
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
-            disable_npu_specific_args=disable_npu_specific_args,
+            disable_npu_specific_args=target.disable_npu_specific_args,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
@@ -1888,9 +2754,11 @@ def _collect_text_run_targets(
                     core_mode,
                     target.max_batch_size,
                     target.batch_mode,
+                    target.disable_npu_specific_args,
+                    target.is_mobilint,
                 )
             )
-    return output_dir, disable_npu_specific_args, run_targets
+    return output_dir, run_targets
 
 
 def _run_measure(args: argparse.Namespace) -> int:
@@ -1899,18 +2767,35 @@ def _run_measure(args: argparse.Namespace) -> int:
     if args.rebuild_charts:
         _rebuild_measure_outputs(_resolve_text_generation_output_dir(args))
         return 0
-    output_dir, disable_npu_specific_args, run_targets = _collect_text_run_targets(args)
+    output_dir, run_targets = _collect_text_run_targets(args)
     if not run_targets:
         return 0
-    if disable_npu_specific_args:
+    disabled_count = sum(1 for entry in run_targets if entry[8])
+    if disabled_count:
         print(
-            "Note: --original-models is enabled; skipping NPU-specific parameters (core_mode/npu_prefill_chunk_size)."
+            f"Note: --original-models mixed run; {disabled_count} upstream target(s) will skip NPU-specific "
+            "parameters (core_mode/npu_prefill_chunk_size); Mobilint sibling targets keep them."
         )
     _collect_host_pc_info(output_dir)
-    for model_id, revision_candidates, label, base, mxq_path, core_mode, batch_size, batch_mode in tqdm(
-        run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"
-    ):
-        target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=mxq_path)
+    skipped_records: list[dict[str, Any]] = _read_skipped_sidecar(output_dir, "measure")
+    for (
+        model_id,
+        revision_candidates,
+        label,
+        base,
+        mxq_path,
+        core_mode,
+        batch_size,
+        batch_mode,
+        target_disable_npu_specific_args,
+        target_is_mobilint,
+    ) in tqdm(run_targets, desc="Measuring models", total=len(run_targets), unit="model-mode"):
+        target_args = _args_for_target_device_backend(
+            args,
+            model_id=model_id,
+            mxq_path=mxq_path,
+            is_mobilint=target_is_mobilint,
+        )
         if _is_cuda_device(target_args.device):
             _clear_cuda_memory(target_args.device)
         revision = revision_candidates[0] if mxq_path else _select_revision(model_id, revision_candidates)
@@ -1928,28 +2813,79 @@ def _run_measure(args: argparse.Namespace) -> int:
                 free_b, _ = mem_info
                 required = int(float(estimated) * float(args.cuda_precheck_margin))
                 if free_b < required:
-                    print(
-                        f"Skipping {label} (pre-check VRAM insufficient): "
-                        f"free={_format_gib(free_b)} required~={_format_gib(required)}"
+                    _handle_cuda_precheck_skip(
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        free_bytes=int(free_b),
+                        required_bytes=int(required),
+                        estimated_bytes=int(estimated),
+                        skipped_records=skipped_records,
+                        phase="load",
+                        output_dir=output_dir,
+                        benchmark_type="measure",
                     )
-                    _clear_cuda_memory(target_args.device)
                     continue
         pipeline = None
         try:
-            pipeline = _build_pipeline(
-                model_id,
-                tokenizer=args.tokenizer,
-                revision=revision,
-                device=target_args.device,
-                device_map=args.device_map,
-                dtype=args.dtype,
-                trust_remote_code=args.trust_remote_code,
-                core_mode=core_mode,
-                mxq_path=mxq_path,
-                default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
-            )
+            try:
+                pipeline = _build_pipeline(
+                    model_id,
+                    tokenizer=args.tokenizer,
+                    revision=revision,
+                    device=target_args.device,
+                    device_map=args.device_map,
+                    dtype=args.dtype,
+                    trust_remote_code=args.trust_remote_code,
+                    core_mode=core_mode,
+                    mxq_path=mxq_path,
+                    default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+                    dev_no=getattr(args, "dev_no", None),
+                    max_batch_size=batch_size,
+                )
+            except _NPU_ALLOC_ERROR_TYPE as e:
+                _handle_npu_alloc_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                    output_dir=output_dir,
+                    benchmark_type="measure",
+                )
+                continue
+            except _NPU_RUNTIME_ERROR_TYPE as e:
+                _handle_npu_runtime_error(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    debug_errors=args.debug_errors,
+                    skipped_records=skipped_records,
+                    phase="load",
+                    output_dir=output_dir,
+                    benchmark_type="measure",
+                )
+                continue
+            except Exception as e:
+                if _is_cuda_oom_error(e):
+                    _handle_cuda_oom(
+                        e,
+                        label=label,
+                        device=target_args.device,
+                        batch_size=batch_size,
+                        pipeline=None,
+                        skipped_records=skipped_records,
+                        phase="load",
+                        output_dir=output_dir,
+                        benchmark_type="measure",
+                    )
+                    continue
+                raise
             measurer = TPSMeasurer(pipeline)
-            resolved_npu_prefill_chunk_size = None if disable_npu_specific_args else args.npu_prefill_chunk_size
+            resolved_npu_prefill_chunk_size = None if target_disable_npu_specific_args else args.npu_prefill_chunk_size
             for i in tqdm(range(args.warmup), desc=f"{label} warmup", leave=False):
                 measurer.measure(
                     num_prefill=args.prefill,
@@ -2079,11 +3015,48 @@ def _run_measure(args: argparse.Namespace) -> int:
             with json_path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             print(f"Saved: {json_path.name}")
+        except _NPU_ALLOC_ERROR_TYPE as e:
+            _handle_npu_alloc_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+                output_dir=output_dir,
+                benchmark_type="measure",
+            )
+        except _NPU_RUNTIME_ERROR_TYPE as e:
+            _handle_npu_runtime_error(
+                e,
+                label=label,
+                device=target_args.device,
+                batch_size=batch_size,
+                debug_errors=args.debug_errors,
+                skipped_records=skipped_records,
+                phase="measure",
+                output_dir=output_dir,
+                benchmark_type="measure",
+            )
         except Exception as e:
-            print(f"Skipping {label} (measure failed): {e}")
+            if _is_cuda_oom_error(e):
+                _handle_cuda_oom(
+                    e,
+                    label=label,
+                    device=target_args.device,
+                    batch_size=batch_size,
+                    pipeline=None,
+                    skipped_records=skipped_records,
+                    phase="measure",
+                    output_dir=output_dir,
+                    benchmark_type="measure",
+                )
+            else:
+                print(f"Skipping {label} (measure failed): {e}")
         finally:
             _release_pipeline(pipeline, target_args.device)
-    _rebuild_measure_outputs(output_dir)
+    _rebuild_measure_outputs(output_dir, skipped_records=skipped_records)
     return 0
 
 

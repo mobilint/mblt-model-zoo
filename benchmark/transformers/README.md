@@ -58,6 +58,13 @@ inference and model downloads.
     `1/4`; explicit user-provided values are preserved. `--decode-window` is not scaled.
   - Batch TPS is total throughput across the batch: prefill tokens and decoded tokens are summed
     across all batch rows before dividing by elapsed time.
+  - `--batch` forces `--core-mode single`. Passing `--core-mode global4` or `--core-mode global8`
+    together with `--batch` raises `SystemExit: batch benchmark only supports --core-mode single`.
+    Batched LLM execution does not support other core modes; see
+    `mblt_model_zoo/hf_transformers/README.md` for the runtime rationale.
+  - `--batch` also disables the default `single`-mode `target_cores` injection. Batch runs rely on
+    the model config's `target_cores` unless you pass `--target-cores` (or `--target-clusters`)
+    explicitly.
   - Models whose id contains `GGUF`, or whose local/Hub repository contains `.gguf` artifacts, are
     skipped by the Transformers benchmark scripts.
 - `device metrics`: Collects power, energy, utilization, and memory metrics.
@@ -511,6 +518,85 @@ python benchmark/transformers/benchmark_text_generation_models.py sweep \
   --skip-existing
 ```
 
+### Compare Batch Mobilint and Original HF in One Pass
+
+`--dev-no` and `--batch-size` are shared between `measure` and `sweep`. Combine them with
+`--batch` to run a batch NPU target and its upstream GPU counterpart from one CLI. On non-Mobilint
+targets `--dev-no` is a silent no-op; on Mobilint targets it becomes the canonical NPU target
+device set. `--batch-size` overrides `config.max_batch_size` for the effective input batch dim
+and, on Mobilint targets, forwards the same value as the backend `max_batch_size` kwarg. On
+upstream Hugging Face targets with `config.max_batch_size == 1`, passing `--batch --batch-size N>1`
+admits the target under `--batch` so a mixed sweep works with the same filter.
+
+Under `--original-models`, a caller-listed `mobilint/*` id is retained alongside its resolved
+upstream parent so both rows run in one pass. Per-target provenance is classified once at target
+collection time (see `TextBenchmarkTarget.role` in
+[`benchmark_text_generation_models.py`](benchmark_text_generation_models.py)) and drives the
+per-target policy: the retained Mobilint sibling keeps NPU/CPU device defaults, its
+`--core-mode` expansion, `--npu-prefill-chunk-size`, and `--dev-no`, while the resolved upstream
+parent routes to `--device cuda` and `--device-backend gpu` with NPU-specific parameters
+suppressed. The `Note: --original-models mixed run;` line printed before the loop reports how
+many upstream targets will skip NPU-specific parameters so the Mobilint sibling row and the
+upstream row are easy to tell apart in a mixed sweep.
+
+```bash
+python benchmark/transformers/benchmark_text_generation_models.py measure \
+  --batch --original-models \
+  --model mobilint/Llama-3.1-8B-Instruct-Batch16 \
+  --batch-size 64 --dev-no 0,1,2,3 \
+  --prefill 1024 --decode 32
+```
+
+If a target OOMs at pipeline construction (or during measurement), the run continues to the next
+target and the combined output records the skip. Either CUDA OOM (upstream GPU targets) or a
+Mobilint NPU allocation failure — `MobilintBackendAllocError` with `phase`, `slot`, and `dev`
+context — is logged as `SKIP model=... reason=cuda_oom|npu_alloc ...` and recorded in
+`combined.csv`/`combined_measure.csv` with empty numeric fields and a populated `skipped_reason`
+column. A single-target OOM does not fail the whole run. The default CUDA pre-load VRAM check
+(`--cuda-precheck`) uses the same skip machinery: a target that fails the pre-check is logged as
+`SKIP model=... reason=cuda_precheck phase=load: free=... required~=... estimated_weights=...`
+and recorded with `skipped_reason=cuda_precheck` (plus `free_bytes`, `required_bytes`, and
+`estimated_weights_bytes` fields), distinct from `cuda_oom` so the two failure modes stay
+distinguishable in the combined output. This preserves symmetry with the runtime-OOM path and
+keeps one-pass NPU-vs-GPU comparisons intact when a GPU parent is skipped by the pre-check.
+No per-target JSON is written for a skipped target, so a rerun with `--skip-existing` naturally
+retries it (typically at a smaller `--batch-size`). Each skip is also persisted to a mode-specific
+sidecar in the output directory:
+`skipped_records_measure.json` for `measure` runs and `skipped_records_sweep.json` for `sweep`
+runs. Splitting by mode keeps `measure` and `sweep` from overwriting each other's skips when
+they share an output directory, so a later `--rebuild-charts` pass reconstructs only the
+failed-target rows for that mode even when the original process crashed mid-run. Legacy
+`skipped_records.json` files from earlier runs are ignored on read. The sidecar keeps at most one
+row per target (identified by its model label): a later failure for the same target replaces the
+earlier record, so retries do not accumulate duplicate rows in the sidecar or rebuilt combined
+outputs.
+
+The rebuild path reconciles sidecar rows against on-disk per-target JSONs with a single
+timestamp-precedence rule: whichever fact is newer wins. Each skip record carries a required
+`recorded_at` field (Unix seconds, set at handler time). Each per-target result JSON is compared
+against the row using its filesystem mtime. For a given model label the resolution is:
+
+- Only the sidecar row exists → the target is a skip.
+- Only the on-disk payload exists → the target is a success.
+- Both exist → the entry with the larger timestamp wins. When the sidecar row is newer, the
+  on-disk payload is excluded from the combined output but the physical JSON file stays on
+  disk for manual inspection; when the on-disk payload is newer, the sidecar row is dropped.
+
+Records written before this refactor (or by an older process) that lack `recorded_at` are treated
+as epoch 0 on read, so any on-disk JSON with a real mtime beats them — the safe backward-compatible
+default. `--rebuild-charts` alone runs the same reconciliation, so a stale sidecar row plus a
+newer retry-success JSON collapses to the success without any special-case flag.
+
+```bash
+# Retry the GPU target at a smaller batch after the NPU row was cached.
+python benchmark/transformers/benchmark_text_generation_models.py measure \
+  --batch --original-models \
+  --model mobilint/Llama-3.1-8B-Instruct-Batch16 \
+  --batch-size 32 \
+  --prefill 1024 --decode 32 \
+  --skip-existing
+```
+
 ### Benchmark Image-Text-to-Text Models
 
 `benchmark_image_text_to_text_models.py` requires a `measure` or `sweep` subcommand. `measure` runs
@@ -749,8 +835,11 @@ python benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
 
 - `--prefill`, `--decode`: Single-case token counts for CLI `measure`.
 - `--batch`, `--non-batch`: Benchmark-script target filters based on config `max_batch_size`.
-  `--non-batch` is the default. `--batch` uses config `max_batch_size` exactly and reports total
-  batch throughput.
+  `--non-batch` is the default. `--batch` uses config `max_batch_size` exactly as the input
+  batch size and reports total batch throughput. `max_batch_size` is the aggregate capacity
+  `N * K`, where `K` is the compiled MXQ batch axis and the runtime launches `N = ceil(
+  max_batch_size / K)` `qbruntime.Model` slots; a non-batch MXQ (`K == 1`) therefore uses sw-batch
+  across `N` slots distributed round-robin across `--dev-no`. Beam search paths stay `N = 1`.
 - `--prefill-range`: Text-generation prefill sweep range in `start:end:step` format. This is also
   used by `mblt-model-zoo tps sweep --task image-text-to-text` for the VLM LLM-stage sweep.
 - `--cache-lengths`: Cache lengths for decode sweep. This is also used by the TPS CLI VLM path.
@@ -764,9 +853,19 @@ python benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
 
 ### NPU/GPU Execution and Device Metrics
 
-- `--core-mode`: One of `single`, `global4`, `global8`, or `all`. `all` is a benchmark-script sweep alias, not a model runtime core mode.
-- `--target-cores`: Explicit target cores for the CLI, for example `"0:0;0:1;0:2;0:3"`.
-- `--target-clusters`: Explicit target clusters for the CLI, for example `"0;1"`.
+- `--core-mode`: One of `single`, `global4`, `global8`, or `all`. `all` is a benchmark-script sweep alias, not a model runtime core mode. `--batch` forces `single` and rejects other values with `SystemExit: batch benchmark only supports --core-mode single`; batch runs also skip the default `single`-mode `target_cores` injection, so either rely on the model config's `target_cores` or pass `--target-cores`/`--target-clusters` explicitly.
+- `--target-cores`: Explicit target cores for the CLI. Canonical fully-qualified form is
+  `"d:c:k"` per entry (e.g., `"0:0:0;0:0:1;1:0:0"`); the legacy 2-part `"c:k"` form (e.g.,
+  `"0:0;0:1;0:2;0:3"`) is still accepted and the missing device prefix is filled from `--dev-no`
+  or the model config.
+- `--target-clusters`: Explicit target clusters for the CLI. Canonical fully-qualified form is
+  `"d:c"` per entry (e.g., `"0:0;1:0"`); the legacy bare `"c"` form (e.g., `"0;1"`) is still
+  accepted and the missing device prefix is filled from `--dev-no` or the model config.
+- `--dev-no`: Device-prefix sugar for canonical NPU targets. Accepts a scalar (`--dev-no 1`) or
+  a comma-separated list (`--dev-no 0,1`). Fills the device component of legacy target entries,
+  and when target lists are omitted supplies the device set for `--core-mode` expansion.
+  Prefix variants `--base-dev-no`/`--draft-dev-no`/`--fc-dev-no` (EAGLE-3) and
+  `--vision-dev-no`/`--text-dev-no` (VLM) take precedence over `--dev-no` when set.
 - `--device-metrics` / `--no-device-metrics`: Enable or disable device metric collection.
 - `--device-backend`: One of `none`, `auto`, `gpu`, or `npu`.
   When omitted, benchmark scripts use `npu` for Mobilint/MXQ targets and `gpu` for other Hugging
