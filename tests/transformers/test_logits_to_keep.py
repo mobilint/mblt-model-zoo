@@ -215,6 +215,66 @@ class TestMxqSupportsAllLogits:
         stale = make_model(DynamicAxisMxq())
         assert stale._mxq_supports_all_logits() is False
 
+    def test_dynamic_token_axis_with_batched_k_returns_false(self) -> None:
+        """Ambiguity mirror: dynamic ``-2`` sentinel on a ``K > 1`` MXQ resolves conservatively.
+
+        Regression: on a batched compiled MXQ (``K > 1``) the ``-1`` at
+        position ``-2`` may mark the compiled batch axis rather than the
+        token axis. Both static probes examine the same field, so
+        :meth:`_mxq_supports_all_logits` must return ``False`` here to
+        stay consistent with the K-aware rule in
+        :meth:`MobilintNPUBackend._probe_output_layout`; otherwise the
+        caller enters Path 2, which assumes per-token output and crashes
+        when the runtime layout is actually per-item.
+        """
+        model = make_model(DynamicAxisMxq())
+        model.npu_backend.k_per_model = 2
+        assert model._mxq_supports_all_logits() is False
+
+    def test_static_token_axis_with_batched_k_returns_false(self) -> None:
+        """A static last-only MXQ stays Path 1 regardless of ``k_per_model``."""
+        model = make_model(StaticLastOnlyMxq())
+        model.npu_backend.k_per_model = 4
+        assert model._mxq_supports_all_logits() is False
+
+    def test_agrees_with_probe_output_layout_across_k_and_axis_matrix(self) -> None:
+        """The K-aware rule must be identical to :meth:`MobilintNPUBackend._probe_output_layout`.
+
+        Both static probes inspect the same ``get_model_output_shape``
+        field. Any disagreement across the four combinations of
+        (token axis static vs dynamic) x (``k_per_model == 1`` vs
+        ``k_per_model > 1``) would let a batched ambiguous MXQ enter
+        Path 2 through :meth:`_mxq_supports_all_logits` even though
+        :meth:`_probe_output_layout` deferred to the runtime fallback.
+        """
+        from mblt_model_zoo.utils.npu_backend import MobilintNPUBackend
+
+        class _ProbeDuck:
+            def __init__(self, mxq, k_per_model: int) -> None:
+                self.mxq_models = [mxq]
+                self.k_per_model = int(k_per_model)
+
+        cases = [
+            (StaticLastOnlyMxq(), 1),
+            (StaticLastOnlyMxq(), 2),
+            (DynamicAxisMxq(), 1),
+            (DynamicAxisMxq(), 2),
+        ]
+        for mxq, k_per_model in cases:
+            probe = MobilintNPUBackend._probe_output_layout(_ProbeDuck(mxq, k_per_model))
+
+            model = make_model(mxq)
+            model.npu_backend.k_per_model = k_per_model
+            supports = model._mxq_supports_all_logits()
+
+            # ``supports_all_logits`` is True iff the probe pinned the flat
+            # per-token layout. Ambiguous ``None`` and static ``"n_items"``
+            # both collapse to ``False``.
+            assert supports is (probe == "n_tokens"), (
+                f"cross-probe mismatch for mxq={type(mxq).__name__} "
+                f"k_per_model={k_per_model}: probe={probe!r} supports={supports!r}"
+            )
+
 
 # ---------------------------------------------------------------------------
 # _mxq_static_vocab_size

@@ -275,6 +275,19 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         The result is cached on the instance because the shape is fixed
         for the lifetime of the loaded model.
 
+        Ambiguity mirror: on a batched ``K > 1`` MXQ the same ``-1`` at
+        position ``-2`` may mark the compiled batch axis rather than the
+        token axis (identical shape signature; the metadata alone cannot
+        distinguish the two). This method conservatively returns ``False``
+        in that case, mirroring the K-aware rule in
+        :meth:`MobilintNPUBackend._probe_output_layout`. Falsely claiming
+        "supports all-logits" on a batched MXQ would route the caller into
+        Path 2, which assumes per-token output and reshapes N-item rows as
+        ``total_tokens`` — that crashes on any prefill where
+        ``tokens > active items``. Falsely returning ``False`` instead
+        routes the caller into Path 1's already-documented slow-path
+        warning and still produces correct output.
+
         Cache population is lazy. Both call sites in
         ``_run_chunked_logits_to_keep`` and ``_llm_forward_batch`` guard the
         probe with ``False if is_default_keep else self._mxq_supports_all_logits()``,
@@ -299,7 +312,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     len(first_shape) >= abs(_MXQ_TOKEN_AXIS_INDEX)
                     and int(first_shape[_MXQ_TOKEN_AXIS_INDEX]) == _MXQ_DYNAMIC_AXIS_SENTINEL
                 ):
-                    supports = True
+                    # Ambiguity mirror: only claim "supports all-logits" when
+                    # the compiled batch axis ``K`` is 1, matching the K-aware
+                    # rule in :meth:`MobilintNPUBackend._probe_output_layout`.
+                    # ``k_per_model`` stays constant for the lifetime of the
+                    # backend, so caching the resolved boolean is safe.
+                    k_per_model = int(getattr(self.npu_backend, "k_per_model", 1) or 1)
+                    if k_per_model <= 1:
+                        supports = True
         except (AttributeError, qbruntime.QbRuntimeError):
             # AttributeError: backend or ``get_model_output_shape`` missing.
             # QbRuntimeError: backend refused the probe. Only backend-specific
