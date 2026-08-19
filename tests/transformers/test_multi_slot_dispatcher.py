@@ -193,6 +193,9 @@ def test_dispatch_multi_group_preserves_caller_row_order() -> None:
     dispatcher = MultiSlotDispatcher(backend)
 
     class _RoutingCache:
+        n_models = 2
+        k_per_model = 1
+
         def slot_of(self, row: int) -> Tuple[int, int]:
             return divmod(row, 1)
 
@@ -221,6 +224,9 @@ def test_dispatch_multi_group_with_four_groups() -> None:
     dispatcher = MultiSlotDispatcher(backend)
 
     class _RoutingCache:
+        n_models = 4
+        k_per_model = 1
+
         def slot_of(self, row: int) -> Tuple[int, int]:
             return divmod(row, 1)
 
@@ -257,6 +263,9 @@ def test_dispatch_n_tokens_layout_preserves_per_token_rows_across_groups() -> No
     dispatcher = MultiSlotDispatcher(backend)
 
     class _RoutingCache:
+        n_models = 2
+        k_per_model = 1
+
         def slot_of(self, row: int) -> Tuple[int, int]:
             return divmod(row, 1)
 
@@ -298,6 +307,9 @@ def test_dispatch_runtime_layout_fallback_pins_backend_cache() -> None:
     dispatcher = MultiSlotDispatcher(backend)
 
     class _RoutingCache:
+        n_models = 2
+        k_per_model = 1
+
         def slot_of(self, row: int) -> Tuple[int, int]:
             return divmod(row, 1)
 
@@ -346,6 +358,9 @@ def test_dispatch_reoverrides_stale_n_tokens_cache_from_runtime_observation() ->
     class _RoutingCache:
         # k=2 splits rows 0/1 -> slot 0, rows 2/3 -> slot 1. Multi-token
         # sequence lengths guarantee unambiguous observation.
+        n_models = 2
+        k_per_model = 2
+
         def slot_of(self, row: int) -> Tuple[int, int]:
             return divmod(row, 2)
 
@@ -484,6 +499,9 @@ def test_dispatch_with_cache_over_backend_capacity_delegates_to_cache() -> None:
     dispatcher = MultiSlotDispatcher(backend)
 
     class _RoutingCache:
+        n_models = 2
+        k_per_model = 1
+
         def slot_of(self, row: int) -> Tuple[int, int]:
             # Route rows 0 -> m0, 1 -> m1 (matches N*K=2).
             return divmod(row, 1)
@@ -548,6 +566,9 @@ def test_pack_extra_inputs_receives_flat_row_cache_ids() -> None:
         return [np.zeros((1, total, 1), dtype=np.float32)]
 
     class _RoutingCache:
+        n_models = 2
+        k_per_model = 1
+
         def slot_of(self, row: int) -> Tuple[int, int]:
             return divmod(row, 1)
 
@@ -563,3 +584,227 @@ def test_pack_extra_inputs_receives_flat_row_cache_ids() -> None:
 
     # Both groups saw their respective flat row (0 or 1), NOT local id 0/0.
     assert sorted(seen_ids) == [[0], [1]]
+
+
+# ---------------------------------------------------------------------------
+# Topology + Model-handle identity validation
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_rejects_cache_with_n_models_mismatch_but_matching_aggregate() -> None:
+    """Cache ``(N=1, K=2)`` and backend ``(N=2, K=1)`` share aggregate 2 but route incompatibly."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    class _MismatchedCache:
+        # Cache built as (N=1, K=2): capacity 2 same as backend, but a
+        # cache.slot_of(1) would return (0, 1) -> route both rows to m0.
+        n_models = 1
+        k_per_model = 2
+        mxq_models = [m0]
+
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            return divmod(row, 2)
+
+    with pytest.raises(ValueError) as excinfo:
+        dispatcher.dispatch(
+            cache_ids=[0, 1],
+            sequence_lengths=[1, 1],
+            cache_sizes=[0, 0],
+            inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+            max_sequence_length=1,
+            past_key_values=_MismatchedCache(),
+        )
+
+    msg = str(excinfo.value)
+    assert "n_models" in msg
+    assert "cache.n_models=1" in msg
+    assert "backend n_slots=2" in msg
+
+
+def test_dispatch_rejects_cache_with_k_per_model_mismatch_but_matching_aggregate() -> None:
+    """Cache ``(N=2, K=1)`` and backend ``(N=1, K=2)`` share aggregate 2 (symmetric mismatch)."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    backend = _MockBackend([m0], k_per_model=2)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    other_m = _StaticN1Mxq(vocab_size=3, tag=100.0)
+
+    class _MismatchedCache:
+        n_models = 2
+        k_per_model = 1
+        mxq_models = [m0, other_m]
+
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            return divmod(row, 1)
+
+    with pytest.raises(ValueError) as excinfo:
+        dispatcher.dispatch(
+            cache_ids=[0, 1],
+            sequence_lengths=[1, 1],
+            cache_sizes=[0, 0],
+            inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+            max_sequence_length=1,
+            past_key_values=_MismatchedCache(),
+        )
+
+    msg = str(excinfo.value)
+    # ``n_models`` is checked first, so a same-aggregate (N=2,K=1) vs (N=1,K=2)
+    # mismatch surfaces on the N axis. The K-axis message wording is still
+    # verified below by the pure-K test where N matches.
+    assert "n_models" in msg or "k_per_model" in msg
+
+
+def test_dispatch_rejects_cache_with_k_axis_only_mismatch() -> None:
+    """N agrees but cache.k_per_model != backend.k_per_model must raise on the K axis."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=2)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    class _MismatchedCache:
+        n_models = 2
+        k_per_model = 1
+        mxq_models = [m0, m1]
+
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            return divmod(row, 1)
+
+    with pytest.raises(ValueError) as excinfo:
+        dispatcher.dispatch(
+            cache_ids=[0, 1],
+            sequence_lengths=[1, 1],
+            cache_sizes=[0, 0],
+            inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+            max_sequence_length=1,
+            past_key_values=_MismatchedCache(),
+        )
+
+    msg = str(excinfo.value)
+    assert "k_per_model" in msg
+    assert "cache.k_per_model=1" in msg
+    assert "backend k_per_model=2" in msg
+
+
+def test_dispatch_rejects_cache_with_stale_model_handles() -> None:
+    """A cache carrying handles from a disposed prior backend must be rejected on identity."""
+    # Live backend the dispatcher was built against.
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=2)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    # Stale handles from a prior (disposed) backend: same shape, different objects.
+    stale_m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    stale_m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+
+    class _StaleCache:
+        n_models = 2
+        k_per_model = 2
+        mxq_models = [stale_m0, stale_m1]
+
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            return divmod(row, 2)
+
+    with pytest.raises(ValueError) as excinfo:
+        dispatcher.dispatch(
+            cache_ids=[0, 1, 2, 3],
+            sequence_lengths=[1, 1, 1, 1],
+            cache_sizes=[0, 0, 0, 0],
+            inputs_embeds_chunks=[_make_embed(1) for _ in range(4)],
+            max_sequence_length=1,
+            past_key_values=_StaleCache(),
+        )
+
+    msg = str(excinfo.value)
+    assert "Model-handle identity mismatch" in msg
+
+
+def test_dispatch_accepts_cache_without_mxq_models_when_topology_matches() -> None:
+    """A stub cache exposing ``slot_of`` but no ``mxq_models`` must skip the identity check.
+
+    Topology check still fires — the topology attributes are present and match
+    — but the missing ``mxq_models`` attribute is treated as "identity unknown"
+    and silently skipped so lightweight test doubles keep working.
+    """
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    class _TopologyOnlyCache:
+        n_models = 2
+        k_per_model = 1
+
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            return divmod(row, 1)
+
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0, 1],
+        sequence_lengths=[1, 1],
+        cache_sizes=[0, 0],
+        inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+        max_sequence_length=1,
+        past_key_values=_TopologyOnlyCache(),
+    )
+    assert merged.shape == (2, 3)
+
+
+def test_dispatch_accepts_cache_with_matching_topology_and_handles() -> None:
+    """Regression: matching ``(N, K)`` and identical Model handles must dispatch normally."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    class _MatchedCache:
+        n_models = 2
+        k_per_model = 1
+        mxq_models = [m0, m1]
+
+        def slot_of(self, row: int) -> Tuple[int, int]:
+            return divmod(row, 1)
+
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0, 1],
+        sequence_lengths=[1, 1],
+        cache_sizes=[0, 0],
+        inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+        max_sequence_length=1,
+        past_key_values=_MatchedCache(),
+    )
+    assert merged.shape == (2, 3)
+    # Routing is unchanged: row 0 -> m0, row 1 -> m1.
+    assert merged[0][0] == pytest.approx(0.0)
+    assert merged[1][0] == pytest.approx(100.0)
+
+
+def test_dispatch_cacheless_bypasses_topology_check() -> None:
+    """``past_key_values=None`` must no-op the topology validator (cacheless guard still fires)."""
+    m0 = _StaticN1Mxq(vocab_size=3, tag=0.0)
+    m1 = _StaticN1Mxq(vocab_size=3, tag=100.0)
+    backend = _MockBackend([m0, m1], k_per_model=1)
+    dispatcher = MultiSlotDispatcher(backend)
+
+    # Within capacity: cacheless N*K guard passes, topology check is skipped.
+    merged, _shape = dispatcher.dispatch(
+        cache_ids=[0, 1],
+        sequence_lengths=[1, 1],
+        cache_sizes=[0, 0],
+        inputs_embeds_chunks=[_make_embed(1), _make_embed(1)],
+        max_sequence_length=1,
+    )
+    assert merged.shape == (2, 3)
+
+    # Over capacity: the sibling cacheless guard still fires unchanged.
+    with pytest.raises(ValueError) as excinfo:
+        dispatcher.dispatch(
+            cache_ids=[0, 1, 2],
+            sequence_lengths=[1, 1, 1],
+            cache_sizes=[0, 0, 0],
+            inputs_embeds_chunks=[_make_embed(1), _make_embed(1), _make_embed(1)],
+            max_sequence_length=1,
+        )
+    assert "Cacheless batched dispatch exceeds backend capacity" in str(excinfo.value)

@@ -83,6 +83,57 @@ class MultiSlotDispatcher:
             return past_key_values.slot_of(int(row))
         return divmod(int(row), self.k_per_model)
 
+    def _validate_cache_topology(self, past_key_values: Optional["MobilintCache"]) -> None:
+        """Reject a caller-supplied cache whose ``(N, K, model handles)`` disagree with this backend.
+
+        Same aggregate capacity is not the same as compatible routing.
+        :meth:`MobilintModelMixin._validate_batch_cache` guards the aggregate
+        ``n_models * k_per_model`` axis, but a cache built with ``(N=1, K=2)``
+        has the same capacity as a backend running ``(N=2, K=1)`` — routing a
+        row through ``cache.slot_of`` then indexes ``backend.mxq_models[0]``
+        twice and leaves ``mxq_models[1]`` idle while the second row is sent
+        to slot 0 with ``local_cache_id=1``, an invalid inference on a
+        ``K==1`` Model. Reject that upfront by comparing the topology axes
+        directly.
+
+        Model-handle identity is the second half: a cache built for a prior
+        backend that has since been disposed and recreated carries stale
+        :class:`qbruntime.Model` references. ``infer`` on those handles would
+        target either freed HBM or a wholly unrelated Model. Compare the
+        cache's ``mxq_models`` against the backend's current slot list
+        element-by-element (``is`` identity) so a rebuilt backend surfaces
+        the mismatch here rather than as an opaque qbruntime error.
+        """
+        if past_key_values is None or not hasattr(past_key_values, "slot_of"):
+            return
+        cache_n = int(getattr(past_key_values, "n_models", 1) or 1)
+        cache_k = int(getattr(past_key_values, "k_per_model", 1) or 1)
+        if cache_n != self.n_slots:
+            raise ValueError(
+                f"MobilintCache topology mismatch: cache.n_models={cache_n} "
+                f"but backend n_slots={self.n_slots}. Rebuild the cache after "
+                f"changing backend max_batch_size."
+            )
+        if cache_k != self.k_per_model:
+            raise ValueError(
+                f"MobilintCache topology mismatch: cache.k_per_model={cache_k} "
+                f"but backend k_per_model={self.k_per_model}. The compiled MXQ "
+                f"batch axis must match the cache's per-model capacity."
+            )
+        cache_models = getattr(past_key_values, "mxq_models", None)
+        if cache_models is not None:
+            backend_models = self.mxq_models
+            cache_models_list = list(cache_models)
+            if len(cache_models_list) != len(backend_models) or any(
+                cm is not bm for cm, bm in zip(cache_models_list, backend_models)
+            ):
+                raise ValueError(
+                    "MobilintCache Model-handle identity mismatch: cache slots do not "
+                    "reference the currently loaded backend slots. The backend was "
+                    "likely disposed and recreated after the cache was built; rebuild "
+                    "the cache to bind to the new slot handles."
+                )
+
     def assert_single_slot(self, caller: str, remediation: str) -> None:
         """Raise ``NotImplementedError`` if the backend has grown beyond ``N == 1``.
 
@@ -158,6 +209,12 @@ class MultiSlotDispatcher:
             ``backend.output_layout``); ``first_group_shape`` is the first
             group's ``inputs_embeds_numpy.shape`` retained for debug logging.
         """
+        # Topology + identity check: reject a caller-supplied cache whose
+        # ``(N, K)`` disagrees with the backend or whose ``mxq_models``
+        # reference stale slot handles. Runs once per dispatch, before any
+        # routing decision that would otherwise trust ``cache.slot_of``.
+        self._validate_cache_topology(past_key_values)
+
         mxq_models = self.mxq_models
         n_backend_slots = self.n_slots
         n_items = len(cache_ids)

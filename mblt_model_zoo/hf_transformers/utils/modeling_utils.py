@@ -1586,13 +1586,26 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     def _validate_batch_cache(past_key_values: Optional[MobilintCache], batch_size: int) -> None:
         """Validate the batched request against a supplied ``MobilintCache``.
 
-        This helper owns the WITH-CACHE half of a two-part validation contract.
-        The CACHELESS half (``past_key_values is None``) is enforced at the top
-        of :meth:`MultiSlotDispatcher.dispatch <mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch.MultiSlotDispatcher.dispatch>`
+        This helper owns the AGGREGATE-CAPACITY half of the with-cache
+        validation contract: it rejects a batched request whose
+        ``batch_size`` exceeds the cache's ``n_models * k_per_model`` (or
+        ``batch_size`` fallback). The CACHELESS half (``past_key_values is
+        None``) is enforced at the top of :meth:`MultiSlotDispatcher.dispatch
+        <mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch.MultiSlotDispatcher.dispatch>`
         against the backend's ``N * K`` capacity, because that check needs
         ``n_slots`` and ``k_per_model`` which live on the backend rather than
         the cache. Do not extend this helper to cover the cacheless case: the
         failure surfaces one layer down, so the guard belongs there.
+
+        Aggregate capacity is necessary but not sufficient — a cache built
+        with ``(N=1, K=2)`` and a backend built with ``(N=2, K=1)`` both have
+        capacity ``2`` but route rows to incompatible Model slots. The
+        TOPOLOGY-AND-IDENTITY half (``cache.n_models`` / ``cache.k_per_model``
+        / ``cache.mxq_models`` vs the backend) now lives on
+        :meth:`MultiSlotDispatcher._validate_cache_topology
+        <mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch.MultiSlotDispatcher._validate_cache_topology>`
+        and runs automatically at dispatch time — callers of
+        ``_validate_batch_cache`` do not need to invoke it separately.
         """
         if past_key_values is None:
             return
