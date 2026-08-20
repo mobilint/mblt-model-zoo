@@ -221,7 +221,7 @@ class ScaledCachedRotaryEmbedding(nn.Module):
 
         self.original_max_seq_len = self.max_seq_len
         self.rope_init_fn = self._resolve_rope_init_fn()
-        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, None, seq_len=self.max_seq_len, **self.rope_kwargs)
+        inv_freq, self.attention_scaling = self._call_rope_init_fn(None, self.max_seq_len)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.original_inv_freq = self.inv_freq.clone()
         self.position_table: Optional[np.ndarray] = None
@@ -232,6 +232,15 @@ class ScaledCachedRotaryEmbedding(nn.Module):
         if self.rope_type in (None, "default"):
             return self.compute_default_rope_parameters
         return ROPE_INIT_FUNCTIONS[self.rope_type]
+
+    def _call_rope_init_fn(
+        self,
+        device: Optional[torch.device],
+        seq_len: Optional[int],
+    ) -> tuple[torch.Tensor, float]:
+        if self.rope_type in (None, "default"):
+            return self.rope_init_fn(self.config, device, seq_len=seq_len, **self.rope_kwargs)
+        return self.rope_init_fn(self.config, device, seq_len=seq_len)
 
     def compute_default_rope_parameters(
         self,
@@ -307,7 +316,7 @@ class ScaledCachedRotaryEmbedding(nn.Module):
             return
         seq_len = int(torch.max(position_ids).item()) + 1
         if seq_len > self.max_seq_len:
-            inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, seq_len=seq_len, **self.rope_kwargs)
+            inv_freq, self.attention_scaling = self._call_rope_init_fn(device, seq_len)
             self.register_buffer("inv_freq", inv_freq, persistent=False)
             self.max_seq_len = seq_len
             self._build_position_table(device=self.inv_freq.device)
