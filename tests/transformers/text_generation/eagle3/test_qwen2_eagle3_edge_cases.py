@@ -391,7 +391,10 @@ def test_base_prepare_decoder_attention_mask_single_token_creates_all_keep_mask(
     """Base path should create an all-keep mask for single-token decode."""
 
     class _DummyBaseModel(MobilintEagle3BaseModelMixin):
-        pass
+        # Bypass the mixin's config-driven ``__init__`` — this test only
+        # exercises ``_prepare_decoder_attention_mask``.
+        def __init__(self) -> None:  # pragma: no cover - trivial stub
+            pass
 
     model = _DummyBaseModel()
     inputs_embeds = torch.zeros((2, 1, 4), dtype=torch.float32)
@@ -413,7 +416,10 @@ def test_draft_prepare_decoder_attention_mask_single_token_creates_all_keep_mask
     """Draft path should create an all-keep mask for single-token decode."""
 
     class _DummyDraftModel(MobilintEagle3DraftModelMixin):
-        pass
+        # Bypass the mixin's config-driven ``__init__`` — this test only
+        # exercises ``_prepare_decoder_attention_mask``.
+        def __init__(self) -> None:  # pragma: no cover - trivial stub
+            pass
 
     model = _DummyDraftModel()
     hidden_states = torch.zeros((2, 1, 4), dtype=torch.float32)

@@ -374,10 +374,42 @@ class MobilintEagle3BaseModelMixin:
     """Shared runtime helpers for an EAGLE-3 base model.
 
     Responsibility:
+    - Install ``embed_tokens`` and ``rotary_emb`` from ``config`` so every
+      concrete family shares a single construction site.
     - Convert PyTorch tensors to MXQ-compatible numpy payloads.
     - Run chunked prefill/decode against base MXQ backend.
     - Reassemble hidden/logits chunks back to torch tensors.
+
+    Families that need a different rotary class (e.g. a future release without
+    ``rope_scaling``) can override :meth:`_build_base_rotary_emb`.
     """
+
+    def __init__(self, config, *args, **kwargs) -> None:
+        super().__init__(config, *args, **kwargs)
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        self.rotary_emb = self._build_base_rotary_emb(config)
+
+    def _build_base_rotary_emb(self, config) -> nn.Module:
+        """Return the base rotary embedding module for ``config``.
+
+        Documented override hook. Every EAGLE-3 base config shipped in this
+        repo carries ``rope_scaling``, so the scaled branch matches today's
+        behavior. Future families with ``rope_scaling=None`` (or a bespoke
+        rotary class) can either rely on the fallback branch here or override
+        this method entirely.
+        """
+        head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        if getattr(config, "rope_scaling", None):
+            return ScaledCachedRotaryEmbedding(
+                dim=head_dim,
+                max_position_embeddings=config.max_position_embeddings,
+                config=config,
+            )
+        return CachedRotaryEmbedding(
+            head_dim,
+            config.max_position_embeddings,
+            base=int(getattr(config, "rope_theta", 10000)),
+        )
 
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
@@ -534,10 +566,56 @@ class MobilintEagle3DraftModelMixin:
     """Shared runtime helpers for an EAGLE-3 draft model.
 
     Responsibility:
+    - Install ``embed_tokens``, ``rotary_emb``, and draft tree bookkeeping
+      (``top_k``, ``max_draft_tokens``, ``depth``, ``hidden_size``,
+      ``logsoftmax``, ``d2t``, ``t2d``, ``tree_mask_init``, ``position_ids``)
+      from ``config`` / ``draft_config`` so every concrete family shares a
+      single construction site.
     - Consume accepted/base hidden states.
     - Expand a top-k draft tree up to configured depth.
     - Return tree metadata consumed by posterior evaluation.
+
+    Families that need a different rotary class can override
+    :meth:`_build_draft_rotary_emb`. Note that ``max_draft_tokens`` set here
+    is a bootstrap value; :class:`MobilintEagle3GenerationMixin.generate`
+    resolves the final value from ``GenerationConfig.num_assistant_tokens``.
     """
+
+    def __init__(self, config, draft_config, fc_projector, *args, **kwargs) -> None:
+        super().__init__(config, *args, **kwargs)
+        self.draft_config = draft_config
+        self.fc_projector = fc_projector
+        self.embed_tokens = nn.Embedding(draft_config.vocab_size, draft_config.hidden_size, draft_config.pad_token_id)
+        self.rotary_emb = self._build_draft_rotary_emb(draft_config)
+        self.top_k = int(config.eagle3_tree_top_k)
+        # Bootstrap value; generate() overrides this from
+        # ``GenerationConfig.num_assistant_tokens`` (default 64) before use.
+        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 64)) - 1
+        self.depth = int(config.eagle3_tree_depth)
+        self.hidden_size = draft_config.hidden_size
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
+        draft_vocab_size = int(getattr(draft_config, "draft_vocab_size", draft_config.vocab_size))
+        self.register_buffer("d2t", torch.zeros(draft_vocab_size, dtype=torch.long, device="cpu"))
+        self.register_buffer("t2d", torch.zeros(draft_config.vocab_size, dtype=torch.bool, device="cpu"))
+        self.tree_mask_init = torch.eye(self.top_k, dtype=torch.float32, device="cpu")[None, None]
+        self.position_ids = torch.zeros(self.top_k, dtype=torch.long, device="cpu")
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
+
+    def _build_draft_rotary_emb(self, draft_config) -> nn.Module:
+        """Return the draft rotary embedding module for ``draft_config``.
+
+        Documented override hook. Every EAGLE-3 draft in this repo uses
+        :class:`CachedRotaryEmbedding` with ``base`` sourced from
+        ``draft_config.rope_theta``; pre-refactor qwen2 relied on the
+        implicit ``base=10000`` default and its shipped configs match.
+        """
+        head_dim = getattr(draft_config, "head_dim", draft_config.hidden_size // draft_config.num_attention_heads)
+        return CachedRotaryEmbedding(
+            head_dim,
+            draft_config.max_position_embeddings,
+            base=int(getattr(draft_config, "rope_theta", 10000)),
+        )
 
     def _prepare_decoder_attention_mask(
         self,
