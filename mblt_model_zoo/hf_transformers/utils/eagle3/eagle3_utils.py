@@ -134,7 +134,8 @@ class CachedRotaryEmbedding(nn.Module):
             target_size = 2 * target_half
             if rotate_tensor.shape[-1] != target_size:
                 rotate_tensor = self.pad_rope(rotate_tensor, target_size)
-            self.position_table = rotate_tensor.cpu().numpy()[0, 0]
+            # numpy has no bfloat16; force fp32 so caller-supplied bf16 does not crash `.numpy()`.
+            self.position_table = rotate_tensor.detach().float().cpu().numpy()[0, 0]
 
     @staticmethod
     def pad_rope(rotate_tensor: torch.Tensor, target_len: int) -> torch.Tensor:
@@ -309,7 +310,8 @@ class ScaledCachedRotaryEmbedding(nn.Module):
             target_size = 2 * target_half
             if rotate_tensor.shape[-1] != target_size:
                 rotate_tensor = CachedRotaryEmbedding.pad_rope(rotate_tensor, target_size)
-            self.position_table = rotate_tensor.cpu().numpy()[0, 0]
+            # numpy has no bfloat16; force fp32 so caller-supplied bf16 does not crash `.numpy()`.
+            self.position_table = rotate_tensor.detach().float().cpu().numpy()[0, 0]
 
     def _dynamic_frequency_update(self, position_ids: torch.LongTensor, device: torch.device) -> None:
         if self.rope_type in (None, "default"):
@@ -355,7 +357,7 @@ class MobilintEagle3FCProjector(MobilintEagle3ModelMixin, PreTrainedModel):
         Returns:
             Projected hidden states, typically ``[1, seq, hidden_draft]``.
         """
-        hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
+        hidden_states_numpy = hidden_states.detach().cpu().contiguous().float().numpy()
         if hidden_states_numpy.ndim == 3:
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
         if count_npu_time:
@@ -635,16 +637,17 @@ class MobilintEagle3DraftModelMixin:
         inputs_embeds_numpy = inputs_embeds.cpu().contiguous().float().numpy()
         if inputs_embeds_numpy.ndim == 3:
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
-        hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
+        hidden_states_numpy = hidden_states.detach().cpu().contiguous().float().numpy()
         if hidden_states_numpy.ndim == 3:
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
         if hidden_states.shape[-1] != inputs_embeds.shape[-1]:
             hidden_states_numpy = (
                 self.fc_projector.project(hidden_states, count_npu_time=count_npu_time)
+                .detach()
                 .cpu()
                 .contiguous()
+                .float()
                 .numpy()
-                .astype(np.float32, copy=False)
             )
             if hidden_states_numpy.ndim == 3:
                 hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
