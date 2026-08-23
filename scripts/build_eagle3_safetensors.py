@@ -210,6 +210,24 @@ def main() -> int:
         f"the draft vocab must be a subset of the target vocab."
     )
 
+    # Every draft-vocab index ``i`` is translated to target-vocab index ``i + d2t[i]`` at
+    # runtime (see ``MobilintEagle3DraftModelMixin.topk_generate``); an out-of-range offset
+    # only surfaces as an IndexError when that candidate is actually sampled. Fail here so
+    # a malformed draft checkpoint never reaches disk as a "built" release.
+    translated = torch.arange(draft_vocab, dtype=torch.int64) + d2t
+    invalid_mask = (translated < 0) | (translated >= vocab_size)
+    n_invalid = int(invalid_mask.sum().item())
+    if n_invalid:
+        first_i = int(invalid_mask.nonzero(as_tuple=False)[0, 0].item())
+        raise SystemExit(
+            f"[error] d2t maps {n_invalid} draft-vocab indices outside target vocab "
+            f"[0, {vocab_size}). first violation: i={first_i}, "
+            f"d2t[{first_i}]={int(d2t[first_i].item())}, "
+            f"i + d2t[i]={int(translated[first_i].item())}, vocab_size={vocab_size}. "
+            f"the draft checkpoint's d2t is inconsistent with the target embeddings; "
+            f"regenerate or replace the draft artifact."
+        )
+
     print("[cast] draft embed float32 -> float16")
     draft_emb_f16 = draft_emb.to(torch.float16).contiguous()
     target_emb_f32 = target_emb.contiguous()

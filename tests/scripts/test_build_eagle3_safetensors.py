@@ -1,7 +1,8 @@
-"""Unit tests for ``scripts/build_eagle3_safetensors.py::_resolve_draft_subdir``.
+"""Unit tests for ``scripts/build_eagle3_safetensors.py``.
 
-The tests focus on the explicit-vs-defaulted ``--draft-subdir`` contract: a defaulted request
-may auto-detect a single candidate, but an explicit request must exist.
+Covers the explicit-vs-defaulted ``--draft-subdir`` contract and the release-write-time ``d2t``
+range check that guards against malformed draft checkpoints slipping onto disk as a "built"
+release only to explode at candidate-sampling time.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import torch
+from safetensors.torch import save_file
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BUILD_SCRIPT = _REPO_ROOT / "scripts" / "build_eagle3_safetensors.py"
@@ -71,3 +74,76 @@ def test_explicit_missing_subdir_never_auto_detects(tmp_path: Path) -> None:
     message = str(excinfo.value)
     assert "typo_epoch" in message
     assert "explicitly" in message
+
+
+def _make_release_fixture(
+    tmp_path: Path,
+    *,
+    vocab_size: int,
+    hidden_size: int,
+    d2t_offsets: list[int],
+) -> Path:
+    """Assemble a minimal release folder with ``target_emb.pth``, ``draft_emb.pth``, and a draft safetensors.
+
+    The embeddings are zero tensors of the requested shape so ``main()`` reaches the ``d2t`` range
+    check without stumbling on unrelated dtype/shape guards.
+    """
+    source = tmp_path / "release"
+    source.mkdir()
+    target_emb = torch.zeros(vocab_size, hidden_size, dtype=torch.float32)
+    torch.save(target_emb, source / "target_emb.pth")
+    draft_emb = torch.zeros(vocab_size, hidden_size, dtype=torch.float32)
+    torch.save(draft_emb, source / "draft_emb.pth")
+
+    subdir = source / build.DEFAULT_DRAFT_SUBDIR
+    subdir.mkdir()
+    d2t = torch.tensor(d2t_offsets, dtype=torch.int64)
+    t2d = torch.zeros(vocab_size, dtype=torch.bool)
+    save_file({"d2t": d2t, "t2d": t2d}, str(subdir / "model.safetensors"))
+    return source
+
+
+def test_valid_d2t_writes_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A well-formed ``d2t`` (every ``i + d2t[i]`` in range) passes validation and writes the release."""
+    source = _make_release_fixture(tmp_path, vocab_size=10, hidden_size=4, d2t_offsets=[5, 5, 5, 5])
+    output = tmp_path / "release.safetensors"
+    monkeypatch.setattr(sys, "argv", ["build_eagle3_safetensors.py", str(source), "--output", str(output)])
+
+    assert build.main() == 0
+    assert output.is_file()
+
+
+def test_d2t_lower_bound_violation_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``i + d2t[i] < 0`` for any ``i`` must abort before writing the release."""
+    # i=0: 0 + (-1) = -1 < 0
+    source = _make_release_fixture(tmp_path, vocab_size=10, hidden_size=4, d2t_offsets=[-1, 5, 5, 5])
+    output = tmp_path / "release.safetensors"
+    monkeypatch.setattr(sys, "argv", ["build_eagle3_safetensors.py", str(source), "--output", str(output)])
+
+    with pytest.raises(SystemExit) as excinfo:
+        build.main()
+
+    message = str(excinfo.value)
+    assert "d2t" in message
+    assert "i=0" in message
+    assert "i + d2t[i]=-1" in message
+    assert "vocab_size=10" in message
+    assert not output.exists()
+
+
+def test_d2t_upper_bound_violation_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``i + d2t[i] >= vocab_size`` for any ``i`` must abort before writing the release."""
+    # i=3: 3 + 10 = 13 >= 10
+    source = _make_release_fixture(tmp_path, vocab_size=10, hidden_size=4, d2t_offsets=[5, 5, 5, 10])
+    output = tmp_path / "release.safetensors"
+    monkeypatch.setattr(sys, "argv", ["build_eagle3_safetensors.py", str(source), "--output", str(output)])
+
+    with pytest.raises(SystemExit) as excinfo:
+        build.main()
+
+    message = str(excinfo.value)
+    assert "d2t" in message
+    assert "i=3" in message
+    assert "i + d2t[i]=13" in message
+    assert "vocab_size=10" in message
+    assert not output.exists()
