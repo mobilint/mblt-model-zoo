@@ -143,7 +143,12 @@
   only when a runtime `vision_mxq_path=` override diverges from the shipped config.
 - EAGLE-3 speculative decoding (`mobilint/EAGLE3-Qwen3-4B` and siblings) loads through
   `AutoModelForCausalLM.from_pretrained(...)` as one release bundling base MXQ, draft MXQ, and
-  FC stack. Tune the draft budget with `GenerationConfig.num_assistant_tokens` (default `64`);
+  FC stack. Qwen3 and Llama base families live under
+  `mblt_model_zoo/hf_transformers/models/{qwen3_eagle3,llama_eagle3}/`
+  (`MobilintQwen3Eagle3ForCausalLM`, `MobilintLlamaEagle3ForCausalLM`) and share
+  `MobilintEagle3BaseModelMixin` / `MobilintEagle3DraftModelMixin`; embed_tokens + rotary_emb
+  init lives in the mixins so every concrete `MobilintXxxEagle3ForCausalLM.__init__` is a thin
+  wiring shim. Tune the draft budget with `GenerationConfig.num_assistant_tokens` (default `64`);
   Qwen3-4B measures best around `25`–`30`.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
   to `auto`: slice by declared `TopKLogitsWarper` if present, else full-vocab softmax so

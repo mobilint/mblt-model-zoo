@@ -284,8 +284,18 @@ truth when this snapshot becomes stale.
   dependency; validate video paths only against a dynamic-vision release.
 - EAGLE-3 speculative decoding is a supported release family loaded through
   `AutoModelForCausalLM.from_pretrained(...)` (for example `mobilint/EAGLE3-Qwen3-4B`), which
-  binds the base MXQ, one-block draft MXQ, and FC stack as one release. The draft-tree budget is
-  `GenerationConfig.num_assistant_tokens` (defaults to `64` in
+  binds the base MXQ, one-block draft MXQ, and FC stack as one release. Qwen3 and Llama base
+  families are supported through `mblt_model_zoo/hf_transformers/models/qwen3_eagle3/` and
+  `mblt_model_zoo/hf_transformers/models/llama_eagle3/`; each ships a
+  `MobilintXxxEagle3Config` / `MobilintXxxEagle3ForCausalLM` pair (e.g.
+  `MobilintQwen3Eagle3Config` / `MobilintQwen3Eagle3ForCausalLM`,
+  `MobilintLlamaEagle3Config` / `MobilintLlamaEagle3ForCausalLM`) that wires
+  `MobilintEagle3FCProjector`, the family-specific base backend, and the family-specific
+  one-block draft backend on top of shared `MobilintEagle3BaseModelMixin` /
+  `MobilintEagle3DraftModelMixin`. The mixins own `embed_tokens` and `rotary_emb`
+  initialization so every concrete `MobilintXxxEagle3ForCausalLM.__init__` stays a thin wiring
+  shim; register a new base family by subclassing the mixins rather than duplicating the init
+  bodies. The draft-tree budget is `GenerationConfig.num_assistant_tokens` (defaults to `64` in
   `mblt_model_zoo/hf_transformers/utils/generation_utils.py`); the Qwen3-4B release measures best
   in the `25`–`30` range, where the Hugging Face default of `49` costs more iteration latency than
   its extra acceptance recovers.
