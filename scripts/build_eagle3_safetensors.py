@@ -66,33 +66,50 @@ def _resolve_draft_emb(source: Path, override: Path | None) -> Path:
     )
 
 
-def _resolve_draft_subdir(source: Path, requested: str) -> Path:
+def _resolve_draft_subdir(source: Path, requested: str | None) -> Path:
     """Return the release's draft-checkpoint subdirectory.
+
+    Auto-detection only fires when the caller did not supply ``--draft-subdir``. An explicit
+    request that resolves to a missing ``model.safetensors`` fails fast so a typo cannot silently
+    pair the wrong draft checkpoint's ``d2t``/``t2d`` with the embeddings.
 
     Args:
         source: Release folder to search.
-        requested: The ``--draft-subdir`` value; used directly when it exists.
+        requested: The ``--draft-subdir`` value when the caller passed one, or ``None`` when the
+            argparse default was used. Explicit non-``None`` values are required to exist.
 
     Returns:
         The resolved subdirectory containing ``model.safetensors``.
 
     Raises:
-        SystemExit: If the requested subdir is missing and auto-detection finds zero or multiple
-            candidate subdirectories with a ``model.safetensors``.
+        SystemExit: If ``requested`` was supplied explicitly but its ``model.safetensors`` is
+            missing, or (when defaulted) if neither ``DEFAULT_DRAFT_SUBDIR`` nor a single
+            auto-detected candidate is available.
     """
 
-    explicit = source / requested
-    if (explicit / "model.safetensors").is_file():
-        return explicit
+    if requested is not None:
+        explicit = source / requested
+        if (explicit / "model.safetensors").is_file():
+            return explicit
+        raise SystemExit(
+            f"[error] --draft-subdir '{requested}': {explicit / 'model.safetensors'} not found. "
+            f"Auto-detection is skipped because you explicitly requested this subdir; "
+            f"pass a different --draft-subdir or omit the flag to auto-detect."
+        )
+
+    default_dir = source / DEFAULT_DRAFT_SUBDIR
+    if (default_dir / "model.safetensors").is_file():
+        return default_dir
 
     candidates = sorted(p for p in source.iterdir() if p.is_dir() and (p / "model.safetensors").is_file())
     if len(candidates) == 1:
         chosen = candidates[0]
-        print(f"[detect] draft subdir '{requested}' missing; using '{chosen.name}'")
+        print(f"[detect] default draft subdir '{DEFAULT_DRAFT_SUBDIR}' missing; using '{chosen.name}'")
         return chosen
     if not candidates:
         raise SystemExit(
-            f"[error] no draft subdirectory with model.safetensors found under {source} (requested '{requested}')."
+            f"[error] no draft subdirectory with model.safetensors found under {source} "
+            f"(default '{DEFAULT_DRAFT_SUBDIR}' also absent)."
         )
     listed = ", ".join(p.name for p in candidates)
     raise SystemExit(
@@ -128,10 +145,12 @@ def main() -> int:
     parser.add_argument(
         "--draft-subdir",
         type=str,
-        default=DEFAULT_DRAFT_SUBDIR,
+        default=None,
         help=(
-            f"Subdirectory of --source-dir holding the draft model.safetensors "
-            f"(default {DEFAULT_DRAFT_SUBDIR}; auto-detected when the default is missing)."
+            f"Subdirectory of --source-dir holding the draft model.safetensors. "
+            f"When omitted, '{DEFAULT_DRAFT_SUBDIR}' is used if present and otherwise "
+            f"auto-detected from the single available candidate. When supplied explicitly, "
+            f"the path must exist (no auto-detect fallback)."
         ),
     )
     parser.add_argument(
