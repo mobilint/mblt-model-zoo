@@ -10,12 +10,12 @@ import torch
 from transformers.generation.stopping_criteria import StoppingCriteria
 
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.modeling_qwen2_eagle3 import (
-    CachedRotaryEmbedding,
     MobilintQwen2Eagle3ForCausalLM,
 )
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintEagle3Cache
 from mblt_model_zoo.hf_transformers.utils.eagle3 import decoding as decoding_module
 from mblt_model_zoo.hf_transformers.utils.eagle3 import tree_decoding as tree_decoding_module
+from mblt_model_zoo.hf_transformers.utils.eagle3.eagle3_utils import CachedRotaryEmbedding
 from mblt_model_zoo.hf_transformers.utils.eagle3.tree_decoding import evaluate_posterior, update_inference_inputs
 from mblt_model_zoo.hf_transformers.utils.generation_utils import MobilintEagle3GenerationMixin, llm_eagle3_forward
 

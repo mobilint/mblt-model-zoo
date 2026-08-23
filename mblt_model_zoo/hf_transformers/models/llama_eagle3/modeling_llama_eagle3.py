@@ -1,4 +1,4 @@
-"""Mobilint Qwen2 EAGLE-3 model implementation."""
+"""Mobilint Llama EAGLE-3 model implementation."""
 
 from __future__ import annotations
 
@@ -17,40 +17,35 @@ from ...utils.eagle3.eagle3_utils import (
     MobilintEagle3ModelMixin,
 )
 from ...utils.generation_utils import MobilintEagle3GenerationMixin, llm_eagle3_forward
-from .configuration_qwen2_eagle3 import MobilintQwen2Eagle3Config
+from .configuration_llama_eagle3 import MobilintLlamaEagle3Config
 
 
-class MobilintQwen2Eagle3PreTrainedModel(PreTrainedModel):
-    """Base pretrained model contract for Mobilint EAGLE-3."""
+class MobilintLlamaEagle3PreTrainedModel(PreTrainedModel):
+    """Base pretrained model contract for Mobilint Llama EAGLE-3."""
 
-    config: MobilintQwen2Eagle3Config
+    config: MobilintLlamaEagle3Config
     base_model_prefix = "model"
     main_input_name = "input_ids"
 
 
-class MobilintQwen2Eagle3BaseModel(MobilintEagle3BaseModelMixin, MobilintEagle3ModelMixin):
-    """Concrete Qwen2 base backend for EAGLE-3."""
+class MobilintLlamaEagle3BaseModel(MobilintEagle3BaseModelMixin, MobilintEagle3ModelMixin):
+    """Concrete Llama base backend for EAGLE-3."""
 
     npu_backend_prefix = "base_"
 
 
-class MobilintQwen2Eagle3DraftModel(MobilintEagle3DraftModelMixin, MobilintEagle3ModelMixin):
-    """Concrete draft backend for EAGLE-3 tree expansion.
-
-    The draft backend is intentionally lightweight and uses a single-block draft
-    architecture (for example, a draft distilled from the original model or a
-    Llama-family 1-block draft), rather than the full base-model stack.
-    """
+class MobilintLlamaEagle3DraftModel(MobilintEagle3DraftModelMixin, MobilintEagle3ModelMixin):
+    """Concrete Llama 1-block draft backend for Llama EAGLE-3."""
 
     npu_backend_prefix = "draft_"
 
 
-class MobilintQwen2Eagle3ForCausalLM(
+class MobilintLlamaEagle3ForCausalLM(
     MobilintEagle3GenerationMixin,
     PretrainedOnlyMixin,
-    MobilintQwen2Eagle3PreTrainedModel,
+    MobilintLlamaEagle3PreTrainedModel,
 ):
-    """Top-level Mobilint EAGLE-3 causal LM.
+    """Top-level Mobilint Llama EAGLE-3 causal LM.
 
     Generation compatibility notes:
     - Ignored with warning: ``attention_mask``, ``min_new_tokens``,
@@ -65,15 +60,15 @@ class MobilintQwen2Eagle3ForCausalLM(
       4) ``config.max_position_embeddings - prompt_length``.
     """
 
-    config_class = MobilintQwen2Eagle3Config
+    config_class = MobilintLlamaEagle3Config
 
-    def __init__(self, config: MobilintQwen2Eagle3Config, *args: object, **kwargs: object) -> None:
+    def __init__(self, config: MobilintLlamaEagle3Config, *args: object, **kwargs: object) -> None:
         no_launch = bool(kwargs.pop("no_launch", False))
         super().__init__(config, *args, **kwargs)
         fc_projector = MobilintEagle3FCProjector(config, _internal_call=True, no_launch=no_launch)
         self.eagle3_fc_projector = fc_projector
-        self.eagle3_base_model = MobilintQwen2Eagle3BaseModel(config, _internal_call=True, no_launch=no_launch)
-        self.eagle3_draft_model = MobilintQwen2Eagle3DraftModel(
+        self.eagle3_base_model = MobilintLlamaEagle3BaseModel(config, _internal_call=True, no_launch=no_launch)
+        self.eagle3_draft_model = MobilintLlamaEagle3DraftModel(
             config,
             draft_config=config.draft_config,
             fc_projector=fc_projector,
@@ -118,5 +113,5 @@ class MobilintQwen2Eagle3ForCausalLM(
         )
 
 
-AutoModel.register(MobilintQwen2Eagle3Config, MobilintQwen2Eagle3ForCausalLM)
-AutoModelForCausalLM.register(MobilintQwen2Eagle3Config, MobilintQwen2Eagle3ForCausalLM)
+AutoModel.register(MobilintLlamaEagle3Config, MobilintLlamaEagle3ForCausalLM)
+AutoModelForCausalLM.register(MobilintLlamaEagle3Config, MobilintLlamaEagle3ForCausalLM)

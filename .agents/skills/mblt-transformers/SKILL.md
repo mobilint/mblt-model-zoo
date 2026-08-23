@@ -91,13 +91,30 @@ description: >-
 
 - Load a release (for example `mobilint/EAGLE3-Qwen3-4B`) through
   `AutoModelForCausalLM.from_pretrained(...)`; the wrapper binds the base MXQ, one-block draft
-  MXQ, and FC stack as a single release. The presence of `eagle3_base_model` on the loaded model
-  is how measurement paths detect EAGLE-3.
+  MXQ, and FC stack as a single release. Qwen3 and Llama base families are supported through
+  `mblt_model_zoo/hf_transformers/models/qwen3_eagle3/` and
+  `mblt_model_zoo/hf_transformers/models/llama_eagle3/`. Each ships a
+  `MobilintXxxEagle3Config` / `MobilintXxxEagle3ForCausalLM` pair
+  (`MobilintQwen3Eagle3Config` / `MobilintQwen3Eagle3ForCausalLM`,
+  `MobilintLlamaEagle3Config` / `MobilintLlamaEagle3ForCausalLM`) that wires
+  `MobilintEagle3FCProjector`, the family-specific base backend, and the family-specific
+  one-block draft backend on top of the shared `MobilintEagle3BaseModelMixin` /
+  `MobilintEagle3DraftModelMixin`. The mixins own `embed_tokens` and `rotary_emb`
+  initialization, so every concrete `MobilintXxxEagle3ForCausalLM.__init__` stays a thin
+  wiring shim; register a new base family by subclassing the mixins rather than duplicating
+  the init bodies. The presence of `eagle3_base_model` on the loaded model is how measurement
+  paths detect EAGLE-3.
 - Tune the draft-tree budget through `GenerationConfig.num_assistant_tokens` (default `64` in
   `mblt_model_zoo/hf_transformers/utils/generation_utils.py`). Qwen3-4B measures best in the
   `25`–`30` range: the Hugging Face default of `49` costs more iteration latency than its extra
   acceptance recovers. Override either by editing the shipped `generation_config.json` or by
   setting `model.generation_config.num_assistant_tokens = ...` before `generate`.
+- Mobilint EAGLE-3 releases train base and draft at a matched hidden size by policy; the
+  `draft_emb.shape == target_emb.shape` assert in `scripts/build_eagle3_safetensors.py` enforces
+  it. The `MobilintEagle3DraftModelMixin` `hidden_states.shape[-1] != inputs_embeds.shape[-1]`
+  branch (calling `MobilintEagle3FCProjector.project`) is legacy / future-experiment scaffolding,
+  not evidence that unequal base/draft widths are supported — do not use it to justify relaxing
+  the packaging assert.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch`
   dispatches per call. Default `auto`: slice to the declared `TopKLogitsWarper`'s top-K first
   and apply the processor list on that slice (Hugging Face `_get_logits_warper` order

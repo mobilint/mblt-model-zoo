@@ -54,9 +54,19 @@ the flag from `config.dynamic_vision` in `from_pretrained`. Call
 
 EAGLE-3 speculative decoding (`mobilint/EAGLE3-Qwen3-4B` and siblings) loads through
 `AutoModelForCausalLM.from_pretrained(...)` as one release bundling base MXQ, one-block draft MXQ,
-and FC stack. Tune the draft-tree budget through `GenerationConfig.num_assistant_tokens` (default
-`64` in `mblt_model_zoo/hf_transformers/utils/generation_utils.py`); Qwen3-4B measures best around
-`25`–`30`. The softmax dispatch in
+and FC stack. Qwen3 and Llama base families live under
+`mblt_model_zoo/hf_transformers/models/{qwen3_eagle3,llama_eagle3}/`
+(`MobilintQwen3Eagle3ForCausalLM`, `MobilintLlamaEagle3ForCausalLM`) and share
+`MobilintEagle3BaseModelMixin` / `MobilintEagle3DraftModelMixin`; embed_tokens + rotary_emb init
+lives in the mixins so every concrete `MobilintXxxEagle3ForCausalLM.__init__` is a thin wiring
+shim (subclass the mixins to register a new base family). Tune the draft-tree budget through
+`GenerationConfig.num_assistant_tokens` (default `64` in
+`mblt_model_zoo/hf_transformers/utils/generation_utils.py`); Qwen3-4B measures best around
+`25`–`30`. Mobilint EAGLE-3 releases train base and draft at a matched hidden size by policy;
+the `draft_emb.shape == target_emb.shape` assert in `scripts/build_eagle3_safetensors.py`
+enforces it, and the `MobilintEagle3DraftModelMixin` FCProjector branch
+(`hidden_states.shape[-1] != inputs_embeds.shape[-1]`) is legacy/future scaffolding, not a
+signal that unequal widths are supported. The softmax dispatch in
 `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
 to `auto`: slice by declared `TopKLogitsWarper` if present, else fall back to full-vocab so a
 bare `TopPLogitsWarper` still determines its nucleus over the whole distribution. The
