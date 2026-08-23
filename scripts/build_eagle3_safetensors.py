@@ -186,6 +186,10 @@ def main() -> int:
     assert isinstance(draft_emb, torch.Tensor), f"{draft_emb_path.name} is not a tensor (got {type(draft_emb)!r})"
     assert draft_emb.dim() == 2, f"draft embed must be rank-2 (V, H); got shape {tuple(draft_emb.shape)}"
     assert draft_emb.dtype == torch.float32, f"draft embed expected float32, got {draft_emb.dtype}"
+    # Contract: Mobilint EAGLE-3 releases train base and draft at a matched hidden size,
+    # so packaged embeddings must be shape-identical. The runtime FCProjector branch in
+    # MobilintEagle3DraftModelMixin is legacy/future scaffolding and is NOT grounds to relax
+    # this equality — see the EAGLE-3 contract bullet in AGENTS.md.
     assert draft_emb.shape == target_emb.shape, (
         f"draft embed shape {tuple(draft_emb.shape)} != target embed shape {tuple(target_emb.shape)}; "
         f"both must share the target-model tokenizer vocab and hidden size."

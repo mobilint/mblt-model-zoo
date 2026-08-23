@@ -806,6 +806,10 @@ class MobilintEagle3DraftModelMixin:
         hidden_states_numpy = hidden_states.detach().cpu().contiguous().float().numpy()
         if hidden_states_numpy.ndim == 3:
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
+        # Legacy / future-experiment scaffolding: Mobilint EAGLE-3 releases train base and draft
+        # at a matched hidden size (see AGENTS.md EAGLE-3 contract), so this branch is not
+        # exercised by any shipped release. Do not treat it as evidence that unequal base/draft
+        # widths are a supported configuration.
         if hidden_states.shape[-1] != inputs_embeds.shape[-1]:
             hidden_states_numpy = (
                 self.fc_projector.project(hidden_states, count_npu_time=count_npu_time)

@@ -299,6 +299,15 @@ truth when this snapshot becomes stale.
   `mblt_model_zoo/hf_transformers/utils/generation_utils.py`); the Qwen3-4B release measures best
   in the `25`–`30` range, where the Hugging Face default of `49` costs more iteration latency than
   its extra acceptance recovers.
+- Mobilint EAGLE-3 releases train the base and draft models at a matched hidden size by training
+  policy — base and draft embeddings must be shape-identical `(V, H)`. The
+  `assert draft_emb.shape == target_emb.shape` in `scripts/build_eagle3_safetensors.py` enforces
+  that contract at packaging time and must not be relaxed. The runtime
+  `hidden_states.shape[-1] != inputs_embeds.shape[-1]` branch in
+  `MobilintEagle3DraftModelMixin` (calling `MobilintEagle3FCProjector.project`) is a legacy /
+  future-experiment path retained only for scaffolding; its presence is not evidence that
+  released MXQ artifacts support unequal base/draft widths, and it is not a valid basis for
+  loosening the packaging assert or embedding-width equality assumptions elsewhere.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` runs in
   one of three modes. Default `auto` dispatches per call: when the processor list contains a
   `TopKLogitsWarper`, slice the raw logits to the declared top-K first and apply the processor

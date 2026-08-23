@@ -150,6 +150,11 @@
   init lives in the mixins so every concrete `MobilintXxxEagle3ForCausalLM.__init__` is a thin
   wiring shim. Tune the draft budget with `GenerationConfig.num_assistant_tokens` (default `64`);
   Qwen3-4B measures best around `25`–`30`.
+- EAGLE-3 releases share hidden size between base and draft by training policy; the
+  `draft_emb.shape == target_emb.shape` assert in `scripts/build_eagle3_safetensors.py` enforces
+  it. The `MobilintEagle3DraftModelMixin` FCProjector branch
+  (`hidden_states.shape[-1] != inputs_embeds.shape[-1]`) is legacy/future scaffolding, not a
+  signal that unequal widths are supported — do not use it as grounds to relax that assert.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch` defaults
   to `auto`: slice by declared `TopKLogitsWarper` if present, else full-vocab softmax so
   `TopPLogitsWarper` computes its nucleus over the whole distribution. The slice-by-TopK path

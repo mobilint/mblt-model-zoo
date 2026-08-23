@@ -109,6 +109,12 @@ description: >-
   `25`–`30` range: the Hugging Face default of `49` costs more iteration latency than its extra
   acceptance recovers. Override either by editing the shipped `generation_config.json` or by
   setting `model.generation_config.num_assistant_tokens = ...` before `generate`.
+- Mobilint EAGLE-3 releases train base and draft at a matched hidden size by policy; the
+  `draft_emb.shape == target_emb.shape` assert in `scripts/build_eagle3_safetensors.py` enforces
+  it. The `MobilintEagle3DraftModelMixin` `hidden_states.shape[-1] != inputs_embeds.shape[-1]`
+  branch (calling `MobilintEagle3FCProjector.project`) is legacy / future-experiment scaffolding,
+  not evidence that unequal base/draft widths are supported — do not use it to justify relaxing
+  the packaging assert.
 - `mblt_model_zoo/hf_transformers/utils/eagle3/tree_decoding.py::softmax_topk_cpu_torch`
   dispatches per call. Default `auto`: slice to the declared `TopKLogitsWarper`'s top-K first
   and apply the processor list on that slice (Hugging Face `_get_logits_warper` order
