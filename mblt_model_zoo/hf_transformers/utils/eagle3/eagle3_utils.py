@@ -95,19 +95,97 @@ def convert_attention_mask_to_numpy(
     return attention_mask.cpu().contiguous().numpy()
 
 
+def _resolve_rope_theta(config: Any, default: Optional[float] = None) -> float:
+    """Resolve ``rope_theta`` from a config across Transformers 4.x / 5.x layouts.
+
+    Transformers 5.x turned :class:`PretrainedConfig` into a dataclass and folded
+    top-level ``rope_theta`` into ``rope_parameters`` (exposed via the
+    ``rope_scaling`` property) during ``__post_init__``, so the flat attribute is
+    dropped. Transformers 4.x keeps ``rope_theta`` as its own attribute. Read
+    both, in that order.
+
+    Args:
+        config: A ``PretrainedConfig`` (or duck-typed equivalent) or ``None``.
+        default: Fallback used when ``config`` is ``None`` or neither access path
+            resolves. When ``None`` and no path resolves, a :class:`ValueError`
+            is raised pointing at both TF 4.x and TF 5.x access paths.
+
+    Returns:
+        Resolved ``rope_theta`` as ``float``.
+    """
+    if config is None:
+        if default is None:
+            raise ValueError(
+                "_resolve_rope_theta requires a config (or an explicit default); received None."
+            )
+        return float(default)
+    rope_theta = getattr(config, "rope_theta", None)
+    if rope_theta is None:
+        rope_scaling = getattr(config, "rope_scaling", None)
+        if isinstance(rope_scaling, dict):
+            rope_theta = rope_scaling.get("rope_theta")
+    if rope_theta is None:
+        if default is None:
+            raise ValueError(
+                "Could not resolve rope_theta from config: it is neither a top-level "
+                "attribute (Transformers <5) nor a key of config.rope_scaling / "
+                "config.rope_parameters (Transformers >=5)."
+            )
+        return float(default)
+    return float(rope_theta)
+
+
 class CachedRotaryEmbedding(nn.Module):
     """Precompute RoPE tables and expose them as MXQ-friendly numpy arrays."""
 
-    def __init__(self, dim: int, max_position_embeddings: int = 2048, base: int = 10000) -> None:
+    def __init__(
+        self,
+        dim: int,
+        max_position_embeddings: int = 2048,
+        base: int = 10000,
+        *,
+        config: Optional[Any] = None,
+    ) -> None:
         super().__init__()
         self.dim = dim
         self.max_seq_len = max_position_embeddings
         self.base = base
+        # ``config`` and ``rope_type`` unlock the HF Transformers 5.x
+        # ``PreTrainedModel._init_weights`` re-init branch, which fires when
+        # class name contains ``RotaryEmbedding`` AND the module carries
+        # ``original_inv_freq``. Without this, ``inv_freq`` is materialized as
+        # uninitialized bytes after the meta-init pass and forward produces
+        # garbage RoPE tables.
+        self.config = config
+        self.rope_type = "default"
         inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float() / self.dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self.original_inv_freq = self.inv_freq.clone()
         self.position_table = None
         if self.inv_freq.device.type != "meta":
             self._build_position_table()
+
+    def compute_default_rope_parameters(
+        self,
+        config: Optional[Any] = None,
+        device: Optional[torch.device] = None,
+        seq_len: Optional[int] = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, float]:
+        """HF TF 5.x re-init hook for ``rope_type='default'``.
+
+        Called from :meth:`PreTrainedModel._init_weights` as
+        ``rope_fn(module.config)`` when a subclass materializes ``inv_freq``
+        after meta-init. Returns ``(inv_freq, attention_scaling)`` to match the
+        upstream signature.
+        """
+        del seq_len, kwargs
+        resolved_config = config if config is not None else self.config
+        base = _resolve_rope_theta(resolved_config, default=self.base)
+        inv_freq = 1.0 / (
+            base ** (torch.arange(0, self.dim, 2, dtype=torch.float32, device=device) / float(self.dim))
+        )
+        return inv_freq, 1.0
 
     def _build_position_table(
         self,
@@ -210,13 +288,20 @@ class ScaledCachedRotaryEmbedding(nn.Module):
                 self.rope_type = "default"
             config_max_pos = int(getattr(config, "max_position_embeddings", max_position_embeddings))
             self.max_seq_len = config_max_pos if max_length is None or max_length < config_max_pos else max_length
+            # Sync ``self.base`` to config so the ``rope_kwargs["base"]`` guard
+            # below and the downstream default rope path agree. TF 5.x drops
+            # the flat ``config.rope_theta`` attribute (folded into
+            # ``rope_parameters`` / ``rope_scaling``), so plain ``getattr``
+            # returned the caller-provided default (10000) and the base RoPE
+            # table silently used the wrong theta.
+            self.base = int(_resolve_rope_theta(config, default=base))
 
         if "rope_type" not in self.rope_kwargs:
             self.rope_kwargs["rope_type"] = self.rope_type
         if dim is not None and "dim" not in self.rope_kwargs:
             self.rope_kwargs["dim"] = dim
         if "base" not in self.rope_kwargs:
-            self.rope_kwargs["base"] = base
+            self.rope_kwargs["base"] = self.base
         if "max_position_embeddings" not in self.rope_kwargs:
             self.rope_kwargs["max_position_embeddings"] = self.max_seq_len
 
@@ -272,9 +357,10 @@ class ScaledCachedRotaryEmbedding(nn.Module):
             partial_rotary_factor = float(getattr(resolved_config, "partial_rotary_factor", 1.0))
         rotary_dim = int(head_dim * partial_rotary_factor)
 
-        rope_theta = self.base
-        if resolved_config is not None:
-            rope_theta = float(getattr(resolved_config, "rope_theta", rope_theta))
+        # Route through the shared helper so TF 5.x configs (which fold
+        # ``rope_theta`` into ``rope_parameters`` / ``rope_scaling``) do not
+        # silently fall back to ``self.base``.
+        rope_theta = _resolve_rope_theta(resolved_config, default=self.base)
 
         inv_freq = 1.0 / (
             rope_theta ** (torch.arange(0, rotary_dim, 2, dtype=torch.float32, device=device) / float(rotary_dim))
@@ -408,7 +494,8 @@ class MobilintEagle3BaseModelMixin:
         return CachedRotaryEmbedding(
             head_dim,
             config.max_position_embeddings,
-            base=int(getattr(config, "rope_theta", 10000)),
+            base=int(_resolve_rope_theta(config, default=10000)),
+            config=config,
         )
 
     def get_input_embeddings(self) -> nn.Module:
@@ -614,7 +701,8 @@ class MobilintEagle3DraftModelMixin:
         return CachedRotaryEmbedding(
             head_dim,
             draft_config.max_position_embeddings,
-            base=int(getattr(draft_config, "rope_theta", 10000)),
+            base=int(_resolve_rope_theta(draft_config, default=10000)),
+            config=draft_config,
         )
 
     def _prepare_decoder_attention_mask(
