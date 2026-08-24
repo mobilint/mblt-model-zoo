@@ -36,4 +36,8 @@ def test_legacy_utility_modules_are_standalone_aliases() -> None:
     assert importlib.import_module("mblt_model_zoo.vision.datasets.registry") is importlib.import_module(
         "mblt_vision.datasets.registry"
     )
+    for utility in ("preprocess", "postprocess", "datasets", "evaluation"):
+        assert importlib.import_module(f"mblt_model_zoo.vision.utils.{utility}") is importlib.import_module(
+            f"mblt_vision.utils.{utility}"
+        )
     assert LetterBoxGeometry.__module__.startswith("mblt_vision.")

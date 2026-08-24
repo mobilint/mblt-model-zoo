@@ -45,8 +45,9 @@ documentation are maintained in
 and import from `mblt_vision` for new applications. `mblt_model_zoo.vision`
 remains available as a forwarding-only compatibility facade for existing code.
 
-Model Zoo continues to provide the Vision CLI, compilation, benchmarks, and
-dataset-management workflows documented below.
+Model Zoo retains compatibility bridges for the Vision CLI and compilation.
+Vision benchmarks and dataset-management workflows are maintained in
+[mblt-vision-python](https://github.com/mobilint/mblt-vision-python/tree/main/benchmark).
 
 ## Optional Extras
 

@@ -1,12 +1,12 @@
 # Benchmark Guide
 
-The `benchmark/` directory contains reproducible performance and accuracy evaluation tools for
-models in this repository. Each benchmark family owns its dataset preparation, command-line
-options, result formats, and detailed usage instructions.
+The `benchmark/` directory contains reproducible performance tools for the
+Transformers integrations in this repository. Vision benchmarks, dataset
+organizers, and result comparison tools are maintained by
+[mblt-vision-python](https://github.com/mobilint/mblt-vision-python/tree/main/benchmark).
 
 ## Directory Layout
 
-- [`vision/`](vision/README.md): Dataset organizers and accuracy benchmarks for vision models.
 - [`transformers/`](transformers/README.md): Throughput, latency, device-metric, and result
   comparison tools for Transformers-based models.
 - `common/`: Shared utilities for argument parsing, dataset handling, runtime setup, summaries,
@@ -25,7 +25,6 @@ pip install -e . --group dev
 The target model, dataset, and hardware runtime determine any additional requirements. Use the
 family-specific guide for setup, supported commands, and examples:
 
-- [Vision benchmarks](vision/README.md)
 - [Transformers benchmarks](transformers/README.md)
 
 ## Quick Vision CLI Validation
@@ -51,9 +50,9 @@ mblt-model-zoo val \
   --data-path ~/.mblt_model_zoo/datasets/imagenet
 ```
 
-For reproducible multi-model or core-mode sweeps, use the
-[vision benchmark runner](vision/README.md#standard-multi-model-runner), which writes JSON, CSV,
-Markdown, and chart artifacts.
+For reproducible Vision benchmark or core-mode sweeps, use the
+[standalone Vision benchmark runner](https://github.com/mobilint/mblt-vision-python/tree/main/benchmark),
+which writes JSON, CSV, Markdown, and chart artifacts.
 
 ## Dataset and Result Handling
 
