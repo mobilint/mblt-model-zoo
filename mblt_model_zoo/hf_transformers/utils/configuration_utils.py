@@ -143,6 +143,15 @@ class MobilintConfigMixin(PretrainedConfig):
         self.npu_backend.mxq_path = value
 
     @property
+    def target_device(self) -> str:
+        """Board identifier used by the shared NPU backend."""
+        return self.npu_backend.target_device
+
+    @target_device.setter
+    def target_device(self, value: str) -> None:
+        self.npu_backend.target_device = value
+
+    @property
     def dev_no(self) -> int:
         return self.npu_backend.dev_no
 

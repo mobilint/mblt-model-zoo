@@ -95,3 +95,14 @@ def test_qwen2_vl_text_dev_no_override_rebuilds_text_target_cores() -> None:
         "1:1:2",
         "1:1:3",
     ]
+
+
+def test_qwen2_vl_subconfig_target_device_overrides_reach_npu_backends() -> None:
+    """Apply prefixed board overrides to the actual text and vision backends."""
+    config = MobilintQwen2VLConfig(
+        text_target_device="regulus-rb",
+        vision_target_device="regulus-ra",
+    )
+
+    assert config.text_config.npu_backend.target_device == "regulus-rb"
+    assert config.vision_config.npu_backend.target_device == "regulus-ra"
