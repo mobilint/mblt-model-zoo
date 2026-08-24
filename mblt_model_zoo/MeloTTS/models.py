@@ -29,6 +29,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
         target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
+        target_device: str = "aries-rb",
         no_launch: bool = False,
     ):
         super().__init__()
@@ -52,6 +53,7 @@ class MobilintTextEncoderAndDurationPredictor(nn.Module):
             core_mode=core_mode,
             target_cores=target_cores,
             target_clusters=target_clusters,
+            target_device=target_device,
         )
         
         self.npu_backend.name_or_path = name_or_path
@@ -193,6 +195,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
         core_mode: Literal["single", "multi", "global4", "global8"] = "single",
         target_cores: Optional[List[Union[str, "CoreId"]]] = None,
         target_clusters: Optional[List[Union[int, "Cluster"]]] = None,
+        target_device: str = "aries-rb",
         no_launch: bool = False,
     ):
         assert channels % 2 == 0, "channels should be divisible by 2"
@@ -207,6 +210,7 @@ class MobilintTransformerCouplingBlockAndGenerator(nn.Module):
             core_mode=core_mode,
             target_cores=target_cores,
             target_clusters=target_clusters,
+            target_device=target_device,
         )
         
         self.npu_backend.name_or_path = name_or_path
@@ -324,6 +328,7 @@ class MobilintSynthesizerTrn(nn.Module):
         target_core="0:0",
         encoder_mxq_path="",
         decoder_mxq_path="",
+        target_device: str = "aries-rb",
         
         **kwargs
     ):
@@ -341,6 +346,7 @@ class MobilintSynthesizerTrn(nn.Module):
             dev_no=dev_no,
             core_mode="single",
             target_cores=[target_core],
+            target_device=target_device,
         )
 
         # self.dec, self.flow all in one mxq
@@ -353,6 +359,7 @@ class MobilintSynthesizerTrn(nn.Module):
             dev_no=dev_no,
             core_mode="single",
             target_cores=[target_core],
+            target_device=target_device,
         )
 
         if n_speakers <= 0:

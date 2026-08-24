@@ -192,7 +192,7 @@ def test_multi_model_dispatch_preserves_row_order_when_rows_map_to_reverse_model
 def test_single_model_batch_2_stays_on_slot_zero() -> None:
     """N=1, K=2: sw-batch dispatch is a no-op and every row goes through slot 0."""
     m0 = StaticLastOnlyMxq(vocab_size=5, max_width=4)
-    model = _make_multi_slot_model([m0])
+    model = _make_multi_slot_model([m0], k_per_model=2)
     cache = MobilintCache(m0, per_model_batch=2)
 
     inputs_embeds = torch.randn(2, 3, 4, dtype=torch.float32)
@@ -216,7 +216,7 @@ def test_multi_model_dispatch_fast_path_when_rows_land_on_one_model() -> None:
     """N=2, K=2: if every row lands on the same Model the parallel fast path fires only that slot."""
     m0 = StaticLastOnlyMxq(vocab_size=3, max_width=4)
     m1 = StaticLastOnlyMxq(vocab_size=3, max_width=4)
-    model = _make_multi_slot_model([m0, m1])
+    model = _make_multi_slot_model([m0, m1], k_per_model=2)
     # per_model_batch=2, so flat rows 0..1 -> m0, 2..3 -> m1.
     cache = MobilintCache([m0, m1], per_model_batch=2)
 

@@ -1,89 +1,38 @@
-"""MBLT vision task exports and discovery helpers.
-
-The vision package keeps task subpackages as the preferred import surface while
-also supporting legacy top-level model imports such as
-``from mblt_model_zoo.vision import ResNet50``.
-"""
+"""Deprecated compatibility facade for :mod:`mblt_vision`."""
 
 from __future__ import annotations
 
 import sys
+from typing import Any
 
-from . import depth_estimation as depth_estimation
-from . import face_detection as face_detection
-from . import image_classification as image_classification
-from . import instance_segmentation as instance_segmentation
-from . import obb as obb
-from . import object_detection as object_detection
-from . import pose_estimation as pose_estimation
-from . import semantic_segmentation as semantic_segmentation
-from ._api import list_models as list_models
-from ._api import list_tasks as list_tasks
-from .wrapper import MBLT_Engine as MBLT_Engine
+import mblt_vision as _standalone_vision
 
-# ``obb`` is canonical; retain the package attribute published before the rename.
+MBLT_Engine = _standalone_vision.MBLT_Engine
+list_models = _standalone_vision.list_models
+list_tasks = _standalone_vision.list_tasks
+depth_estimation = _standalone_vision.depth_estimation
+face_detection = _standalone_vision.face_detection
+image_classification = _standalone_vision.image_classification
+instance_segmentation = _standalone_vision.instance_segmentation
+object_detection = _standalone_vision.object_detection
+obb = _standalone_vision.obb
+pose_estimation = _standalone_vision.pose_estimation
+semantic_segmentation = _standalone_vision.semantic_segmentation
+
+# ``obb`` is canonical; retain the historical package alias.
 oriented_bounding_boxes = obb
 sys.modules[f"{__name__}.oriented_bounding_boxes"] = obb
 
-_TASK_MODULES = (
-    face_detection,
-    depth_estimation,
-    image_classification,
-    instance_segmentation,
-    object_detection,
-    obb,
-    pose_estimation,
-    semantic_segmentation,
-)
-
-_LEGACY_MODEL_EXPORTS: dict[str, object] = {}
-for _task_module in _TASK_MODULES:
-    for _export_name in getattr(_task_module, "__all__", ()):
-        if _export_name in _LEGACY_MODEL_EXPORTS:
-            raise RuntimeError(f"Duplicate vision export detected for '{_export_name}'.")
-        _LEGACY_MODEL_EXPORTS[_export_name] = _task_module
-
-_PUBLIC_EXPORTS = [
-    "MBLT_Engine",
-    "list_models",
-    "list_tasks",
-    "face_detection",
-    "depth_estimation",
-    "image_classification",
-    "instance_segmentation",
-    "object_detection",
-    "obb",
-    "oriented_bounding_boxes",
-    "pose_estimation",
-    "semantic_segmentation",
-] + sorted(_LEGACY_MODEL_EXPORTS)
-# Keep legacy compatibility exports synchronized with their task packages.
-__all__: list[str] = _PUBLIC_EXPORTS  # pyright: ignore[reportUnsupportedDunderAll]
+__all__ = [*_standalone_vision.__all__, "oriented_bounding_boxes"]
 
 
-def __getattr__(name: str) -> object:
-    """Lazily resolve legacy top-level model exports.
+def __getattr__(name: str) -> Any:
+    """Forward standalone Vision exports through the historical package path."""
 
-    Args:
-        name: Attribute requested from the vision package.
-
-    Returns:
-        The exported model wrapper class for the requested legacy name.
-
-    Raises:
-        AttributeError: If the requested name is not exported by the package.
-    """
-
-    task_module = _LEGACY_MODEL_EXPORTS.get(name)
-    if task_module is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    value = getattr(task_module, name)
-    globals()[name] = value
-    return value
+    return getattr(_standalone_vision, name)
 
 
 def __dir__() -> list[str]:
-    """Return package attributes including lazy legacy exports."""
+    """Return compatibility and standalone Vision attributes."""
 
     return sorted(set(globals()) | set(__all__))

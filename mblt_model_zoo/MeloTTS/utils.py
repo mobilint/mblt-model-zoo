@@ -67,6 +67,7 @@ class ModelHParams(HParamsBase):
         self.bert_model_id: str = kwargs['bert_model_id'] # type: ignore
         self.dev_no: int = kwargs.get('dev_no', 0)
         self.target_core: str = kwargs['target_core']
+        self.target_device: str = kwargs.get('target_device', 'aries-rb')
         self.encoder_mxq_path: str = kwargs['encoder_mxq_path'] # type: ignore
         self.decoder_mxq_path: str = kwargs['decoder_mxq_path'] # type: ignore
         self.use_spk_conditioned_encoder: bool = kwargs.get('use_spk_conditioned_encoder', True) # type: ignore

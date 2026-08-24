@@ -1,15 +1,7 @@
-"""
-Type definitions for MBLT vision models.
-"""
+"""Deprecated module alias for :mod:`mblt_vision.utils.types`."""
 
-from __future__ import annotations
+import sys
 
-from collections.abc import Sequence
-from typing import TypeAlias
+from mblt_vision.utils import types as _standalone_types
 
-import numpy as np
-import torch
-
-TensorLike: TypeAlias = torch.Tensor | np.ndarray
-ListTensorLike: TypeAlias = Sequence[TensorLike]
-NestedListTensorLike: TypeAlias = Sequence[TensorLike | ListTensorLike]
+sys.modules[__name__] = _standalone_types

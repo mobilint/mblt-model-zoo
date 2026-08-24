@@ -4,7 +4,7 @@
 <div align="center">
 <p>
 <a href="https://www.mobilint.com/" target="_blank">
-<img src="https://raw.githubusercontent.com/mobilint/mblt-model-zoo/master/assets/Mobilint_Logo_Primary.png" alt="Mobilint Logo" width="60%">
+<img src="https://raw.githubusercontent.com/mobilint/.github/main/assets/Mobilint_Logo_Primary.png" alt="Mobilint Logo" width="60%">
 </a>
 </p>
 </div>
@@ -37,164 +37,17 @@ pip install -e .
 
 Release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
-## Quick Start Guide
+## Vision
 
-### Initializing a Vision Model
+Vision models, model metadata, preprocessing, postprocessing, datasets, evaluation, and Python API
+documentation are maintained in
+[mblt-vision-python](https://github.com/mobilint/mblt-vision-python). Install it
+and import from `mblt_vision` for new applications. `mblt_model_zoo.vision`
+remains available as a forwarding-only compatibility facade for existing code.
 
-Vision models are loaded through `MBLT_Engine`. This is the same loading style used in
-[`tests/vision`](tests/vision) and [`benchmark/vision`](benchmark/vision).
-
-```python
-from mblt_model_zoo.vision import MBLT_Engine
-
-# Load a built-in model config.
-# If model_path is empty, the MXQ file is downloaded from Hugging Face Hub and cached automatically.
-model = MBLT_Engine(
-    model_cls="resnet50",
-    model_type="DEFAULT",
-    model_path="",
-    core_mode="global8",
-)
-
-# Load a different recipe defined in the model YAML.
-model = MBLT_Engine(
-    model_cls="resnet50",
-    model_type="IMAGENET1K_V1",
-    model_path="",
-    core_mode="global8",
-)
-
-# Load from a local MXQ file instead of downloading from the Hub.
-model = MBLT_Engine(
-    model_cls="resnet50",
-    model_type="DEFAULT",
-    model_path="path/to/resnet50.mxq",
-    core_mode="global8",
-)
-
-# Run a vision model with ONNX instead of MXQ.
-# Local `.onnx` and `.mxq` paths auto-detect the framework from the suffix.
-# If model_path is empty, the matching ONNX file is downloaded from the
-# same Hugging Face repo and cached automatically.
-model = MBLT_Engine(
-    model_cls="alexnet",
-    model_type="IMAGENET1K_V1",
-    framework="onnx",
-    model_path="",
-)
-```
-
-`MBLT_Engine` accepts these main arguments:
-
-- `model_cls`: Model name or YAML config path.
-- `model_type`: Variant key defined in the model YAML. `DEFAULT` resolves to the default entry in that file.
-- `framework`: Inference backend. When omitted, the engine infers `.mxq` and `.onnx` from `model_path` or `file_cfg.model_path` and otherwise falls back to `mxq`. `onnx` is supported across the vision tasks, including depth and semantic segmentation.
-- `model_path`: Local MXQ or ONNX path. Use `""` to download and cache the published artifact automatically for the selected framework.
-- `mxq_path` and `onnx_path`: Backward-compatible explicit path aliases.
-- `onnx_providers`: Optional ONNX Runtime provider order. By default, the engine uses `CPUExecutionProvider`; pass this option to select another provider order explicitly.
-- `core_mode`: NPU execution mode. Supported values are `single`, `multi`, `global4`, and `global8`.
-
-Model files are also available on our [Hugging Face Hub](https://huggingface.co/mobilint).
-
-### Running Inference
-
-You can pass an image path, PIL image, numpy array, or torch tensor to the preprocess pipeline.
-
-```python
-from mblt_model_zoo.vision import MBLT_Engine
-
-model = MBLT_Engine(
-    model_cls="resnet50",
-    model_type="DEFAULT",
-    model_path="",
-    core_mode="global8",
-)
-
-image_path = "path/to/image.jpg"
-
-try:
-    input_img = model.preprocess(image_path)
-    output = model(input_img)
-    result = model.postprocess(output)
-
-    result.plot(
-        source_path=image_path,
-        save_path="path/to/save/result.jpg",
-        topk=5,
-    )
-finally:
-    model.dispose()
-```
-
-For ONNX vision models, the preprocess and postprocess flow stays the same:
-
-```python
-from mblt_model_zoo.vision import MBLT_Engine
-
-model = MBLT_Engine(
-    model_cls="caformer_b36",
-    framework="onnx",
-)
-
-try:
-    input_img = model.preprocess("path/to/image.jpg")
-    output = model(input_img)
-    result = model.postprocess(output)
-finally:
-    model.dispose()
-```
-
-For object detection models such as YOLO, postprocessing thresholds are initialized from the model
-YAML. You can either use those defaults directly:
-
-```python
-result = model.postprocess(output)
-```
-
-or override them once on the model before calling `postprocess()`:
-
-```python
-model.set_postprocess_thresholds(conf_thres=0.25)
-result = model.postprocess(output)
-```
-
-Available vision models are documented in [mblt_model_zoo/vision/README.md](mblt_model_zoo/vision/README.md).
-
-### Vision API Migration for 2.0.0
-
-`mblt_model_zoo.vision` supports both the legacy top-level model imports and the task subpackage
-imports. These imports are valid:
-
-```python
-from mblt_model_zoo.vision import ResNet50
-from mblt_model_zoo.vision import YOLO11m
-```
-
-```python
-from mblt_model_zoo.vision.image_classification import ResNet50
-from mblt_model_zoo.vision.object_detection import YOLO11m
-```
-
-For new code, `MBLT_Engine` remains the preferred loading API:
-
-```python
-from mblt_model_zoo.vision import MBLT_Engine
-
-model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT", model_path="", core_mode="global8")
-```
-
-The task subpackage imports remain available as compatibility wrappers around `MBLT_Engine`. You
-can also inspect supported tasks and model names programmatically with `mblt_model_zoo.vision.list_tasks()`
-and `mblt_model_zoo.vision.list_models()`.
-
-For legacy class-style constructors, the old `product` argument is still accepted in `2.0.0` so
-existing call sites do not fail immediately, but it is ignored by the YAML-backed model registry.
-If you previously relied on `product` to choose a non-default artifact, migrate that selection to
-explicit `model_cls`, `model_type`, or `model_path` values.
-
-## Model List
-
-We provide models quantized with our advanced quantization techniques. You can check whether a model is available in our [configuration directory](mblt_model_zoo/vision/models/).
+Model Zoo retains compatibility bridges for the Vision CLI and compilation.
+Vision benchmarks and dataset-management workflows are maintained in
+[mblt-vision-python](https://github.com/mobilint/mblt-vision-python/tree/main/benchmark).
 
 ## Optional Extras
 
@@ -204,8 +57,6 @@ Currently, these optional functions are only available on environment equipped w
 
 |Name|Use|Details|
 |-------|------|------|
-|onnxruntime|For running vision models with `framework="onnx"` on CPU|Install with `pip install mblt-model-zoo[onnxruntime]`|
-|onnxruntime-gpu|For running vision models with `framework="onnx"` with GPU-enabled ONNX Runtime|Install with `pip install mblt-model-zoo[onnxruntime-gpu]`|
 |transformers|For using Hugging Face Transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 |qbcompiler|For generating mxq files with custom setting|[README.md](compile/README.md)|
@@ -236,7 +87,7 @@ Transformers commands to the installed `transformers` package.
 The built-in command surface shown by `mblt-model-zoo -h` is:
 
 - `predict` — run classification, depth estimation, object or face detection, instance or semantic
-  segmentation, OBB, and pose inference; `classify`, `detect`, `pose`, and `segment` are aliases.
+  segmentation, OBB, and pose inference.
 - `val` — validate a vision model on its benchmark dataset.
 - `compile` — compile a configured vision ONNX model to MXQ.
 - `tps measure` and `tps sweep` — run Transformers token-per-second benchmarks.
@@ -252,8 +103,10 @@ Compile a configured vision ONNX model with the optional compiler dependency:
 mblt-model-zoo compile --model-cls alexnet
 ```
 
-The matching Python API is `mblt_model_zoo.compile.vision.compile_vision_model`. See the
-[vision compilation guide](compile/vision/README.md) for calibration datasets and options.
+The matching Python API is `mblt_model_zoo.compile.vision.compile_vision_model`. New
+applications should use `mblt_vision.compile.compile_vision_model`; see the
+[standalone Vision compilation guide](https://github.com/mobilint/mblt-vision-python/tree/main/compile/vision)
+for calibration datasets and options.
 Invoking this API or command is the only point where qbcompiler is imported.
 
 When paths are omitted, compilation stores downloaded ONNX models and compiled MXQ outputs under
@@ -493,4 +346,4 @@ Additionally, the license for each model provided in this package follows the te
 
 ## Support & Issues
 
-If you encounter any problems with this package, please feel free to contact [us](mailto:tech-support@mobilint.com).
+If you encounter any problems with this package, please feel free to contact [us](https://discuss.mobilint.com/).
