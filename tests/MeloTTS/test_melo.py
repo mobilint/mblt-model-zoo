@@ -55,8 +55,17 @@ def test_melo(pipe: TTS):
     )
 
 
-def test_tts_forwards_target_device_to_synthesizer_and_bert(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A public board override must reach every MeloTTS NPU model."""
+@pytest.mark.parametrize(
+    ("configured_target_device", "target_device", "expected_target_device"),
+    [("aries-rb", "regulus-rb", "regulus-rb"), ("regulus-rb", None, "regulus-rb")],
+)
+def test_tts_forwards_target_device_to_synthesizer_and_bert(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_target_device: str,
+    target_device: str | None,
+    expected_target_device: str,
+) -> None:
+    """Use an override first, otherwise retain the config's MeloTTS board."""
 
     class AttrDict(dict):
         __getattr__ = dict.__getitem__
@@ -68,6 +77,7 @@ def test_tts_forwards_target_device_to_synthesizer_and_bert(monkeypatch: pytest.
         encoder_mxq_path="encoder.mxq",
         decoder_mxq_path="decoder.mxq",
         bert_model_id="bert",
+        target_device=configured_target_device,
     )
     hps = SimpleNamespace(
         model=model_config,
@@ -107,7 +117,8 @@ def test_tts_forwards_target_device_to_synthesizer_and_bert(monkeypatch: pytest.
         lambda *args, **kwargs: bert_kwargs.update(kwargs) or FakeBert(),
     )
 
-    TTS(language="EN_NEWEST", device="cpu", target_device="regulus-rb")
+    tts_kwargs = {"target_device": target_device} if target_device is not None else {}
+    TTS(language="EN_NEWEST", device="cpu", **tts_kwargs)
 
-    assert synth_kwargs["target_device"] == "regulus-rb"
-    assert bert_kwargs["target_device"] == "regulus-rb"
+    assert synth_kwargs["target_device"] == expected_target_device
+    assert bert_kwargs["target_device"] == expected_target_device
