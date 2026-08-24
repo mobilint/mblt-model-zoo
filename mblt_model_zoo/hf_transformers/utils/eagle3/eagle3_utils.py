@@ -791,6 +791,18 @@ class MobilintEagle3DraftModelMixin:
             if prev_end > prev_start:
                 buf[:, :, :prev_tgt, prev_start:prev_end].zero_()
 
+        # Bool masks are validated up front (before any buffer mutation): a bool
+        # mask with any ``False`` entry is a caller error and raises immediately,
+        # leaving the reusable buffer state unchanged so a caller that catches
+        # the ``ValueError`` cannot see stale ``finfo.min`` entries on a later
+        # call. Non-bool masks add through the slow ``expand_mask`` path below.
+        if attention_mask is not None and attention_mask.dtype == torch.bool and not attention_mask.all():
+            raise ValueError(
+                "draft _prepare_decoder_attention_mask fast path requires an all-True bool "
+                "attention_mask; got a bool mask with False entries. Pass an fp32 mask "
+                "instead if partial masking is needed."
+            )
+
         # Build the current tree region in place. ``target_length == 1``
         # (single-token step) needs no causal fill because the only tree
         # column is already zero.
@@ -802,23 +814,11 @@ class MobilintEagle3DraftModelMixin:
 
         combined_attention_mask = buf[:, :, :target_length, :kv_length]
 
-        # Bool masks are asserted to be all-True (the invariant that the internal
-        # default in ``forward`` produces); a bool mask with any ``False`` entry
-        # is a caller error and raises immediately, because the buffer-reuse
-        # fast path would otherwise silently ignore the masked positions.
-        # Non-bool masks go through the slow ``expand_mask`` + add path.
-        if attention_mask is not None:
-            if attention_mask.dtype != torch.bool:
-                expanded_attn_mask = expand_mask(
-                    attention_mask, torch.float32, tgt_len=target_length
-                ).to(hidden_states.device)
-                combined_attention_mask = combined_attention_mask + expanded_attn_mask
-            elif not attention_mask.all():
-                raise ValueError(
-                    "draft _prepare_decoder_attention_mask fast path requires an all-True bool "
-                    "attention_mask; got a bool mask with False entries. Pass an fp32 mask "
-                    "instead if partial masking is needed."
-                )
+        if attention_mask is not None and attention_mask.dtype != torch.bool:
+            expanded_attn_mask = expand_mask(
+                attention_mask, torch.float32, tgt_len=target_length
+            ).to(hidden_states.device)
+            combined_attention_mask = combined_attention_mask + expanded_attn_mask
 
         # Record the union of non-zero writes so the next call can restore it
         # to zero. The causal fill spans ``[past_key_values_length, kv_length]``
