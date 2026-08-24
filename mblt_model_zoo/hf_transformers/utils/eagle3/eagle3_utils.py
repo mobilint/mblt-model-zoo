@@ -767,9 +767,14 @@ class MobilintEagle3DraftModelMixin:
             or buf.device != hidden_states.device
         )
         if need_alloc:
+            # Buffer grows geometrically (doubling both ``new_tgt`` and ``new_kv`` on
+            # each reallocation) so long-context decode does not re-hit ``need_alloc``
+            # on nearly every iteration once ``kv_length`` exceeds the current buffer
+            # capacity. The ``_draft_mask_upper_bool`` template is rebuilt at the new
+            # ``new_tgt`` size.
             new_batch = max(batch_size, buf.size(0) if buf is not None else 1)
-            new_tgt = max(target_length, buf.size(-2) if buf is not None else 0, 16)
-            new_kv = max(kv_length, buf.size(-1) if buf is not None else 0, 128)
+            new_tgt = max(target_length, buf.size(-2) * 2 if buf is not None else 0, 16)
+            new_kv = max(kv_length, buf.size(-1) * 2 if buf is not None else 0, 128)
             self._draft_mask_buf = torch.zeros(
                 (new_batch, 1, new_tgt, new_kv),
                 dtype=torch.float32,
