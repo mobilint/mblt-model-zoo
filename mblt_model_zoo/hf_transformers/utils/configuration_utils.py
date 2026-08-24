@@ -17,6 +17,56 @@ except ImportError:
 
 from ...utils.npu_backend import MobilintNPUBackend
 
+# Re-export the migration helpers so external callers (tests, downstream
+# integrations) can still import them from this module. The canonical
+# implementations now live alongside :class:`NPUTargetSpec`.
+from ...utils.npu_target import (
+    _DEFAULT_DEV_NO,
+    NPUTargetSpec,
+    _migrate_target_clusters,
+    _migrate_target_cores,
+)
+
+__all__ = [
+    "MobilintConfigMixin",
+    "MobilintEncoderDecoderConfigMixin",
+    "MobilintVisionTextConfigMixin",
+    "MobilintEagle3ConfigMixin",
+    "NPUTargetSpec",
+    "_normalize_npu_target_kwargs",
+    "_migrate_target_cores",
+    "_migrate_target_clusters",
+]
+
+
+def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> None:
+    """Normalize NPU target fields inside ``kwargs`` in place.
+
+    Thin wrapper over :meth:`NPUTargetSpec.from_kwargs`: rewrites
+    ``{prefix}target_cores`` and ``{prefix}target_clusters`` to canonical
+    fully-qualified representations, expands ``{prefix}dev_no`` sugar when
+    both target lists are absent, unifies grain to the field appropriate for
+    ``{prefix}core_mode``, and validates global8 coverage / device-set
+    consistency. Delegated to :class:`NPUTargetSpec` so the same
+    normalization logic runs from every entry point (config load, backend
+    ctor, per-field setter).
+
+    Args:
+        kwargs: The keyword-argument dict handed to a config mixin's
+            ``__init__`` or ``__post_init__``. Mutated in place: the target
+            fields are replaced with canonical values and off-mode grain is
+            popped.
+        prefix: Optional prefix that scopes the NPU keys (e.g. ``"encoder_"``,
+            ``"vision_"``, ``"base_"``). Empty for the default backend.
+
+    Raises:
+        ValueError: For any inconsistency the spec calls out — mixed legacy
+            and new items, list-shaped ``dev_no`` combined with legacy items,
+            device-set mismatch, or incomplete global8 coverage.
+        TypeError: When a target entry has an unsupported type.
+    """
+    NPUTargetSpec.from_kwargs(kwargs, prefix=prefix)
+
 
 def _serialized_target_cores(backend: MobilintNPUBackend) -> list[str]:
     """Return JSON-safe core assignments for a Transformers configuration."""
@@ -31,9 +81,14 @@ def _serialized_target_clusters(backend: MobilintNPUBackend) -> list[int]:
 
 
 class MobilintConfigMixin(PretrainedConfig):
+    # ``dev_no`` is exposed as syntactic sugar for the device-prefix component
+    # of the canonical target strings. It accepts either a single device index
+    # or a list of indices; downstream normalization expands it into
+    # ``target_cores`` / ``target_clusters`` when the caller does not specify
+    # targets directly.
     _NPU_SIGNATURE_FIELDS = (
         ("mxq_path", "", str),
-        ("dev_no", 0, int),
+        ("dev_no", _DEFAULT_DEV_NO, Union[int, list[int]]),
         ("max_batch_size", 1, int),
         ("core_mode", "single", str),
         ("target_device", "aries-rb", str),
@@ -68,6 +123,7 @@ class MobilintConfigMixin(PretrainedConfig):
 
     def _ensure_npu_backend(self, kwargs: dict[str, Any]) -> None:
         if not hasattr(self, "npu_backend"):
+            _normalize_npu_target_kwargs(kwargs, prefix="")
             self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
 
     def __init__(self, *args, **kwargs):
@@ -169,9 +225,11 @@ class MobilintConfigMixin(PretrainedConfig):
 class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     def _ensure_encoder_decoder_npu_backends(self, kwargs: dict[str, Any]) -> None:
         if not hasattr(self, "encoder_npu_backend"):
+            _normalize_npu_target_kwargs(kwargs, prefix="encoder_")
             self.encoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="encoder_")
 
         if not hasattr(self, "decoder_npu_backend"):
+            _normalize_npu_target_kwargs(kwargs, prefix="decoder_")
             self.decoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="decoder_")
 
     def __init__(self, **kwargs):
@@ -337,7 +395,18 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
                 vision_kwargs[field] = kwargs.pop(vision_key)
         return text_kwargs, vision_kwargs
 
-    def _apply_sub_backend_kwargs(self, text_kwargs: dict[str, Any], vision_kwargs: dict[str, Any]) -> None:
+    def _apply_sub_backend_kwargs(
+        self, text_kwargs: dict[str, Any], vision_kwargs: dict[str, Any]
+    ) -> None:
+        # Overrides come from two paths: the JSON-load helper that unpacks
+        # top-level ``text_*`` / ``vision_*`` keys, and HF's ``from_pretrained``
+        # model-kwargs application. Both routes reach here as unprefixed keys
+        # (``dev_no`` etc.) that we route through the sub-config's own
+        # setters. Each setter records its raw override on the sub-config
+        # backend's :class:`NPUTargetSpecPending` accumulator without
+        # normalizing between fields; the canonical spec is materialized once
+        # on the next :attr:`MobilintNPUBackend._spec` read, so setter order
+        # inside this loop is irrelevant.
         text_config = getattr(self, "text_config", None)
         if text_config is not None:
             for key, value in text_kwargs.items():
@@ -557,14 +626,17 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
             return backend_kwargs
 
         if not hasattr(self, "base_npu_backend"):
-            self.base_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("base_"), prefix="base_")
+            base_kwargs = _resolve_backend_kwargs("base_")
+            _normalize_npu_target_kwargs(base_kwargs, prefix="base_")
+            self.base_npu_backend = MobilintNPUBackend.from_dict(base_kwargs, prefix="base_")
         if not hasattr(self, "draft_npu_backend"):
-            self.draft_npu_backend = MobilintNPUBackend.from_dict(
-                _resolve_backend_kwargs("draft_"),
-                prefix="draft_",
-            )
+            draft_kwargs = _resolve_backend_kwargs("draft_")
+            _normalize_npu_target_kwargs(draft_kwargs, prefix="draft_")
+            self.draft_npu_backend = MobilintNPUBackend.from_dict(draft_kwargs, prefix="draft_")
         if not hasattr(self, "fc_npu_backend"):
-            self.fc_npu_backend = MobilintNPUBackend.from_dict(_resolve_backend_kwargs("fc_"), prefix="fc_")
+            fc_kwargs = _resolve_backend_kwargs("fc_")
+            _normalize_npu_target_kwargs(fc_kwargs, prefix="fc_")
+            self.fc_npu_backend = MobilintNPUBackend.from_dict(fc_kwargs, prefix="fc_")
 
     def _ensure_eagle3_runtime_fields(self, kwargs: dict[str, Any]) -> None:
         for field_name, default_value, _annotation in self._EAGLE3_RUNTIME_FIELDS:

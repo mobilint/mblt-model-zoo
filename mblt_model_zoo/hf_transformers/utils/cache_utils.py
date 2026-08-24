@@ -3,11 +3,26 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Type, Union
 
 import qbruntime
 import torch
-from transformers.cache_utils import Cache, CacheLayerMixin
+from transformers.cache_utils import Cache
+
+try:
+    from transformers.cache_utils import CacheLayerMixin
+except ImportError:
+    # transformers < 4.54 compat shim: CacheLayerMixin was introduced in transformers 4.54.0.
+    # This stub only satisfies subclassing at class-definition time so this module can import
+    # cleanly for GPU-only workflows (e.g. running text-generation benchmarks on transformers
+    # 4.53.x, which is required by some third-party custom modeling code such as EXAONE-3.5).
+    # Any actual MobilintCache/MobilintLayer runtime path relies on the real CacheLayerMixin
+    # contract and requires transformers>=4.54; instantiating those on the stub will fail
+    # downstream. That is intentional — the stub must not silently masquerade as the real class.
+    class CacheLayerMixin:  # type: ignore[no-redef]
+        """Compat stub for transformers<4.54; MobilintCache paths require the real class."""
+
+        pass
 
 
 def is_whisper_beam_debug_trace_enabled() -> bool:
@@ -122,25 +137,121 @@ class MobilintLayer(CacheLayerMixin):
 
 
 class MobilintCache(Cache):
-    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1):
-        """Create a cache with fresh logical cursors for the shared runtime model.
+    def __init__(
+        self,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
+        per_model_batch: int = 1,
+        *,
+        batch_size: Optional[int] = None,
+    ):
+        """Create a cache with fresh logical cursors across one or more runtime models.
+
+        The cache dualizes KV state along ``(model_idx, cache_id)``: it holds
+        ``N = len(mxq_models)`` Model handles with ``K = per_model_batch``
+        cache slots each, laid out as flat rows so external callers can keep
+        the historical row-index API. Row ``i`` maps to
+        ``(i // K, i % K)``; helpers :meth:`slot_of`, :meth:`model_of`, and
+        :meth:`group_by_model` expose that routing without leaking the slot
+        concept into upstream dispatch.
 
         qbruntime selects the readable KV prefix from the ``cache_size`` passed
-        to inference; it does not expose the old ``reset_cache_memory`` API.
-        Fresh layers therefore start at sequence length zero, causing the next
-        inference to overwrite cache entries from the beginning rather than
-        making a previous request's KV prefix addressable.
+        to inference; fresh layers therefore start at sequence length zero,
+        causing the next inference to overwrite cache entries from the
+        beginning rather than making a previous request's KV prefix
+        addressable.
+
+        Args:
+            mxq_models: One :class:`qbruntime.Model` or a list of them. A
+                single Model is promoted to a length-1 list for backward
+                compatibility.
+            per_model_batch: Cache slots per Model (``K``). Total rows =
+                ``N * K``.
+            batch_size: Legacy keyword-only alias for ``per_model_batch``.
+                Only accepted when the cache hosts a single Model (``N = 1``)
+                so that ``MobilintCache(model, batch_size=K)`` keeps working;
+                rejected with a multi-Model list because the legacy alias
+                would silently double the total capacity and pin the first
+                ``K`` rows entirely to slot 0.
+
+        Raises:
+            TypeError: If both ``per_model_batch`` and legacy ``batch_size``
+                are provided, or if the legacy ``batch_size`` is combined
+                with a multi-Model list.
+            ValueError: If ``mxq_models`` is an empty list.
         """
-        self.mxq_model = mxq_model
-        self.batch_size = max(1, batch_size)
+        if isinstance(mxq_models, list):
+            models_list: List[qbruntime.Model] = list(mxq_models)
+        else:
+            models_list = [mxq_models]
+
+        if not models_list:
+            raise ValueError("mxq_models must contain at least one Model")
+
+        if batch_size is not None:
+            if per_model_batch != 1:
+                raise TypeError(
+                    "Pass either per_model_batch or the legacy batch_size, not both"
+                )
+            if len(models_list) > 1:
+                raise TypeError(
+                    "MobilintCache legacy batch_size= is a single-Model (N=1) shim; "
+                    f"pass per_model_batch=K instead (got N={len(models_list)} Models). "
+                    "The legacy alias would misroute rows across slots and defeat "
+                    "multi-slot dispatch."
+                )
+            per_model_batch = int(batch_size)
+
+        self.mxq_models: List[qbruntime.Model] = models_list
+        self.k_per_model: int = max(1, int(per_model_batch))
+        self.n_models: int = len(self.mxq_models)
+        self.batch_size: int = self.n_models * self.k_per_model
 
         self.layers: list[MobilintLayer] = [
-            MobilintLayer(self.mxq_model, cache_id) for cache_id in range(self.batch_size)
+            MobilintLayer(self.mxq_models[model_idx], cache_id)
+            for model_idx in range(self.n_models)
+            for cache_id in range(self.k_per_model)
         ]
         self.layer_classes = MobilintLayer
 
         self.num_hidden_layers = 1
         self.cache_processor = None
+
+    @property
+    def mxq_model(self) -> Optional[qbruntime.Model]:
+        """First Model handle for callers written against the pre-multi-Model API."""
+        return self.mxq_models[0] if self.mxq_models else None
+
+    def slot_of(self, row: int) -> Tuple[int, int]:
+        """Return ``(model_idx, local_cache_id)`` for a flat row index."""
+        row = int(row)
+        if row < 0 or row >= len(self.layers):
+            raise IndexError(
+                f"row {row} out of range for cache with {len(self.layers)} rows "
+                f"(N={self.n_models}, K={self.k_per_model})"
+            )
+        return divmod(row, self.k_per_model)
+
+    def model_of(self, row: int) -> qbruntime.Model:
+        """Return the :class:`qbruntime.Model` that owns the KV state for ``row``."""
+        model_idx, _ = self.slot_of(row)
+        return self.mxq_models[model_idx]
+
+    def group_by_model(self, rows: Iterable[int]) -> Dict[int, List[Tuple[int, int]]]:
+        """Group flat rows by owning Model.
+
+        Args:
+            rows: Iterable of flat row indices.
+
+        Returns:
+            Mapping ``model_idx -> [(row, local_cache_id), ...]`` in the input
+            order, so upstream dispatch can issue one blocking
+            :meth:`qbruntime.Model.infer` per Model without inspecting slots.
+        """
+        grouped: Dict[int, List[Tuple[int, int]]] = {}
+        for row in rows:
+            model_idx, local_cache_id = self.slot_of(int(row))
+            grouped.setdefault(model_idx, []).append((int(row), local_cache_id))
+        return grouped
 
     def get_seq_length(self, index: int = 0) -> int:
         return self.layers[index].get_seq_length()
@@ -202,19 +313,190 @@ class MobilintCache(Cache):
             layer.reset()
 
     def ensure_batch_size(self, batch_size: int) -> None:
-        """Grow logical cache entries so batched generation can track each active row."""
+        """Grow logical cache entries so batched generation can track each active row.
+
+        Growth beyond ``N * K`` is only supported on the legacy single-Model
+        hardware-batch path (``N == 1``); multi-Model caches must be sized
+        upfront because slot count is fixed by the backend.
+        """
         batch_size = max(1, int(batch_size))
         if batch_size <= self.batch_size:
             return
+        if self.n_models != 1:
+            raise ValueError(
+                f"cannot grow multi-Model cache beyond {self.batch_size} rows "
+                f"(N={self.n_models}, K={self.k_per_model}); allocate a larger cache upfront"
+            )
+        only_model = self.mxq_models[0]
         for cache_id in range(self.batch_size, batch_size):
-            self.layers.append(MobilintLayer(self.mxq_model, cache_id))
+            self.layers.append(MobilintLayer(only_model, cache_id))
         self.batch_size = batch_size
+        self.k_per_model = batch_size
 
     def copy(self):
-        copied = MobilintCache(self.mxq_model, batch_size=self.batch_size)
-        for i in range(self.batch_size):
+        copied = MobilintCache(list(self.mxq_models), per_model_batch=self.k_per_model)
+        if len(copied.layers) < self.batch_size:
+            copied.ensure_batch_size(self.batch_size)
+        for i in range(len(self.layers)):
             copied.layers[i] = self.layers[i].copy()
         return copied
+
+
+def _resolve_language_model_candidate(model: Any) -> Optional[Any]:
+    """Return the nested language model commonly used by VLM wrappers."""
+    nested_model = getattr(model, "model", None)
+    if nested_model is not None:
+        language_model = getattr(nested_model, "language_model", None)
+        if language_model is not None:
+            return language_model
+    return getattr(model, "language_model", None)
+
+
+def _call_maybe_getter(obj: Any, name: str) -> Optional[Any]:
+    """Return an attribute value, calling it when it is a zero-argument getter."""
+    candidate = getattr(obj, name, None)
+    if candidate is None:
+        return None
+    if callable(candidate):
+        try:
+            return candidate()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return None
+    return candidate
+
+
+def resolve_multi_slot_backend(model: Any) -> Optional[Any]:
+    """Return the Mobilint NPU backend that hosts one or more Model slots for ``model``.
+
+    Walks ``model`` and its nested language model (the two shapes current VLM
+    wrappers use — ``model.language_model`` and ``model.model.language_model``)
+    looking for an ``npu_backend`` that exposes a non-empty ``mxq_models``
+    list. Returns ``None`` for models that do not expose a Mobilint backend
+    (e.g. unit-test stubs that only carry a bare ``get_cache_mxq_model``).
+    """
+    for candidate in (model, _resolve_language_model_candidate(model)):
+        if candidate is None:
+            continue
+        backend = getattr(candidate, "npu_backend", None)
+        if backend is None:
+            continue
+        if getattr(backend, "mxq_models", None):
+            return backend
+    return None
+
+
+def resolve_cache_mxq_model(model: Any) -> Optional[qbruntime.Model]:
+    """Return the single ``qbruntime.Model`` used by the legacy cache path.
+
+    Falls back through ``get_cache_mxq_model``, then ``get_mxq_model`` on both
+    ``model`` and its nested language model, so wrappers that override
+    ``get_cache_mxq_model`` to delegate into ``language_model`` continue to work.
+    """
+    for candidate in (model, _resolve_language_model_candidate(model)):
+        if candidate is None:
+            continue
+        for getter_name in ("get_cache_mxq_model", "get_mxq_model"):
+            mxq_model = _call_maybe_getter(candidate, getter_name)
+            if mxq_model is not None:
+                return mxq_model
+    return None
+
+
+def build_mobilint_cache_from_model(
+    model: Any,
+    batch_size: int,
+    *,
+    cache_cls: Type[MobilintCache] = MobilintCache,
+    **cache_kwargs: Any,
+) -> MobilintCache:
+    """Build a Mobilint cache routed across every ``qbruntime.Model`` slot the backend hosts.
+
+    Uses the multi-slot ``cache_cls(mxq_models, per_model_batch=K)`` signature
+    when the model exposes a multi-slot :class:`MobilintNPUBackend`, so
+    :meth:`MobilintCache.slot_of` routes each flat row to its owning Model.
+    Falls back to ``cache_cls(mxq_model, batch_size=batch_size)`` when the
+    backend cannot be resolved (unit-test stubs and single-Model wrappers
+    without a discoverable backend).
+
+    On the resolved-backend path the cache is sized upfront to the backend's
+    aggregate ``N * K`` capacity and a caller ``batch_size`` that exceeds that
+    capacity is rejected with :class:`ValueError`; growing the cache after
+    construction via :meth:`MobilintCache.ensure_batch_size` would silently
+    misroute rows to slots that do not exist because no additional
+    :class:`qbruntime.Model` is launched. The backend-less legacy path still
+    passes ``batch_size`` through to ``cache_cls`` so ``ensure_batch_size``
+    growth remains available for single-Model hardware-batch callers.
+    """
+    backend = resolve_multi_slot_backend(model)
+    if backend is None:
+        # Backend-less legacy path: allow ensure_batch_size growth via
+        # ``cache_cls``'s single-Model constructor. This is the only caller
+        # that may grow past ``cache.batch_size`` after construction.
+        mxq_model = resolve_cache_mxq_model(model)
+        if mxq_model is None:
+            raise RuntimeError(
+                "Cannot build MobilintCache: no Mobilint NPU backend or "
+                "get_cache_mxq_model resolver on this model."
+            )
+        return cache_cls(mxq_model, batch_size=batch_size, **cache_kwargs)
+
+    # Multi-slot resolved-backend path: size is fixed by (N, K) at build.
+    # ``ensure_batch_size`` cannot grow the cache here because the backend
+    # launched exactly N Model slots; a larger request must lower
+    # ``max_batch_size`` (spread across more devices) or recompile with a
+    # larger compiled batch axis K.
+    mxq_models = list(getattr(backend, "mxq_models", []) or [])
+    if not mxq_models:
+        raise RuntimeError("Mobilint NPU backend has no loaded Model slots.")
+    k_per_model = int(getattr(backend, "k_per_model", 1) or 1)
+    capacity = len(mxq_models) * max(1, k_per_model)
+    if batch_size > capacity:
+        raise ValueError(
+            f"Requested batch_size={batch_size} exceeds Mobilint NPU backend "
+            f"capacity N*K = {len(mxq_models)}*{k_per_model} = {capacity}. "
+            "Recompile the MXQ with a larger compiled batch axis K, or raise "
+            "the backend's max_batch_size at construction time so it launches "
+            "more Model slots."
+        )
+    return cache_cls(mxq_models, per_model_batch=k_per_model, **cache_kwargs)
+
+
+def cache_matches_backend_topology(cache: Any, model: Any) -> bool:
+    """Return True when ``cache`` was built for ``model``'s current backend topology.
+
+    Cache reuse across a dispose+recreate cycle must invalidate on any change to
+    ``(mxq_models, k_per_model)`` because :meth:`MobilintCache.slot_of` and
+    :meth:`MobilintCache.model_of` bake that routing in at construction time. Two
+    backends with the same aggregate row capacity (e.g. ``N=2, K=2`` vs
+    ``N=4, K=1``) hand out incompatible ``(model_idx, cache_id)`` pairs, so a
+    reuse guard that only checks ``batch_size`` would silently misroute rows.
+
+    Legacy single-Model fallback (no discoverable multi-slot backend): the cache
+    was built via ``cache_cls(mxq_model, batch_size=B)`` and may have grown via
+    :meth:`MobilintCache.ensure_batch_size`, so only the Model handle identity
+    is compared and ``k_per_model`` growth is left to the caller's capacity check.
+    """
+    if not isinstance(cache, MobilintCache):
+        return False
+
+    backend = resolve_multi_slot_backend(model)
+    if backend is not None:
+        backend_mxq_models = list(getattr(backend, "mxq_models", []) or [])
+        backend_k_per_model = int(getattr(backend, "k_per_model", 1) or 1)
+        if cache.k_per_model != backend_k_per_model:
+            return False
+    else:
+        fallback_mxq_model = resolve_cache_mxq_model(model)
+        if fallback_mxq_model is None:
+            return False
+        backend_mxq_models = [fallback_mxq_model]
+
+    if len(cache.mxq_models) != len(backend_mxq_models):
+        return False
+    for cached_model, backend_model in zip(cache.mxq_models, backend_mxq_models):
+        if cached_model is not backend_model:
+            return False
+    return True
 
 
 class MobilintBeamCache(MobilintCache):
@@ -225,10 +507,40 @@ class MobilintBeamCache(MobilintCache):
     qbruntime cache. Callers can compare a target beam history with the active
     history, skip the common prefix, and forward only the suffix with the proper
     cache position.
+
+    The beam-cache dispatch path is ``N == 1`` only: it issues one blocking
+    ``mxq_model.infer`` on the single tracked slot with no cross-slot routing or
+    beam-cache reorder. The ``mxq_models`` argument alone cannot detect the
+    owning-backend topology when a caller passes ``get_cache_mxq_model()`` (which
+    returns slot 0 as a single :class:`qbruntime.Model`) even though the backend
+    launched ``N > 1`` slots. Callers that own a Mobilint NPU backend should pass
+    ``n_slots=backend.dispatcher.n_slots`` (or equivalent) so the invariant is
+    enforced at construction time rather than deep in generation. When
+    ``n_slots`` is not supplied, only the existing multi-Model list guard runs
+    to preserve backward compatibility for unit-test stubs.
     """
 
-    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
-        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+    def __init__(
+        self,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
+        batch_size: int = 1,
+        *,
+        n_slots: Optional[int] = None,
+    ) -> None:
+        if isinstance(mxq_models, list) and len(mxq_models) > 1:
+            raise NotImplementedError(
+                "MobilintBeamCache does not support multi-Model dispatch (N > 1); "
+                "beam search keeps N=1 (encoder-decoder) — use MobilintCache for N > 1"
+            )
+        if n_slots is not None and int(n_slots) > 1:
+            raise NotImplementedError(
+                "MobilintBeamCache does not support multi-slot dispatch "
+                f"(owning backend launched N={int(n_slots)} slots); beam search "
+                "keeps N=1. Cap the owning backend's max_batch_size at K so it "
+                "keeps a single slot, or compile a batched (K>1) MXQ so slot-0 "
+                "hardware batching serves the load — use MobilintCache for N > 1."
+            )
+        super().__init__(mxq_models=mxq_models, batch_size=batch_size)
         self._beam_token_histories: list[list[int]] = [[] for _ in range(self.batch_size)]
         self._beam_source_indices: list[int | None] = [None for _ in range(self.batch_size)]
         self._active_token_history: list[int] = []
@@ -243,6 +555,31 @@ class MobilintBeamCache(MobilintCache):
         self._active_token_history = []
         self._active_source_index = None
         self._beam_seq_lengths = [0 for _ in range(self.batch_size)]
+
+    def matches_live_topology(
+        self,
+        expected_mxq_model: qbruntime.Model,
+        n_slots: Optional[int] = None,
+    ) -> bool:
+        """Return True when this cache can be reused for the current backend topology.
+
+        The beam-cache contract is ``N == 1``: one active qbruntime cache and one
+        Model handle. Callers reuse an existing beam cache via :meth:`reset`, but
+        the constructor-time guard does not re-run on that path. This helper
+        performs the same invariant check so ``_get_cache`` implementations can
+        rebuild rather than reset when either (a) the owning backend now hosts
+        more than one slot (breaking the ``N == 1`` contract) or (b) the stored
+        Model handle no longer matches the current slot 0 (the backend was
+        disposed and re-created with a fresh Model).
+        """
+        if n_slots is not None and int(n_slots) > 1:
+            return False
+        cached_models = getattr(self, "mxq_models", None)
+        if not cached_models:
+            return False
+        if len(cached_models) != 1:
+            return False
+        return cached_models[0] is expected_mxq_model
 
     def ensure_batch_size(self, batch_size: int) -> None:
         """Grow logical beam token storage for beam-expanded generation."""
@@ -415,8 +752,10 @@ class MobilintBeamCache(MobilintCache):
 
     def copy(self) -> "MobilintBeamCache":
         """Return a copy preserving application-level beam token histories."""
-        copied = self.__class__(self.mxq_model, batch_size=self.batch_size)
-        for i in range(self.batch_size):
+        copied = self.__class__(list(self.mxq_models), batch_size=self.k_per_model)
+        if len(copied.layers) < self.batch_size:
+            copied.ensure_batch_size(self.batch_size)
+        for i in range(len(self.layers)):
             copied.layers[i] = self.layers[i].copy()
         copied._beam_token_histories = [list(tokens) for tokens in self._beam_token_histories]
         copied._beam_source_indices = list(self._beam_source_indices)
@@ -429,8 +768,14 @@ class MobilintBeamCache(MobilintCache):
 class MobilintWhisperCache(MobilintBeamCache):
     """Whisper cache using token-history beam replay."""
 
-    def __init__(self, mxq_model: qbruntime.Model, batch_size: int = 1) -> None:
-        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+    def __init__(
+        self,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
+        batch_size: int = 1,
+        *,
+        n_slots: Optional[int] = None,
+    ) -> None:
+        super().__init__(mxq_models=mxq_models, batch_size=batch_size, n_slots=n_slots)
         self._encoder_source_count: int | None = None
 
     def reset(self) -> None:
@@ -464,16 +809,26 @@ class MobilintDeepStackCache(MobilintCache):
     This cache keeps the KV sequence length in ``MobilintCache`` while providing the matching
     deepstack chunk for each decoder invocation. Fake prefill stores only the requested sequence
     length and lazily serves zero deepstack chunks for synthetic decode TPS measurements.
+
+    The constructor mirrors :class:`MobilintCache`'s dual signature so a multi-slot backend can
+    build the deepstack cache through :func:`build_mobilint_cache_from_model` with
+    ``per_model_batch=K`` while the legacy single-Model path keeps its ``batch_size=B`` keyword.
     """
 
     def __init__(
         self,
-        mxq_model: qbruntime.Model,
-        batch_size: int = 1,
+        mxq_models: Union[List[qbruntime.Model], qbruntime.Model],
+        per_model_batch: int = 1,
+        *,
         num_deepstack_layers: int = 0,
         hidden_size: int = 0,
+        batch_size: Optional[int] = None,
     ) -> None:
-        super().__init__(mxq_model=mxq_model, batch_size=batch_size)
+        super().__init__(
+            mxq_models=mxq_models,
+            per_model_batch=per_model_batch,
+            batch_size=batch_size,
+        )
         if num_deepstack_layers < 0:
             raise ValueError(f"num_deepstack_layers must be non-negative, got {num_deepstack_layers}")
         if hidden_size < 0:
@@ -550,12 +905,14 @@ class MobilintDeepStackCache(MobilintCache):
     def copy(self) -> "MobilintDeepStackCache":
         """Return a copy preserving KV state and the current deepstack tensor."""
         copied = MobilintDeepStackCache(
-            self.mxq_model,
-            batch_size=self.batch_size,
+            list(self.mxq_models),
+            per_model_batch=self.k_per_model,
             num_deepstack_layers=self.num_deepstack_layers,
             hidden_size=self.hidden_size,
         )
-        for i in range(self.batch_size):
+        if len(copied.layers) < self.batch_size:
+            copied.ensure_batch_size(self.batch_size)
+        for i in range(len(self.layers)):
             copied.layers[i] = self.layers[i].copy()
         copied._deepstack_tensor = None if self._deepstack_tensor is None else self._deepstack_tensor.clone()
         return copied

@@ -26,7 +26,6 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  
     MobilintQwen3VLTextModel,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fake MXQ backends for the dual-input Qwen3-VL text decoder
 #
@@ -90,6 +89,9 @@ class _DynamicAxisMxq:
 class _FakeBackend:
     def __init__(self, mxq_model):
         self.mxq_model = mxq_model
+        # ``_llm_forward_batch`` reads ``mxq_models`` directly; a single-Model
+        # fake keeps the single-group fast path exercised.
+        self.mxq_models = [mxq_model]
 
 
 class _BareQwen3VLTextModel(MobilintQwen3VLTextModel):
@@ -135,9 +137,7 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         npu_prefill_chunk_size: Optional[int] = None,
     ):
         model = _BareQwen3VLTextModel(mxq, hidden_size=hidden_size)
-        inputs_embeds = torch.arange(seq_len * hidden_size, dtype=torch.float32).reshape(
-            1, seq_len, hidden_size
-        )
+        inputs_embeds = torch.arange(seq_len * hidden_size, dtype=torch.float32).reshape(1, seq_len, hidden_size)
         cache_position = torch.arange(seq_len)
         logits = model.llm_forward(
             inputs_embeds=inputs_embeds,
@@ -174,9 +174,7 @@ class TestQwen3VLTextDecoderLogitsToKeep:
         for chunk_len in (3, 3):
             base = running_cache_size * mxq.vocab_size
             expected_chunks.append(
-                (np.arange(chunk_len * mxq.vocab_size, dtype=np.float32) + base).reshape(
-                    1, chunk_len, mxq.vocab_size
-                )
+                (np.arange(chunk_len * mxq.vocab_size, dtype=np.float32) + base).reshape(1, chunk_len, mxq.vocab_size)
             )
             running_cache_size += chunk_len
         expected = np.concatenate(expected_chunks, axis=1)
@@ -190,17 +188,13 @@ class TestQwen3VLTextDecoderLogitsToKeep:
     def test_dynamic_axis_tensor_indices_pick_out_positions(self) -> None:
         mxq = _DynamicAxisMxq(vocab_size=5)
         indices = torch.tensor([0, 3])
-        _model, logits = self._run(
-            mxq, seq_len=6, logits_to_keep=indices, npu_prefill_chunk_size=3
-        )
+        _model, logits = self._run(mxq, seq_len=6, logits_to_keep=indices, npu_prefill_chunk_size=3)
         assert logits.shape == (1, 2, mxq.vocab_size)
 
     def test_fallback_interleaves_size_one_infer_for_kept_positions(self) -> None:
         mxq = _StaticLastOnlyMxq(vocab_size=5)
         indices = torch.tensor([2, 5])
-        _model, logits = self._run(
-            mxq, seq_len=6, logits_to_keep=indices, npu_prefill_chunk_size=4
-        )
+        _model, logits = self._run(mxq, seq_len=6, logits_to_keep=indices, npu_prefill_chunk_size=4)
 
         chunk_seqs = [c["inputs_shape"][1] for c in mxq.calls]
         # Prefix stride is clamped to the next kept position (like the shared core).
@@ -290,25 +284,21 @@ class _RecordingModel:
 
     def __call__(self, **kwargs):
         self.received = kwargs
-        last_hidden_state = torch.arange(
-            self.kept_len * self.vocab_size, dtype=torch.float32
-        ).reshape(1, self.kept_len, self.vocab_size)
+        last_hidden_state = torch.arange(self.kept_len * self.vocab_size, dtype=torch.float32).reshape(
+            1, self.kept_len, self.vocab_size
+        )
         return _ModelOutput(last_hidden_state)
 
 
 class TestQwen3VLForConditionalGenerationForward:
     def _make_wrapper(self, kept_len: int = 3, vocab_size: int = 5, hidden_size: int = 4):
-        wrapper = MobilintQwen3VLForConditionalGeneration.__new__(
-            MobilintQwen3VLForConditionalGeneration
-        )
+        wrapper = MobilintQwen3VLForConditionalGeneration.__new__(MobilintQwen3VLForConditionalGeneration)
         torch.nn.Module.__init__(wrapper)
         wrapper.config = SimpleNamespace(
             text_config=SimpleNamespace(vocab_size=vocab_size),
             return_dict=True,
         )
-        wrapper.model = _RecordingModel(
-            vocab_size=vocab_size, kept_len=kept_len, hidden_size=hidden_size
-        )
+        wrapper.model = _RecordingModel(vocab_size=vocab_size, kept_len=kept_len, hidden_size=hidden_size)
         wrapper.lm_head = torch.nn.Identity()
         return wrapper
 
@@ -407,11 +397,12 @@ class TestQwen3VLForConditionalGenerationForward:
         passing too many positional args would have those extras discarded rather
         than surfaced. Mirror CPython's own message so the failure reads naturally.
         """
-        from mblt_model_zoo.hf_transformers.utils.generation_utils import (
-            upstream_positional_params,
-        )
         from transformers.models.qwen3_vl.modeling_qwen3_vl import (
             Qwen3VLForConditionalGeneration,
+        )
+
+        from mblt_model_zoo.hf_transformers.utils.generation_utils import (
+            upstream_positional_params,
         )
 
         wrapper = self._make_wrapper(kept_len=1)

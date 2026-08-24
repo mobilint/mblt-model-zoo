@@ -536,3 +536,114 @@ def test_transformer_default_compare_output_dir_uses_comparison(tmp_path: Path) 
     output_dir = default_charts_dir(tmp_path, [Path("linux_asr"), Path("windows_asr")])
 
     assert output_dir == tmp_path / "results" / "comparison" / "linux_asr_windows_asr"
+
+
+def test_collect_folder_metrics_skips_non_model_sidecars(tmp_path: Path, capsys) -> None:
+    """Verify collect_folder_metrics silently skips sidecar JSON files.
+
+    ``skipped_records_measure.json`` and ``skipped_records_sweep.json`` are
+    top-level JSON lists written alongside per-model payloads; ``host_pc_info.json``
+    is a dict but not a per-model payload. Globbing them into the collector used
+    to log noisy "failed to parse" warnings on every rebuild.
+    """
+
+    from benchmark.transformers.chart_utils import collect_folder_metrics
+
+    model_payload = {
+        "model": "repo/model-a",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+        "device": {"avg_power_w": 1.0},
+    }
+    (tmp_path / "model-a.json").write_text(json.dumps(model_payload), encoding="utf-8")
+    (tmp_path / "skipped_records_measure.json").write_text(
+        json.dumps([{"model": "repo/skipped", "reason": "oom"}]), encoding="utf-8"
+    )
+    (tmp_path / "skipped_records_sweep.json").write_text(
+        json.dumps([{"model": "repo/skipped", "reason": "oom"}]), encoding="utf-8"
+    )
+    (tmp_path / "host_pc_info.json").write_text(json.dumps({"cpu": {"name": "Test CPU"}}), encoding="utf-8")
+
+    metrics = collect_folder_metrics(tmp_path)
+    captured = capsys.readouterr()
+
+    assert list(metrics.keys()) == ["repo/model-a"]
+    assert "failed to parse" not in captured.out
+    assert "failed to parse" not in captured.err
+
+
+def _sweep_payload(model_id: str) -> dict:
+    return {
+        "model": model_id,
+        "benchmark_type": "sweep",
+        "benchmark": {
+            "prefill_sweep": {"x_values": [128], "tps_values": [10.0], "time_values": [1.0]},
+            "decode_sweep": {"x_values": [128], "tps_values": [20.0], "time_values": [2.0]},
+        },
+        "device": {"avg_power_w": 1.0},
+    }
+
+
+def _measure_payload(model_id: str) -> dict:
+    return {
+        "model": model_id,
+        "benchmark_type": "measure",
+        "task": "text-generation",
+        "prefill": 128,
+        "decode": 32,
+        "summary": {
+            "prefill_tps": {"mean": 10.0},
+            "decode_tps": {"mean": 20.0},
+            "ttft_ms": {"mean": 30.0},
+            "decode_duration_ms": {"mean": 40.0},
+        },
+        "device": {"avg_power_w": 8.0},
+    }
+
+
+def test_collect_folder_metrics_skips_measure_payloads_in_mixed_folder(tmp_path: Path, capsys) -> None:
+    """Verify measure payloads are dropped so sweep charts stay measure-free.
+
+    Mixed ``measure`` + ``sweep`` folders (documented in
+    ``benchmark/transformers/README.md``) used to leak measure targets into
+    sweep charts because ``load_model_metrics`` returned a metric with empty
+    token-sweep maps plus real measure-only device scalars.
+    """
+
+    from benchmark.transformers.chart_utils import collect_folder_metrics
+
+    (tmp_path / "model-a.json").write_text(json.dumps(_sweep_payload("repo/model-a")), encoding="utf-8")
+    (tmp_path / "model-b_measure.json").write_text(json.dumps(_measure_payload("repo/model-b")), encoding="utf-8")
+
+    metrics = collect_folder_metrics(tmp_path)
+    captured = capsys.readouterr()
+
+    assert list(metrics.keys()) == ["repo/model-a"]
+    assert "failed to parse" not in captured.out
+    assert "failed to parse" not in captured.err
+
+
+def test_collect_folder_metrics_returns_sweep_only_folder(tmp_path: Path) -> None:
+    """Verify a sweep-only folder is unaffected by the measure filter."""
+
+    from benchmark.transformers.chart_utils import collect_folder_metrics
+
+    (tmp_path / "model-a.json").write_text(json.dumps(_sweep_payload("repo/model-a")), encoding="utf-8")
+
+    metrics = collect_folder_metrics(tmp_path)
+
+    assert list(metrics.keys()) == ["repo/model-a"]
+
+
+def test_collect_folder_metrics_returns_empty_for_measure_only_folder(tmp_path: Path) -> None:
+    """Verify a measure-only folder returns no metrics without crashing."""
+
+    from benchmark.transformers.chart_utils import collect_folder_metrics
+
+    (tmp_path / "model-a_measure.json").write_text(json.dumps(_measure_payload("repo/model-a")), encoding="utf-8")
+
+    metrics = collect_folder_metrics(tmp_path)
+
+    assert metrics == {}

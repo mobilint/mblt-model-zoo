@@ -95,19 +95,97 @@ def convert_attention_mask_to_numpy(
     return attention_mask.cpu().contiguous().numpy()
 
 
+def _resolve_rope_theta(config: Any, default: Optional[float] = None) -> float:
+    """Resolve ``rope_theta`` from a config across Transformers 4.x / 5.x layouts.
+
+    Transformers 5.x turned :class:`PretrainedConfig` into a dataclass and folded
+    top-level ``rope_theta`` into ``rope_parameters`` (exposed via the
+    ``rope_scaling`` property) during ``__post_init__``, so the flat attribute is
+    dropped. Transformers 4.x keeps ``rope_theta`` as its own attribute. Read
+    both, in that order.
+
+    Args:
+        config: A ``PretrainedConfig`` (or duck-typed equivalent) or ``None``.
+        default: Fallback used when ``config`` is ``None`` or neither access path
+            resolves. When ``None`` and no path resolves, a :class:`ValueError`
+            is raised pointing at both TF 4.x and TF 5.x access paths.
+
+    Returns:
+        Resolved ``rope_theta`` as ``float``.
+    """
+    if config is None:
+        if default is None:
+            raise ValueError(
+                "_resolve_rope_theta requires a config (or an explicit default); received None."
+            )
+        return float(default)
+    rope_theta = getattr(config, "rope_theta", None)
+    if rope_theta is None:
+        rope_scaling = getattr(config, "rope_scaling", None)
+        if isinstance(rope_scaling, dict):
+            rope_theta = rope_scaling.get("rope_theta")
+    if rope_theta is None:
+        if default is None:
+            raise ValueError(
+                "Could not resolve rope_theta from config: it is neither a top-level "
+                "attribute (Transformers <5) nor a key of config.rope_scaling / "
+                "config.rope_parameters (Transformers >=5)."
+            )
+        return float(default)
+    return float(rope_theta)
+
+
 class CachedRotaryEmbedding(nn.Module):
     """Precompute RoPE tables and expose them as MXQ-friendly numpy arrays."""
 
-    def __init__(self, dim: int, max_position_embeddings: int = 2048, base: int = 10000) -> None:
+    def __init__(
+        self,
+        dim: int,
+        max_position_embeddings: int = 2048,
+        base: int = 10000,
+        *,
+        config: Optional[Any] = None,
+    ) -> None:
         super().__init__()
         self.dim = dim
         self.max_seq_len = max_position_embeddings
         self.base = base
+        # ``config`` and ``rope_type`` unlock the HF Transformers 5.x
+        # ``PreTrainedModel._init_weights`` re-init branch, which fires when
+        # class name contains ``RotaryEmbedding`` AND the module carries
+        # ``original_inv_freq``. Without this, ``inv_freq`` is materialized as
+        # uninitialized bytes after the meta-init pass and forward produces
+        # garbage RoPE tables.
+        self.config = config
+        self.rope_type = "default"
         inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float() / self.dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self.original_inv_freq = self.inv_freq.clone()
         self.position_table = None
         if self.inv_freq.device.type != "meta":
             self._build_position_table()
+
+    def compute_default_rope_parameters(
+        self,
+        config: Optional[Any] = None,
+        device: Optional[torch.device] = None,
+        seq_len: Optional[int] = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, float]:
+        """HF TF 5.x re-init hook for ``rope_type='default'``.
+
+        Called from :meth:`PreTrainedModel._init_weights` as
+        ``rope_fn(module.config)`` when a subclass materializes ``inv_freq``
+        after meta-init. Returns ``(inv_freq, attention_scaling)`` to match the
+        upstream signature.
+        """
+        del seq_len, kwargs
+        resolved_config = config if config is not None else self.config
+        base = _resolve_rope_theta(resolved_config, default=self.base)
+        inv_freq = 1.0 / (
+            base ** (torch.arange(0, self.dim, 2, dtype=torch.float32, device=device) / float(self.dim))
+        )
+        return inv_freq, 1.0
 
     def _build_position_table(
         self,
@@ -134,7 +212,8 @@ class CachedRotaryEmbedding(nn.Module):
             target_size = 2 * target_half
             if rotate_tensor.shape[-1] != target_size:
                 rotate_tensor = self.pad_rope(rotate_tensor, target_size)
-            self.position_table = rotate_tensor.cpu().numpy()[0, 0]
+            # numpy has no bfloat16; force fp32 so caller-supplied bf16 does not crash `.numpy()`.
+            self.position_table = rotate_tensor.detach().float().cpu().numpy()[0, 0]
 
     @staticmethod
     def pad_rope(rotate_tensor: torch.Tensor, target_len: int) -> torch.Tensor:
@@ -209,19 +288,26 @@ class ScaledCachedRotaryEmbedding(nn.Module):
                 self.rope_type = "default"
             config_max_pos = int(getattr(config, "max_position_embeddings", max_position_embeddings))
             self.max_seq_len = config_max_pos if max_length is None or max_length < config_max_pos else max_length
+            # Sync ``self.base`` to config so the ``rope_kwargs["base"]`` guard
+            # below and the downstream default rope path agree. TF 5.x drops
+            # the flat ``config.rope_theta`` attribute (folded into
+            # ``rope_parameters`` / ``rope_scaling``), so plain ``getattr``
+            # returned the caller-provided default (10000) and the base RoPE
+            # table silently used the wrong theta.
+            self.base = int(_resolve_rope_theta(config, default=base))
 
         if "rope_type" not in self.rope_kwargs:
             self.rope_kwargs["rope_type"] = self.rope_type
         if dim is not None and "dim" not in self.rope_kwargs:
             self.rope_kwargs["dim"] = dim
         if "base" not in self.rope_kwargs:
-            self.rope_kwargs["base"] = base
+            self.rope_kwargs["base"] = self.base
         if "max_position_embeddings" not in self.rope_kwargs:
             self.rope_kwargs["max_position_embeddings"] = self.max_seq_len
 
         self.original_max_seq_len = self.max_seq_len
         self.rope_init_fn = self._resolve_rope_init_fn()
-        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, None, seq_len=self.max_seq_len, **self.rope_kwargs)
+        inv_freq, self.attention_scaling = self._call_rope_init_fn(None, self.max_seq_len)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.original_inv_freq = self.inv_freq.clone()
         self.position_table: Optional[np.ndarray] = None
@@ -232,6 +318,15 @@ class ScaledCachedRotaryEmbedding(nn.Module):
         if self.rope_type in (None, "default"):
             return self.compute_default_rope_parameters
         return ROPE_INIT_FUNCTIONS[self.rope_type]
+
+    def _call_rope_init_fn(
+        self,
+        device: Optional[torch.device],
+        seq_len: Optional[int],
+    ) -> tuple[torch.Tensor, float]:
+        if self.rope_type in (None, "default"):
+            return self.rope_init_fn(self.config, device, seq_len=seq_len, **self.rope_kwargs)
+        return self.rope_init_fn(self.config, device, seq_len=seq_len)
 
     def compute_default_rope_parameters(
         self,
@@ -262,9 +357,10 @@ class ScaledCachedRotaryEmbedding(nn.Module):
             partial_rotary_factor = float(getattr(resolved_config, "partial_rotary_factor", 1.0))
         rotary_dim = int(head_dim * partial_rotary_factor)
 
-        rope_theta = self.base
-        if resolved_config is not None:
-            rope_theta = float(getattr(resolved_config, "rope_theta", rope_theta))
+        # Route through the shared helper so TF 5.x configs (which fold
+        # ``rope_theta`` into ``rope_parameters`` / ``rope_scaling``) do not
+        # silently fall back to ``self.base``.
+        rope_theta = _resolve_rope_theta(resolved_config, default=self.base)
 
         inv_freq = 1.0 / (
             rope_theta ** (torch.arange(0, rotary_dim, 2, dtype=torch.float32, device=device) / float(rotary_dim))
@@ -300,14 +396,15 @@ class ScaledCachedRotaryEmbedding(nn.Module):
             target_size = 2 * target_half
             if rotate_tensor.shape[-1] != target_size:
                 rotate_tensor = CachedRotaryEmbedding.pad_rope(rotate_tensor, target_size)
-            self.position_table = rotate_tensor.cpu().numpy()[0, 0]
+            # numpy has no bfloat16; force fp32 so caller-supplied bf16 does not crash `.numpy()`.
+            self.position_table = rotate_tensor.detach().float().cpu().numpy()[0, 0]
 
     def _dynamic_frequency_update(self, position_ids: torch.LongTensor, device: torch.device) -> None:
         if self.rope_type in (None, "default"):
             return
         seq_len = int(torch.max(position_ids).item()) + 1
         if seq_len > self.max_seq_len:
-            inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, seq_len=seq_len, **self.rope_kwargs)
+            inv_freq, self.attention_scaling = self._call_rope_init_fn(device, seq_len)
             self.register_buffer("inv_freq", inv_freq, persistent=False)
             self.max_seq_len = seq_len
             self._build_position_table(device=self.inv_freq.device)
@@ -346,7 +443,7 @@ class MobilintEagle3FCProjector(MobilintEagle3ModelMixin, PreTrainedModel):
         Returns:
             Projected hidden states, typically ``[1, seq, hidden_draft]``.
         """
-        hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
+        hidden_states_numpy = hidden_states.detach().cpu().contiguous().float().numpy()
         if hidden_states_numpy.ndim == 3:
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
         if count_npu_time:
@@ -363,10 +460,43 @@ class MobilintEagle3BaseModelMixin:
     """Shared runtime helpers for an EAGLE-3 base model.
 
     Responsibility:
+    - Install ``embed_tokens`` and ``rotary_emb`` from ``config`` so every
+      concrete family shares a single construction site.
     - Convert PyTorch tensors to MXQ-compatible numpy payloads.
     - Run chunked prefill/decode against base MXQ backend.
     - Reassemble hidden/logits chunks back to torch tensors.
+
+    Families that need a different rotary class (e.g. a future release without
+    ``rope_scaling``) can override :meth:`_build_base_rotary_emb`.
     """
+
+    def __init__(self, config, *args, **kwargs) -> None:
+        super().__init__(config, *args, **kwargs)
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        self.rotary_emb = self._build_base_rotary_emb(config)
+
+    def _build_base_rotary_emb(self, config) -> nn.Module:
+        """Return the base rotary embedding module for ``config``.
+
+        Documented override hook. Every EAGLE-3 base config shipped in this
+        repo carries ``rope_scaling``, so the scaled branch matches today's
+        behavior. Future families with ``rope_scaling=None`` (or a bespoke
+        rotary class) can either rely on the fallback branch here or override
+        this method entirely.
+        """
+        head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        if getattr(config, "rope_scaling", None):
+            return ScaledCachedRotaryEmbedding(
+                dim=head_dim,
+                max_position_embeddings=config.max_position_embeddings,
+                config=config,
+            )
+        return CachedRotaryEmbedding(
+            head_dim,
+            config.max_position_embeddings,
+            base=int(_resolve_rope_theta(config, default=10000)),
+            config=config,
+        )
 
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
@@ -523,10 +653,57 @@ class MobilintEagle3DraftModelMixin:
     """Shared runtime helpers for an EAGLE-3 draft model.
 
     Responsibility:
+    - Install ``embed_tokens``, ``rotary_emb``, and draft tree bookkeeping
+      (``top_k``, ``max_draft_tokens``, ``depth``, ``hidden_size``,
+      ``logsoftmax``, ``d2t``, ``t2d``, ``tree_mask_init``, ``position_ids``)
+      from ``config`` / ``draft_config`` so every concrete family shares a
+      single construction site.
     - Consume accepted/base hidden states.
     - Expand a top-k draft tree up to configured depth.
     - Return tree metadata consumed by posterior evaluation.
+
+    Families that need a different rotary class can override
+    :meth:`_build_draft_rotary_emb`. Note that ``max_draft_tokens`` set here
+    is a bootstrap value; :class:`MobilintEagle3GenerationMixin.generate`
+    resolves the final value from ``GenerationConfig.num_assistant_tokens``.
     """
+
+    def __init__(self, config, draft_config, fc_projector, *args, **kwargs) -> None:
+        super().__init__(config, *args, **kwargs)
+        self.draft_config = draft_config
+        self.fc_projector = fc_projector
+        self.embed_tokens = nn.Embedding(draft_config.vocab_size, draft_config.hidden_size, draft_config.pad_token_id)
+        self.rotary_emb = self._build_draft_rotary_emb(draft_config)
+        self.top_k = int(config.eagle3_tree_top_k)
+        # Bootstrap value; generate() overrides this from
+        # ``GenerationConfig.num_assistant_tokens`` (default 64) before use.
+        self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 64)) - 1
+        self.depth = int(config.eagle3_tree_depth)
+        self.hidden_size = draft_config.hidden_size
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
+        draft_vocab_size = int(getattr(draft_config, "draft_vocab_size", draft_config.vocab_size))
+        self.register_buffer("d2t", torch.zeros(draft_vocab_size, dtype=torch.long, device="cpu"))
+        self.register_buffer("t2d", torch.zeros(draft_config.vocab_size, dtype=torch.bool, device="cpu"))
+        self.tree_mask_init = torch.eye(self.top_k, dtype=torch.float32, device="cpu")[None, None]
+        self.position_ids = torch.zeros(self.top_k, dtype=torch.long, device="cpu")
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
+
+    def _build_draft_rotary_emb(self, draft_config) -> nn.Module:
+        """Return the draft rotary embedding module for ``draft_config``.
+
+        Documented override hook. Every EAGLE-3 draft in this repo uses
+        :class:`CachedRotaryEmbedding` with ``base`` sourced from
+        ``draft_config.rope_theta``; pre-refactor qwen2 relied on the
+        implicit ``base=10000`` default and its shipped configs match.
+        """
+        head_dim = getattr(draft_config, "head_dim", draft_config.hidden_size // draft_config.num_attention_heads)
+        return CachedRotaryEmbedding(
+            head_dim,
+            draft_config.max_position_embeddings,
+            base=int(_resolve_rope_theta(draft_config, default=10000)),
+            config=draft_config,
+        )
 
     def _prepare_decoder_attention_mask(
         self,
@@ -626,16 +803,21 @@ class MobilintEagle3DraftModelMixin:
         inputs_embeds_numpy = inputs_embeds.cpu().contiguous().float().numpy()
         if inputs_embeds_numpy.ndim == 3:
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)
-        hidden_states_numpy = hidden_states.cpu().contiguous().numpy().astype(np.float32, copy=False)
+        hidden_states_numpy = hidden_states.detach().cpu().contiguous().float().numpy()
         if hidden_states_numpy.ndim == 3:
             hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
+        # Legacy / future-experiment scaffolding: Mobilint EAGLE-3 releases train base and draft
+        # at a matched hidden size (see AGENTS.md EAGLE-3 contract), so this branch is not
+        # exercised by any shipped release. Do not treat it as evidence that unequal base/draft
+        # widths are a supported configuration.
         if hidden_states.shape[-1] != inputs_embeds.shape[-1]:
             hidden_states_numpy = (
                 self.fc_projector.project(hidden_states, count_npu_time=count_npu_time)
+                .detach()
                 .cpu()
                 .contiguous()
+                .float()
                 .numpy()
-                .astype(np.float32, copy=False)
             )
             if hidden_states_numpy.ndim == 3:
                 hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)

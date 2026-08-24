@@ -169,17 +169,51 @@ class MobilintQwen3ASRTextModel(
         self.embed_tokens = value
 
     def _get_cache(self, cache_implementation: str, batch_size: int, max_cache_len: int, *args) -> MobilintBeamCache:
-        """Return a beam-snapshot cache for Qwen3-ASR text generation."""
+        """Return a beam-snapshot cache for Qwen3-ASR text generation.
+
+        Revalidates the live backend topology on every call so a cached beam
+        cache is not silently reused across a backend dispose+relaunch cycle.
+        The constructor-time N==1 guard runs only when a new cache is built;
+        the reset fast-path would otherwise retain a stale slot 0 handle when
+        the backend was recreated with a different slot count or fresh Model
+        handle.
+        """
         del cache_implementation, max_cache_len, args
         configured_batch_size = max(1, int(batch_size), getattr(self.config, "max_batch_size", 1))
+        # Enforce the beam-cache N==1 contract against the owning backend's real
+        # slot count rather than only the shape of get_cache_mxq_model() (which
+        # returns slot 0 as a single qbruntime.Model even when the backend
+        # launched N > 1 slots via max_batch_size > K).
+        # TODO(beomsu): consider capping this text backend's max_batch_size to K
+        # at construction time so N>1 slots are never launched for beam decoders.
+        text_n_slots = self._resolve_text_n_slots()
+        expected_mxq_model = self.get_cache_mxq_model()
         if not hasattr(self, "_cache") or not isinstance(self._cache, MobilintBeamCache):
-            self._cache = MobilintBeamCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+            self._cache = MobilintBeamCache(
+                expected_mxq_model, batch_size=configured_batch_size, n_slots=text_n_slots,
+            )
         elif getattr(self._cache, "batch_size", 1) != configured_batch_size:
-            self._cache = MobilintBeamCache(self.get_cache_mxq_model(), batch_size=configured_batch_size)
+            self._cache = MobilintBeamCache(
+                expected_mxq_model, batch_size=configured_batch_size, n_slots=text_n_slots,
+            )
+        elif not self._cache.matches_live_topology(expected_mxq_model, n_slots=text_n_slots):
+            self._cache = MobilintBeamCache(
+                expected_mxq_model, batch_size=configured_batch_size, n_slots=text_n_slots,
+            )
         else:
             self._cache.reset()
 
         return self._cache
+
+    def _resolve_text_n_slots(self) -> Optional[int]:
+        """Return the Qwen3-ASR text backend's slot count, or ``None`` if unavailable."""
+        backend = getattr(self, "npu_backend", None)
+        if backend is None:
+            return None
+        mxq_models = getattr(backend, "mxq_models", None)
+        if not mxq_models:
+            return None
+        return len(mxq_models)
 
     def _resolve_source_indices(self, inputs_embeds: torch.Tensor) -> list[int]:
         """Return source ids for rows sharing the same audio-conditioned prompt embeddings."""

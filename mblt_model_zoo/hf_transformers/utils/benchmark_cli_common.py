@@ -95,6 +95,34 @@ def parse_int_list_optional(spec: str | None) -> list[int] | None:
     return parse_non_negative_int_list_optional(spec, name="device-gpu-id")
 
 
+def parse_dev_no(spec: str | None) -> int | list[int] | None:
+    """Parse ``--dev-no`` as a scalar int or a comma-separated list of ints.
+
+    A single value (``--dev-no 0``) returns ``int``; a list (``--dev-no 0,1``)
+    returns ``list[int]``. Non-negative integers are required so the value can
+    stand in for the device-prefix component of a canonical NPU target.
+    Mirrors :func:`mblt_model_zoo.cli.tps._parse_dev_no` so benchmark scripts
+    share the same wire form as the ``tps`` CLI.
+    """
+    if spec is None:
+        return None
+    text = str(spec).strip()
+    if not text:
+        return None
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if not parts:
+        return None
+    try:
+        values = [int(p) for p in parts]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--dev-no values must be integers") from exc
+    if any(v < 0 for v in values):
+        raise argparse.ArgumentTypeError("--dev-no values must be >= 0")
+    if len(values) == 1:
+        return values[0]
+    return values
+
+
 def parse_npu_rail_metrics(spec: str | None) -> NpuRailMetrics:
     """Parse NPU rail metrics for mblt-tracker NPU device tracking.
 
@@ -205,7 +233,21 @@ def apply_core_mode_model_kwargs(
     target_cores: list[str] | None = None,
     target_clusters: list[int] | None = None,
     default_single_target_cores: Sequence[str] | None = DEFAULT_SINGLE_TARGET_CORES,
+    dev_no: int | list[int] | None = None,
 ) -> dict[str, Any]:
+    """Populate ``model_kwargs`` with per-core-mode NPU target defaults.
+
+    When the caller does not supply explicit ``target_cores`` / ``target_clusters``
+    and ``core_mode`` is provided, this helper injects a legacy default target
+    list so the backend has *something* to configure a ModelConfig with.
+    Those defaults (``"0:0"`` for single mode, bare int clusters ``[0]`` /
+    ``[0, 1]`` for global4/global8) do not carry a device prefix and become
+    ambiguous when combined with a list-valued ``dev_no`` — the config-layer
+    normalization deliberately rejects that combination. When ``dev_no`` is a
+    list we therefore suppress every legacy default and let
+    :func:`_normalize_npu_target_kwargs`'s ``dev_no`` sugar expansion produce
+    canonical, fully-qualified targets for each device.
+    """
     key_prefix = f"{prefix}_" if prefix else ""
     if not core_mode:
         if target_cores is not None:
@@ -214,17 +256,27 @@ def apply_core_mode_model_kwargs(
             model_kwargs[f"{key_prefix}target_clusters"] = target_clusters
         return model_kwargs
 
+    # List-shaped ``dev_no`` signals explicit multi-device intent. Injecting
+    # any legacy default would create an ambiguity that the config layer
+    # deliberately raises on; skip all defaults symmetrically for single,
+    # global4, and global8 modes and rely on config-layer sugar expansion.
+    inject_legacy_defaults = not isinstance(dev_no, (list, tuple))
+
     model_kwargs[f"{key_prefix}core_mode"] = core_mode
     if target_cores is not None:
         model_kwargs[f"{key_prefix}target_cores"] = target_cores
-    elif core_mode == "single" and default_single_target_cores is not None:
+    elif (
+        inject_legacy_defaults
+        and core_mode == "single"
+        and default_single_target_cores is not None
+    ):
         model_kwargs[f"{key_prefix}target_cores"] = list(default_single_target_cores)
 
     if target_clusters is not None:
         model_kwargs[f"{key_prefix}target_clusters"] = target_clusters
-    elif not target_cores and core_mode == "global4":
+    elif inject_legacy_defaults and not target_cores and core_mode == "global4":
         model_kwargs[f"{key_prefix}target_clusters"] = [0]
-    elif not target_cores and core_mode == "global8":
+    elif inject_legacy_defaults and not target_cores and core_mode == "global8":
         model_kwargs[f"{key_prefix}target_clusters"] = [0, 1]
     return model_kwargs
 
@@ -247,6 +299,8 @@ def apply_subconfig_core_mode_model_kwargs(
     base_mxq_path: str | None = None,
     subconfig_mxq_paths: Mapping[str, str | None] | None = None,
     default_single_target_cores: Sequence[str] | None = DEFAULT_SINGLE_TARGET_CORES,
+    base_dev_no: int | list[int] | None = None,
+    subconfig_dev_nos: Mapping[str, int | list[int] | None] | None = None,
 ) -> dict[str, Any]:
     """Apply core-mode kwargs to each subconfig, letting each override the base value.
 
@@ -265,6 +319,11 @@ def apply_subconfig_core_mode_model_kwargs(
         base_mxq_path: Fallback mxq path applied to each subconfig when not overridden.
         subconfig_mxq_paths: Optional per-prefix mxq path overrides.
         default_single_target_cores: Default cores injected for single mode when nothing is set.
+        base_dev_no: Fallback ``dev_no`` used to decide whether to inject legacy default
+            targets on each subconfig. A list value suppresses defaults so the config
+            layer's sugar expansion can produce fully-qualified targets from ``dev_no``.
+        subconfig_dev_nos: Optional per-prefix ``dev_no`` overrides used with the same
+            default-suppression semantics as ``base_dev_no``.
 
     Returns:
         The updated ``model_kwargs``.
@@ -273,10 +332,12 @@ def apply_subconfig_core_mode_model_kwargs(
     subconfig_target_cores = subconfig_target_cores or {}
     subconfig_target_clusters = subconfig_target_clusters or {}
     subconfig_mxq_paths = subconfig_mxq_paths or {}
+    subconfig_dev_nos = subconfig_dev_nos or {}
     for prefix in prefixes:
         effective_core_mode = coalesce_subconfig(subconfig_core_modes.get(prefix), base_core_mode)
         effective_target_cores = coalesce_subconfig(subconfig_target_cores.get(prefix), base_target_cores)
         effective_target_clusters = coalesce_subconfig(subconfig_target_clusters.get(prefix), base_target_clusters)
+        effective_dev_no = coalesce_subconfig(subconfig_dev_nos.get(prefix), base_dev_no)
         apply_core_mode_model_kwargs(
             model_kwargs,
             effective_core_mode,
@@ -284,6 +345,7 @@ def apply_subconfig_core_mode_model_kwargs(
             target_cores=effective_target_cores,
             target_clusters=effective_target_clusters,
             default_single_target_cores=default_single_target_cores,
+            dev_no=effective_dev_no,
         )
         effective_mxq_path = coalesce_subconfig(subconfig_mxq_paths.get(prefix), base_mxq_path)
         if effective_mxq_path:
@@ -381,6 +443,18 @@ def add_pipeline_device_args(
         "--no-trust-remote-code",
         dest="trust_remote_code",
         action="store_false",
+    )
+    parser.add_argument(
+        "--dev-no",
+        type=parse_dev_no,
+        default=None,
+        help=(
+            "Device-prefix sugar for canonical NPU targets on Mobilint targets. "
+            'Scalar (e.g., "--dev-no 1") pins one device; comma-separated (e.g., '
+            '"--dev-no 0,1,2,3") expands the target set across those devices. '
+            "Silent no-op on non-Mobilint targets so a mixed NPU vs. GPU sweep "
+            "can pass the same argument."
+        ),
     )
 
 

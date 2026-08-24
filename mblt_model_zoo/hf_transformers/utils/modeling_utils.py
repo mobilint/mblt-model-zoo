@@ -14,7 +14,10 @@ from transformers.modeling_utils import PreTrainedModel
 from ...utils.npu_backend import MobilintNPUBackend
 from ..utils.cache_utils import MobilintCache
 from .base_utils import PretrainedOnlyMixin
-from .configuration_utils import MobilintConfigMixin, MobilintEncoderDecoderConfigMixin
+from .configuration_utils import (
+    MobilintConfigMixin,
+    MobilintEncoderDecoderConfigMixin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +85,15 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         commit_hash = getattr(self.config, "_commit_hash", None)
         if commit_hash:
             self.npu_backend._commit_hash = commit_hash
+        # HF ``from_pretrained`` applies ``model_kwargs`` (e.g. ``--dev-no 1``,
+        # ``--core-mode global4``, ``--text-dev-no 0``) via setter chains after
+        # the config layer built the initial ``NPUTargetSpec`` from the JSON
+        # payload. Each per-field setter records its raw override on the
+        # backend's :class:`NPUTargetSpecPending` accumulator without
+        # normalizing between fields; the canonical spec is materialized once
+        # on the next :attr:`_spec` read (triggered by :meth:`create`). This
+        # deferred finalize eliminates the setter-order dependency that the
+        # older eager-renormalize path exposed.
         self.npu_backend.create()
         if not no_launch:
             self.launch()
@@ -156,6 +168,37 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
     def get_mxq_model(self):
         return self.npu_backend.mxq_model
+
+    @classmethod
+    def get_mobilint_cache_cls(cls) -> type[MobilintCache]:
+        """Return the ``MobilintCache`` subclass this model uses for KV caching.
+
+        The multi-slot cache builder :func:`build_mobilint_cache_from_model`
+        (and its ``benchmark_utils`` wrapper) consults this classmethod when a
+        caller does not supply ``cache_cls`` explicitly. Models whose decoder
+        forward expects a specialized cache (e.g. :class:`MobilintDeepStackCache`
+        for Qwen3-VL text) override this so the multi-slot builder does not
+        default to plain :class:`MobilintCache` and trip the model-side
+        ``isinstance`` guard.
+        """
+        return MobilintCache
+
+    def get_mobilint_cache_kwargs(self) -> dict[str, Any]:
+        """Return the extra constructor kwargs the declared cache class requires.
+
+        Companion to :meth:`get_mobilint_cache_cls`: the classmethod picks the
+        cache subclass, and this method supplies the additional keyword
+        arguments its ``__init__`` needs beyond the ``mxq_models`` /
+        ``per_model_batch`` (or ``batch_size``) arguments the multi-slot cache
+        builder already supplies. Returns ``{}`` by default so plain
+        :class:`MobilintCache` callers keep the existing signature. Models
+        whose declared cache carries dense side inputs (e.g.
+        :class:`MobilintDeepStackCache` requires ``num_deepstack_layers`` and
+        ``hidden_size``) override this to forward the same values the model's
+        own ``_get_cache`` uses, so multi-slot benchmark builders do not
+        instantiate the specialized cache with zero-shaped side tensors.
+        """
+        return {}
 
     def reset_npu_timing(self) -> None:
         """Reset aggregate NPU timing counters used by TPS benchmarks."""
@@ -232,6 +275,19 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         The result is cached on the instance because the shape is fixed
         for the lifetime of the loaded model.
 
+        Ambiguity mirror: on a batched ``K > 1`` MXQ the same ``-1`` at
+        position ``-2`` may mark the compiled batch axis rather than the
+        token axis (identical shape signature; the metadata alone cannot
+        distinguish the two). This method conservatively returns ``False``
+        in that case, mirroring the K-aware rule in
+        :meth:`MobilintNPUBackend._probe_output_layout`. Falsely claiming
+        "supports all-logits" on a batched MXQ would route the caller into
+        Path 2, which assumes per-token output and reshapes N-item rows as
+        ``total_tokens`` — that crashes on any prefill where
+        ``tokens > active items``. Falsely returning ``False`` instead
+        routes the caller into Path 1's already-documented slow-path
+        warning and still produces correct output.
+
         Cache population is lazy. Both call sites in
         ``_run_chunked_logits_to_keep`` and ``_llm_forward_batch`` guard the
         probe with ``False if is_default_keep else self._mxq_supports_all_logits()``,
@@ -256,7 +312,14 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     len(first_shape) >= abs(_MXQ_TOKEN_AXIS_INDEX)
                     and int(first_shape[_MXQ_TOKEN_AXIS_INDEX]) == _MXQ_DYNAMIC_AXIS_SENTINEL
                 ):
-                    supports = True
+                    # Ambiguity mirror: only claim "supports all-logits" when
+                    # the compiled batch axis ``K`` is 1, matching the K-aware
+                    # rule in :meth:`MobilintNPUBackend._probe_output_layout`.
+                    # ``k_per_model`` stays constant for the lifetime of the
+                    # backend, so caching the resolved boolean is safe.
+                    k_per_model = int(getattr(self.npu_backend, "k_per_model", 1) or 1)
+                    if k_per_model <= 1:
+                        supports = True
         except (AttributeError, qbruntime.QbRuntimeError):
             # AttributeError: backend or ``get_model_output_shape`` missing.
             # QbRuntimeError: backend refused the probe. Only backend-specific
@@ -497,7 +560,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
     ):
         input_numpy = input.type(torch.float32).cpu().numpy()
 
-        result = self.npu_backend.mxq_model.infer([input_numpy])
+        result = self.npu_backend.mxq_models[0].infer([input_numpy])
         assert result is not None, "mxq infer result is None!"
 
         output = torch.tensor(result[0], dtype=input.dtype, device=input.device)
@@ -728,7 +791,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             inputs_embeds_numpy = np.expand_dims(inputs_embeds_numpy, 1)  # (batch, 1, seqlen, hidden_size)
 
         seq_len = inputs_embeds_numpy.shape[2]
-        mxq_model = self.npu_backend.mxq_model
+        mxq_model = self.npu_backend.mxq_models[0]
         initial_cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
         timing_phase: Literal["prefill", "decode"] = "prefill" if initial_cache_size == 0 else "decode"
 
@@ -924,9 +987,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             )
 
         max_sequence_length = max(sequence_lengths)
-        mxq_model = self.npu_backend.mxq_model
+        mxq_models = self.npu_backend.mxq_models
+        # Slot 0 is used for backend probes and as the single-group fast path;
+        # per-group dispatch inside ``_run_batch_infer`` selects
+        # ``mxq_models[model_idx]`` based on the owning cache slot.
         if npu_prefill_chunk_size == 0:
-            npu_prefill_chunk_size = mxq_model.get_input_buffer_info()[0].max_width
+            npu_prefill_chunk_size = mxq_models[0].get_input_buffer_info()[0].max_width
         assert npu_prefill_chunk_size > 0, (
             "npu_prefill_chunk_size should be a positive number! npu_prefill_chunk_size: %d" % npu_prefill_chunk_size
         )
@@ -984,6 +1050,13 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
                     output_positions_by_item[j] = positions_j
                     walk_positions_by_item[j] = sorted(set(positions_j))
 
+        dispatcher = self.npu_backend.dispatcher
+
+        def _record_npu_time(phase: Literal["prefill", "decode"], elapsed: float) -> None:
+            assert self.npu_time is not None
+            self.npu_time += elapsed
+            self._record_npu_timing(phase, elapsed)
+
         def _run_batch_infer(
             cache_ids_l: list[int],
             sequence_lengths_chunks_l: list[int],
@@ -993,52 +1066,21 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             *,
             chunk_start: int = 0,
         ) -> tuple[np.ndarray, tuple[int, ...]]:
-            inputs_embeds_concat_l = torch.concat(inputs_embeds_chunks_l, dim=0).unsqueeze(0)
-            inputs_embeds_numpy_l: np.ndarray = inputs_embeds_concat_l.type(torch.float32).cpu().numpy()
-            if self._batched_input_expand_dims and inputs_embeds_numpy_l.ndim == 3:
-                inputs_embeds_numpy_l = np.expand_dims(inputs_embeds_numpy_l, 1)
-            infer_inputs_l: list[np.ndarray] = [inputs_embeds_numpy_l]
-            if pack_extra_inputs is not None:
-                # Hook for multi-input decoders (e.g. Qwen3-VL deepstack). The
-                # callback receives the same window info as _assemble_batch_chunk
-                # emitted so it can slice per-item side inputs the same way.
-                extras = pack_extra_inputs(
-                    chunk_start=chunk_start,
-                    sequence_lengths_chunks=sequence_lengths_chunks_l,
-                    cache_ids=cache_ids_l,
-                )
-                infer_inputs_l.extend(extras)
-            batch_params_l = [
-                qbruntime.BatchParam(
-                    sequence_length=sequence_lengths_chunks_l[k],
-                    cache_size=cache_sizes_chunks_l[k],
-                    cache_id=cache_ids_l[k],
-                )
-                for k in range(len(cache_ids_l))
-            ]
-            if count_npu_time:
-                t0 = time.perf_counter()
-                result_l = mxq_model.infer(infer_inputs_l, None, 0, batch_params_l)
-                assert self.npu_time is not None
-                elapsed = time.perf_counter() - t0
-                self.npu_time += elapsed
-                # Path 3 fallback advances a shared cursor across the batch, so its
-                # chunk=1 capture calls run at cursor > 0 with all cache_sizes > 0 —
-                # but the auto-heuristic below latches on max_sequence_length (the
-                # batch-wide max, not the current chunk size) and would misclassify
-                # every one of those captures as 'prefill'. Path 3 passes an
-                # explicit phase_override to keep decode_time accurate; Path 1 and
-                # Path 2 leave it None and get the auto-heuristic.
-                phase: Literal["prefill", "decode"] = phase_override or (
-                    "prefill"
-                    if max_sequence_length > 1 or any(cache_size == 0 for cache_size in cache_sizes_chunks_l)
-                    else "decode"
-                )
-                self._record_npu_timing(phase, elapsed)
-            else:
-                result_l = mxq_model.infer(infer_inputs_l, None, 0, batch_params_l)
-            assert result_l is not None, "mxq infer result is None!"
-            return result_l[0], inputs_embeds_numpy_l.shape
+            return dispatcher.dispatch(
+                cache_ids=cache_ids_l,
+                sequence_lengths=sequence_lengths_chunks_l,
+                cache_sizes=cache_sizes_chunks_l,
+                inputs_embeds_chunks=inputs_embeds_chunks_l,
+                max_sequence_length=max_sequence_length,
+                pack_extra_inputs=pack_extra_inputs,
+                past_key_values=past_key_values,
+                batched_input_expand_dims=self._batched_input_expand_dims,
+                chunk_start=chunk_start,
+                count_npu_time=count_npu_time,
+                phase_override=phase_override,
+                record_npu_time=_record_npu_time if count_npu_time else None,
+                debug_enabled=debug_enabled,
+            )
 
         # ------------------------------------------------------------------
         # Path 1: default fast path (logits_to_keep == 1). Preserved
@@ -1562,15 +1604,47 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
 
     @staticmethod
     def _validate_batch_cache(past_key_values: Optional[MobilintCache], batch_size: int) -> None:
+        """Validate the batched request against a supplied ``MobilintCache``.
+
+        This helper owns the AGGREGATE-CAPACITY half of the with-cache
+        validation contract: it rejects a batched request whose
+        ``batch_size`` exceeds the cache's ``n_models * k_per_model`` (or
+        ``batch_size`` fallback). The CACHELESS half (``past_key_values is
+        None``) is enforced at the top of :meth:`MultiSlotDispatcher.dispatch
+        <mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch.MultiSlotDispatcher.dispatch>`
+        against the backend's ``N * K`` capacity, because that check needs
+        ``n_slots`` and ``k_per_model`` which live on the backend rather than
+        the cache. Do not extend this helper to cover the cacheless case: the
+        failure surfaces one layer down, so the guard belongs there.
+
+        Aggregate capacity is necessary but not sufficient — a cache built
+        with ``(N=1, K=2)`` and a backend built with ``(N=2, K=1)`` both have
+        capacity ``2`` but route rows to incompatible Model slots. The
+        TOPOLOGY-AND-IDENTITY half (``cache.n_models`` / ``cache.k_per_model``
+        / ``cache.mxq_models`` vs the backend) now lives on
+        :meth:`MultiSlotDispatcher._validate_cache_topology
+        <mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch.MultiSlotDispatcher._validate_cache_topology>`
+        and runs automatically at dispatch time — callers of
+        ``_validate_batch_cache`` do not need to invoke it separately.
+        """
         if past_key_values is None:
             return
 
-        cache_batch_size = getattr(past_key_values, "batch_size", 1)
+        # The multi-Model cache exposes ``n_models`` and ``k_per_model``; the
+        # aggregate capacity is ``n_models * k_per_model`` (also stored as
+        # ``batch_size`` for legacy callers, and preserved as the fallback so
+        # test doubles that only expose ``batch_size`` keep working).
+        n_models = getattr(past_key_values, "n_models", None)
+        k_per_model = getattr(past_key_values, "k_per_model", None)
+        if isinstance(n_models, int) and isinstance(k_per_model, int):
+            cache_batch_size = n_models * k_per_model
+        else:
+            cache_batch_size = getattr(past_key_values, "batch_size", 1)
         if cache_batch_size < batch_size:
             raise ValueError(
                 "Batch cache size is too small: "
-                f"past_key_values.batch_size={cache_batch_size}, input batch_size={batch_size}. "
-                "Create MobilintCache with a batch size greater than or equal to the batched request."
+                f"cache capacity (n_models*k_per_model)={cache_batch_size}, input batch_size={batch_size}. "
+                "Create MobilintCache with capacity greater than or equal to the batched request."
             )
 
     def resolve_npu_prefill_chunk_size(self, npu_prefill_chunk_size: Optional[int]) -> int:
@@ -1620,10 +1694,32 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         past_key_values: Optional[MobilintCache],
         cache_position: torch.Tensor,
     ):
+        # Cross-attention conditioned decoders (BLIP text head, and any future
+        # encoder-decoder backend that inherits this default) always dispatch
+        # a single ``mxq_model.infer`` on slot 0. Growing the backend to
+        # ``N>1`` slots via ``max_batch_size>K`` (e.g. CLI ``--batch-size B``
+        # on a K=1 text MXQ) would therefore leave slots ``1..N-1`` idle
+        # while slot 0 receives a batch-shaped input it cannot serve. Route
+        # the guard through :meth:`MultiSlotDispatcher.assert_single_slot` so
+        # the invariant lives in one place — mirroring the ``MobilintBeamCache``
+        # ``N==1`` invariant that already covers Whisper / Qwen3-ASR beam decode.
+        self.npu_backend.dispatcher.assert_single_slot(
+            caller="Encoder-decoder decoder_forward",
+            remediation=(
+                "Cross-attention decoders in this repo (BLIP text head, and "
+                "similar) run one blocking mxq_model.infer per call; multi-slot "
+                "routing and beam-cache reorder across slots are not implemented. "
+                "Either rerun with the aggregate batch capped at K (e.g. drop "
+                "--batch-size on TPS, or set max_batch_size<=K on the text "
+                "backend) or compile a batched (K>1) text MXQ so slot-0 "
+                "hardware batching serves the request."
+            ),
+        )
+
         hidden_states_numpy = hidden_states.type(torch.float32).cpu().numpy()
         encoder_hidden_states_numpy = encoder_hidden_states.type(torch.float32).cpu().numpy()
 
-        mxq_model = self.npu_backend.mxq_model
+        mxq_model = self.npu_backend.mxq_models[0]
 
         cache_size = 0 if past_key_values is None else past_key_values.get_seq_length()
 

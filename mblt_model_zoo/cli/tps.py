@@ -162,6 +162,9 @@ class Eagle3PipelineOptions:
     base_target_clusters: list[int] | None = None
     draft_target_clusters: list[int] | None = None
     fc_target_clusters: list[int] | None = None
+    base_dev_no: int | list[int] | None = None
+    draft_dev_no: int | list[int] | None = None
+    fc_dev_no: int | list[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,8 @@ class SubconfigPipelineOptions:
     text_target_clusters: list[int] | None = None
     vision_mxq_path: str | None = None
     text_mxq_path: str | None = None
+    vision_dev_no: int | list[int] | None = None
+    text_dev_no: int | list[int] | None = None
 
 
 def _warn_eagle3_override(
@@ -220,6 +225,9 @@ def _warn_eagle3_applied_options_summary(model_kwargs: dict[str, Any]) -> None:
         "base_mxq_path",
         "draft_mxq_path",
         "fc_mxq_path",
+        "base_dev_no",
+        "draft_dev_no",
+        "fc_dev_no",
     ]
     applied = {key: model_kwargs[key] for key in tracked_keys if key in model_kwargs}
     if not applied:
@@ -367,6 +375,32 @@ def _apply_sweep_batch_auto_scale(args: argparse.Namespace, pipeline: Any) -> No
         print(f"[tps] batch={batch_size} detected; skipping auto-scale for explicit flag(s): " + ", ".join(skipped))
 
 
+def _parse_dev_no(spec: Union[str, None]) -> Union[int, list[int], None]:
+    """Parse ``--dev-no`` as a scalar int or a comma-separated list of ints.
+
+    A single value (``--dev-no 0``) returns ``int``; a list (``--dev-no 0,1``)
+    returns ``list[int]``. Non-negative integers are required so the value can
+    stand in for the device-prefix component of a canonical NPU target.
+    """
+    if spec is None:
+        return None
+    text = spec.strip()
+    if not text:
+        return None
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if not parts:
+        return None
+    try:
+        values = [int(p) for p in parts]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--dev-no values must be integers") from exc
+    if any(v < 0 for v in values):
+        raise argparse.ArgumentTypeError("--dev-no values must be >= 0")
+    if len(values) == 1:
+        return values[0]
+    return values
+
+
 def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
     if spec is None:
         return None
@@ -376,18 +410,28 @@ def _parse_target_cores(spec: Union[str, None]) -> Union[list[str], None]:
     return [item.strip() for item in text.split(";") if item.strip()]
 
 
-def _parse_target_clusters(spec: Union[str, None]) -> Union[list[int], None]:
+def _parse_target_clusters(spec: Union[str, None]) -> Union[list, None]:
+    """Parse ``--target-clusters`` accepting canonical ``"d:c"`` and legacy bare ``"c"``.
+
+    Canonical fully-qualified entries (``"0:0"``) are preserved as strings so
+    :func:`_normalize_npu_target_kwargs` can dispatch them across devices;
+    legacy bare integers are still converted to ``int`` for backward
+    compatibility with configs that pin a single device via ``dev_no``.
+    """
     if spec is None:
         return None
     text = spec.strip()
     if not text:
         return None
-    clusters: list[int] = []
+    clusters: list = []
     for item in text.split(";"):
         item = item.strip()
         if not item:
             continue
-        clusters.append(int(item))
+        if ":" in item:
+            clusters.append(item)
+        else:
+            clusters.append(int(item))
     return clusters
 
 
@@ -410,6 +454,91 @@ def _is_vlm_config(config: Any) -> bool:
         return any(any(marker in str(item).lower() for marker in _VLM_MODEL_TYPE_MARKERS) for item in architectures)
 
     return False
+
+
+def _is_eagle3_config(config: Any) -> bool:
+    """Return whether a Transformers config appears to describe an EAGLE-3 speculative release."""
+    try:
+        from mblt_model_zoo.hf_transformers.utils.configuration_utils import MobilintEagle3ConfigMixin
+    except Exception:
+        MobilintEagle3ConfigMixin = None  # type: ignore[assignment]
+    if MobilintEagle3ConfigMixin is not None and isinstance(config, MobilintEagle3ConfigMixin):
+        return True
+
+    model_type = str(getattr(config, "model_type", "") or "").lower()
+    if "eagle3" in model_type:
+        return True
+
+    architectures = getattr(config, "architectures", None)
+    if isinstance(architectures, (list, tuple)):
+        return any("eagle3" in str(item).lower() for item in architectures)
+
+    return False
+
+
+def _detect_eagle3_model(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> bool:
+    """Return whether the loaded model release appears to be an EAGLE-3 speculative bundle.
+
+    Failures to load ``AutoConfig`` are non-fatal: the caller silently falls back to the
+    non-EAGLE-3 path, matching prior behavior when EAGLE-3 auto-detection is unavailable.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return False
+
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return False
+    return _is_eagle3_config(config)
+
+
+def _is_qwen3_vl_config(config: Any) -> bool:
+    """Return whether a Transformers config appears to describe a Mobilint Qwen3-VL release."""
+    model_type = str(getattr(config, "model_type", "") or "").lower()
+    if "qwen3_vl" in model_type or "qwen3-vl" in model_type:
+        return True
+
+    architectures = getattr(config, "architectures", None)
+    if isinstance(architectures, (list, tuple)):
+        return any("qwen3vl" in str(item).lower() or "qwen3_vl" in str(item).lower() for item in architectures)
+
+    return False
+
+
+def _detect_qwen3_vl_model(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> bool:
+    """Return whether the loaded model release appears to be a Mobilint Qwen3-VL bundle.
+
+    Failures to load ``AutoConfig`` are non-fatal: the caller silently falls back to the
+    non-Qwen3-VL path, matching prior behavior when auto-detection is unavailable.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return False
+
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return False
+    return _is_qwen3_vl_config(config)
 
 
 def _auto_detect_vlm_task(args: argparse.Namespace) -> str | None:
@@ -474,11 +603,16 @@ def _apply_vlm_core_mode_model_kwargs(
     text_target_cores: list[str] | None = None,
     vision_target_clusters: list[int] | None = None,
     text_target_clusters: list[int] | None = None,
+    dev_no: int | list[int] | None = None,
+    vision_dev_no: int | list[int] | None = None,
+    text_dev_no: int | list[int] | None = None,
 ) -> dict[str, Any]:
     """Apply shared VLM core-mode kwargs to both vision and text sub-configs.
 
     ``vision_*`` and ``text_*`` overrides take precedence over the base values for their prefix,
-    while the base values continue to fill in any subconfig left unspecified.
+    while the base values continue to fill in any subconfig left unspecified. The per-subconfig
+    ``dev_no`` values are threaded down so :func:`apply_core_mode_model_kwargs` can suppress
+    the legacy default target lists when either subconfig receives a list-shaped ``dev_no``.
     """
     return _apply_subconfig_core_mode_model_kwargs_common(
         model_kwargs,
@@ -490,6 +624,8 @@ def _apply_vlm_core_mode_model_kwargs(
         base_target_clusters=target_clusters,
         subconfig_target_clusters={"vision": vision_target_clusters, "text": text_target_clusters},
         default_single_target_cores=default_single_target_cores,
+        base_dev_no=dev_no,
+        subconfig_dev_nos={"vision": vision_dev_no, "text": text_dev_no},
     )
 
 
@@ -528,6 +664,30 @@ def _candidate_max_batch_sizes(config: Any, *, task: str) -> Iterable[Any]:
             yield getattr(vision_config, "max_batch_size", None)
 
 
+def _candidate_core_modes(config: Any, *, task: str) -> Iterable[Any]:
+    """Yield task-specific ``core_mode`` candidates from a model config.
+
+    Mirrors :func:`_candidate_max_batch_sizes` so the pre-launch core-mode
+    probe honors the same VLM sub-config traversal (Qwen3-VL Batch16 releases
+    ship ``text_config.core_mode``).
+
+    Args:
+        config: Model config object that may expose top-level or nested ``core_mode`` attributes.
+        task: Transformers pipeline task used to decide VLM-specific candidates.
+
+    Yields:
+        Candidate ``core_mode`` string values in priority order.
+    """
+    yield getattr(config, "core_mode", None)
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        yield getattr(text_config, "core_mode", None)
+    if _is_vlm_task(task):
+        vision_config = getattr(config, "vision_config", None)
+        if vision_config is not None:
+            yield getattr(vision_config, "core_mode", None)
+
+
 def _resolve_model_max_batch_size(pipeline: Any, *, task: str) -> int:
     """Resolve the automatic CLI batch size from a loaded pipeline.
 
@@ -564,13 +724,736 @@ def _resolve_cli_batch_size(args: argparse.Namespace, pipeline: Any) -> int:
     return _resolve_model_max_batch_size(pipeline, task=args.task)
 
 
+# Batch and core-mode resolution
+# ------------------------------
+# Every ``args.batch_size`` / ``args.core_mode`` reader in this module routes
+# through one of four canonical entry points so a fourth-repeat "CLI-only
+# reader missing the config-driven aggregate" review comment cannot resurface:
+#
+# Pre-launch (before pipeline construction):
+#     :func:`_resolve_effective_batch_size_pre_launch` (CLI → config → 1)
+#     :func:`_resolve_effective_core_mode_pre_launch`  (CLI → config → None)
+#
+# Post-launch measurement (pipeline exists):
+#     :func:`_resolve_cli_batch_size` (CLI → pipeline config → 1)
+#
+# Post-launch Qwen3-VL guard (pipeline + backend exist):
+#     :func:`_resolve_effective_qwen3_vl_batch` (CLI → backend → config → None)
+#
+# Raw pass-through to :func:`_build_pipeline` (no resolution needed — the
+# Mobilint config layer normalizes the value downstream):
+#     ``core_mode=args.core_mode`` and ``max_batch_size=args.batch_size`` at
+#     the four :func:`_build_pipeline` call sites in ``_run_text_measure``,
+#     ``_run_vlm_measure``, ``_run_text_sweep``, ``_run_vlm_sweep``.
+#
+# Any new CLI-vs-config decision MUST use one of these resolvers; do NOT add
+# a fresh ``args.batch_size`` / ``args.core_mode`` read outside these bodies.
+
+
+_BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES = frozenset({"multi", "global4", "global8"})
+
+
+def _resolve_effective_batch_size_pre_launch(
+    args: argparse.Namespace,
+    *,
+    model: str | None,
+    task: str | None,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> int:
+    """Resolve the effective aggregate ``max_batch_size`` before pipeline construction.
+
+    The pre-launch counterpart to :func:`_resolve_cli_batch_size`. Runs when
+    the pipeline does not exist yet (e.g. from
+    :func:`_default_single_target_cores_for_args`, which decides target-cores
+    defaults that feed into pipeline construction).
+
+    Under the sw-batch contract (AGENTS.md L171-L177) the aggregate
+    ``max_batch_size`` is ``N * K``: a ``K == 1`` release with
+    ``config.max_batch_size = 16`` still fans out to ``N = 16`` sw-batch
+    slots even when the CLI omits ``--batch-size``. Inspecting only
+    ``args.batch_size`` at pre-launch time loses that config-driven ``N`` and
+    was the root cause of the "``K == 1`` MXQ pinned to ``0:0`` on all
+    slots → Model_NotAlive" bug (PR review r3813611879).
+
+    Resolution priority:
+
+    1. ``args.batch_size`` when set — the CLI always wins.
+    2. :func:`_probe_config_max_batch_size` — release config aggregate,
+       task-aware via :func:`_candidate_max_batch_sizes` so VLM
+       ``text_config.max_batch_size`` / ``vision_config.max_batch_size`` are
+       honored.
+    3. ``1`` — both signals absent, treat as non-batched.
+
+    Args:
+        args: Parsed CLI arguments.
+        model: Model repo string or local path. When ``None`` or empty, the
+            config probe is skipped and this returns ``1``.
+        task: Transformers pipeline task (drives VLM sub-config traversal
+            through :func:`_candidate_max_batch_sizes`).
+        trust_remote_code: Forwarded to :meth:`AutoConfig.from_pretrained`.
+        revision: Forwarded to :meth:`AutoConfig.from_pretrained`.
+
+    Returns:
+        Effective aggregate batch size (``>= 1``).
+    """
+    explicit = getattr(args, "batch_size", None)
+    if explicit is not None:
+        try:
+            return max(1, int(explicit))
+        except (TypeError, ValueError):
+            pass
+    if not model:
+        return 1
+    return _probe_config_max_batch_size(
+        str(model),
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+        task=task or "",
+    )
+
+
+def _resolve_effective_core_mode_pre_launch(
+    args: argparse.Namespace,
+    *,
+    model: str | None,
+    task: str | None,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> str | None:
+    """Resolve the effective ``--core-mode`` before pipeline construction.
+
+    Sibling of :func:`_resolve_effective_batch_size_pre_launch`. The pre-launch
+    guard chain (:func:`_enforce_batched_mxq_core_mode_constraint` via
+    :func:`_resolve_effective_llm_core_mode`) uses this to catch a release
+    that ships a non-``single`` ``core_mode`` in its config even when the
+    caller omits ``--core-mode`` — the previous CLI-only read let a
+    ``text_config.core_mode = 'global4'`` release defer silently until
+    post-launch.
+
+    Resolution priority:
+
+    1. ``getattr(args, "core_mode", None)`` when set — the CLI always wins.
+    2. :func:`_probe_config_core_mode` — release config's declared
+       ``core_mode`` (task-aware sub-config traversal).
+    3. ``None`` — no CLI signal and no resolvable config signal; the caller
+       treats this as "unspecified" and falls through to its own default.
+
+    Args:
+        args: Parsed CLI arguments.
+        model: Model repo string or local path. When ``None`` or empty, the
+            config probe is skipped and this returns whatever the CLI holds
+            (possibly ``None``).
+        task: Transformers pipeline task (drives VLM sub-config traversal).
+        trust_remote_code: Forwarded to :meth:`AutoConfig.from_pretrained`.
+        revision: Forwarded to :meth:`AutoConfig.from_pretrained`.
+
+    Returns:
+        Effective core-mode string or ``None`` when neither signal resolves.
+    """
+    explicit = getattr(args, "core_mode", None)
+    if explicit is not None:
+        return explicit
+    if not model:
+        return None
+    return _probe_config_core_mode(
+        str(model),
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+        task=task or "",
+    )
+
+
+def _probe_config_max_batch_size(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+    task: str,
+) -> int:
+    """Return the config-declared aggregate max batch size, or ``1`` when unavailable.
+
+    Loads ``AutoConfig.from_pretrained(model)`` and reuses
+    :func:`_candidate_max_batch_sizes` so the probe honors task-specific VLM
+    sub-configs. Any resolution failure (missing extras, offline, wrong path)
+    returns ``1`` — the guard then treats the target as a non-batch MXQ and
+    the pipeline-construction path surfaces the real error later.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return 1
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return 1
+    for candidate in _candidate_max_batch_sizes(config, task=task):
+        size = _normalize_max_batch_size(candidate)
+        if size is not None:
+            return size
+    return 1
+
+
+def _probe_config_core_mode(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+    task: str,
+) -> str | None:
+    """Return the config-declared ``core_mode``, or ``None`` when unavailable.
+
+    Pre-launch analogue of the ``backend.core_mode`` fallback used by
+    :func:`_verify_batched_mxq_core_mode_post_launch`. Loads
+    ``AutoConfig.from_pretrained(model)`` and walks
+    :func:`_candidate_core_modes` so a Qwen3-VL release shipping
+    ``text_config.core_mode = 'global4'`` (with no CLI ``--core-mode``) is
+    still surfaced. Any resolution failure returns ``None`` and the caller
+    falls through — matching :func:`_probe_config_max_batch_size`'s
+    fault-tolerance discipline.
+    """
+    try:
+        from transformers import AutoConfig
+    except Exception:
+        return None
+    config_kwargs: dict[str, Any] = {"trust_remote_code": trust_remote_code}
+    if revision:
+        config_kwargs["revision"] = revision
+    try:
+        config = AutoConfig.from_pretrained(model, **config_kwargs)
+    except Exception:
+        return None
+    for candidate in _candidate_core_modes(config, task=task):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+def _probe_mxq_artifact_k(mxq_path: str) -> int | None:
+    """Return the compiled batch axis ``K`` of a local MXQ artifact, or ``None`` on failure.
+
+    Uses the authoritative K probe (:meth:`qbruntime.Model.get_cache_infos`
+    ``num_batches`` field, matching :meth:`MobilintNPUBackend._probe_k_per_model`).
+    ``qbruntime.Model(path, ModelConfig())`` parses the MXQ file header and
+    exposes cache metadata *before* ``launch``, so this probe does not upload
+    weights to device memory. Non-local paths (Hub references) are skipped —
+    the config-based probe is the correct fallback for those.
+
+    Returns:
+        The compiled ``num_batches`` when probing succeeds, or ``None`` when
+        the artifact is not a resolvable local file, ``qbruntime`` is not
+        importable, or parsing fails. Callers should treat ``None`` as
+        "unknown" and fall back to the config-based probe.
+    """
+    if not mxq_path:
+        return None
+    try:
+        if not os.path.isfile(mxq_path):
+            return None
+    except (OSError, ValueError):
+        return None
+    try:
+        from qbruntime import Model, ModelConfig, QbRuntimeError
+    except Exception:
+        return None
+    mxq_model = None
+    try:
+        try:
+            mxq_model = Model(mxq_path, ModelConfig())
+        except (QbRuntimeError, OSError, ValueError):
+            return None
+        try:
+            infos = mxq_model.get_cache_infos()
+        except (AttributeError, QbRuntimeError):
+            return None
+        if not infos:
+            return 1
+        try:
+            k = int(getattr(infos[0], "num_batches", 1) or 1)
+        except (TypeError, ValueError):
+            return None
+        return k if k > 0 else 1
+    finally:
+        if mxq_model is not None:
+            try:
+                mxq_model.dispose()
+            except Exception:  # noqa: BLE001 — release path must not raise.
+                pass
+
+
+def _select_llm_mxq_override(args: argparse.Namespace) -> str | None:
+    """Return the LLM-role MXQ path override that governs batched execution.
+
+    The batched-MXQ core-mode constraint follows the *LLM* MXQ's compiled
+    batch axis. When the user overrides the shipped artifact, we probe the
+    override rather than the config's ``max_batch_size`` declaration.
+
+    Precedence mirrors ``_build_pipeline`` role resolution:
+
+    * VLM tasks: ``--text-mxq-path`` (the text LLM in the release).
+    * EAGLE-3 prefixed: ``--base-mxq-path`` (the base LLM; the draft is a
+      one-block helper and does not drive the guard).
+    * Otherwise: the plain ``--mxq-path`` override.
+    """
+    if _is_vlm_task(getattr(args, "task", None)):
+        text_path = getattr(args, "text_mxq_path", None)
+        if text_path:
+            return text_path
+    base_path = getattr(args, "base_mxq_path", None)
+    if base_path:
+        return base_path
+    return getattr(args, "mxq_path", None)
+
+
+def _resolve_effective_llm_core_mode(
+    args: argparse.Namespace,
+    *,
+    is_eagle3: bool,
+) -> tuple[str | None, str, str]:
+    """Return the effective LLM-role core mode plus the CLI flag and args attribute it came from.
+
+    Role-specific overrides take precedence over the shared ``--core-mode``
+    for the LLM MXQ that governs batched execution:
+
+    * VLM tasks: ``--text-core-mode`` (falls back to ``--core-mode``).
+    * EAGLE-3 releases: ``--base-core-mode`` (falls back to ``--core-mode``).
+    * Otherwise (plain LLM): ``--core-mode``.
+
+    Returns a tuple of ``(effective_core_mode, flag_label, args_attr)`` so
+    the caller can raise a rejection message that names the flag the user
+    actually passed and pin the same attribute when auto-defaulting to
+    ``single``.
+
+    When neither a role-specific flag nor ``--core-mode`` is set on the CLI,
+    the base-flag fallback routes through
+    :func:`_resolve_effective_core_mode_pre_launch` so a release that ships
+    a non-``single`` ``core_mode`` in its config (e.g. Qwen3-VL Batch16 with
+    ``text_config.core_mode = 'global4'``) is still surfaced at pre-launch.
+    The ``flag_label`` becomes ``"release config core_mode"`` in that case
+    to keep the SystemExit message honest about where the value came from.
+    """
+    if _is_vlm_task(getattr(args, "task", None)):
+        text_mode = getattr(args, "text_core_mode", None)
+        if text_mode is not None:
+            return text_mode, "--text-core-mode", "text_core_mode"
+    elif is_eagle3:
+        base_mode = getattr(args, "base_core_mode", None)
+        if base_mode is not None:
+            return base_mode, "--base-core-mode", "base_core_mode"
+    if getattr(args, "core_mode", None) is not None:
+        return args.core_mode, "--core-mode", "core_mode"
+    effective = _resolve_effective_core_mode_pre_launch(
+        args,
+        model=getattr(args, "model", None),
+        task=getattr(args, "task", None),
+        trust_remote_code=getattr(args, "trust_remote_code", True),
+        revision=getattr(args, "revision", None),
+    )
+    label = "--core-mode" if effective is None else "release config core_mode"
+    return effective, label, "core_mode"
+
+
+@dataclass(frozen=True)
+class _BatchedMxqGuardContext:
+    """Deferred-guard payload stashed on ``args`` for post-launch verification.
+
+    Populated by :func:`_enforce_batched_mxq_core_mode_constraint` when no
+    local ``--mxq-path`` override was available to probe pre-launch, and
+    consumed by :func:`_verify_batched_mxq_core_mode_post_launch` after the
+    backend has probed the authoritative ``k_per_model``.
+    """
+
+    effective_core_mode: str | None
+    flag_label: str
+    args_attr: str
+    model: str
+
+
+def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
+    """Reject ``--core-mode global4/global8/multi`` on a batched MXQ.
+
+    Batched LLM execution (compiled MXQ batch axis ``K > 1``) only supports
+    ``--core-mode single`` at runtime; see ``mblt_model_zoo/hf_transformers/README.md``
+    and the matching enforcement in ``benchmark/transformers/benchmark_text_generation_models.py``
+    and ``benchmark_image_text_to_text_models.py``. This runs before pipeline
+    construction so users see the same friendly ``SystemExit`` the benchmark
+    scripts raise, rather than a low-level backend error mid-launch.
+
+    The effective core mode for the LLM MXQ is resolved via
+    :func:`_resolve_effective_llm_core_mode` so role-specific overrides
+    (``--text-core-mode`` for VLM, ``--base-core-mode`` for EAGLE-3) that
+    later win in :func:`_apply_vlm_core_mode_model_kwargs` / the EAGLE-3
+    prefix apply-path are also caught here rather than reaching pipeline
+    construction under a non-single mode.
+
+    When the caller overrides the shipped LLM artifact (``--mxq-path`` for
+    text generation, ``--base-mxq-path`` for EAGLE-3, ``--text-mxq-path``
+    for VLM) with a locally resolvable file, the guard probes that artifact's
+    compiled ``K`` via :func:`_probe_mxq_artifact_k`. This avoids two
+    misclassifications the config-only probe used to make: a Batch-N release
+    overridden with a ``K == 1`` MXQ is no longer rejected for ``global4``,
+    and a batch-1 release overridden with a ``K > 1`` MXQ is now caught here
+    instead of reaching an unsupported runtime configuration.
+
+    When no local artifact probe succeeds (no override, non-local override, or
+    ``qbruntime`` unavailable), the guard defers to
+    :func:`_verify_batched_mxq_core_mode_post_launch`. Under the sw-batch
+    contract ``config.max_batch_size`` is the aggregate ``N * K`` capacity,
+    so a pre-launch classification based on that alone would misclassify a
+    ``K == 1`` release with ``N > 1`` sw-batch as batched and reject
+    ``global4`` unnecessarily, while a ``K > 1`` release with a batch-1
+    config would slip through the pre-launch check entirely.
+    :meth:`MobilintNPUBackend._probe_k_per_model` reads the authoritative K
+    from ``qbruntime.Model.get_cache_infos()[0].num_batches`` after launch,
+    so the post-launch verifier can apply the same rejection logic against
+    the true value.
+
+    Non-batch MXQ (effective batch axis ``== 1``) with ``--batch-size B > 1``
+    is a separate sw-batch feature and stays unrestricted — sw-batch across
+    ``N`` slots is orthogonal to the batched-MXQ single-only rule.
+    """
+    model = getattr(args, "model", None)
+    if not model:
+        return
+    trust_remote_code = getattr(args, "trust_remote_code", True)
+    revision = getattr(args, "revision", None)
+    is_eagle3 = False
+    if not _is_vlm_task(getattr(args, "task", None)):
+        is_eagle3 = _detect_eagle3_model(model, trust_remote_code=trust_remote_code, revision=revision)
+    effective_core_mode, flag_label, args_attr = _resolve_effective_llm_core_mode(args, is_eagle3=is_eagle3)
+    if effective_core_mode == "single":
+        return
+    override_path = _select_llm_mxq_override(args)
+    probed_k: int | None = None
+    if override_path:
+        probed_k = _probe_mxq_artifact_k(override_path)
+    if probed_k is None:
+        # No local artifact probe available: defer to post-launch, where
+        # ``k_per_model`` is authoritative. ``config.max_batch_size`` is the
+        # aggregate ``N * K`` under sw-batch and cannot classify K alone.
+        args._batched_mxq_guard_ctx = _BatchedMxqGuardContext(
+            effective_core_mode=effective_core_mode,
+            flag_label=flag_label,
+            args_attr=args_attr,
+            model=str(args.model),
+        )
+        return
+    if probed_k <= 1:
+        return
+    if effective_core_mode is not None and effective_core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
+        raise SystemExit(
+            f"tps: batched MXQ only supports --core-mode single "
+            f"(model={args.model!r}, artifact K={probed_k}, "
+            f"{flag_label}={effective_core_mode!r})"
+        )
+    # Match the benchmark-script convention: pin the resolved role-specific
+    # flag to ``single`` for batched MXQ when the user did not pass it
+    # explicitly. Pinning the role-specific attribute (not just ``core_mode``)
+    # keeps :func:`_apply_vlm_core_mode_model_kwargs` and the EAGLE-3 prefix
+    # apply-path from later escalating the LLM MXQ back to a non-single mode.
+    setattr(args, args_attr, "single")
+
+
+def _resolve_llm_npu_backend(model: Any) -> Any | None:
+    """Locate the LLM MXQ ``MobilintNPUBackend`` on a loaded Mobilint model.
+
+    The LLM MXQ is the one whose compiled ``K`` governs the batched-MXQ
+    core-mode constraint. Attribute-path priority mirrors the LLM-role
+    resolution in :func:`_resolve_effective_llm_core_mode`:
+
+    * EAGLE-3 releases expose the base LLM at ``eagle3_base_model``.
+    * VLM releases keep the text LLM under ``model.language_model``
+      (Qwen3-VL) or ``text_decoder.bert`` (BLIP).
+    * Plain LLM releases carry ``npu_backend`` on the top-level model.
+
+    Returns ``None`` when the pipeline is non-Mobilint or the LLM backend
+    cannot be located; callers should treat that as "unknown" and skip the
+    check rather than false-positive.
+    """
+    if model is None:
+        return None
+    base = getattr(model, "eagle3_base_model", None)
+    if base is not None:
+        backend = getattr(base, "npu_backend", None)
+        if backend is not None:
+            return backend
+    inner = getattr(model, "model", None)
+    if inner is not None:
+        for name in ("language_model", "text_model"):
+            child = getattr(inner, name, None)
+            if child is not None:
+                backend = getattr(child, "npu_backend", None)
+                if backend is not None:
+                    return backend
+    text_decoder = getattr(model, "text_decoder", None)
+    if text_decoder is not None:
+        bert = getattr(text_decoder, "bert", None)
+        if bert is not None:
+            backend = getattr(bert, "npu_backend", None)
+            if backend is not None:
+                return backend
+        backend = getattr(text_decoder, "npu_backend", None)
+        if backend is not None:
+            return backend
+    for name in ("language_model", "text_model"):
+        child = getattr(model, name, None)
+        if child is not None:
+            backend = getattr(child, "npu_backend", None)
+            if backend is not None:
+                return backend
+    return getattr(model, "npu_backend", None)
+
+
+def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Namespace) -> None:
+    """Post-launch counterpart to :func:`_enforce_batched_mxq_core_mode_constraint`.
+
+    Runs after :func:`_build_pipeline` when the pre-launch guard could not
+    probe a local artifact and stashed a
+    :class:`_BatchedMxqGuardContext` on ``args`` instead of using the
+    aggregate ``config.max_batch_size`` (which under the sw-batch contract
+    mixes ``K`` with the slot count ``N`` and cannot classify batched
+    execution on its own).
+
+    Reads ``k_per_model`` — probed by
+    :meth:`MobilintNPUBackend._probe_k_per_model` from
+    ``qbruntime.Model.get_cache_infos()[0].num_batches`` — and raises the
+    same friendly :class:`SystemExit` as the pre-launch guard when the
+    effective LLM core mode is non-``single`` against a batched
+    (``K > 1``) MXQ. Non-Mobilint pipelines, unknown model structures, or
+    missing ``k_per_model`` state fall through silently.
+
+    When the caller omitted the role-specific CLI mode flag,
+    ``ctx.effective_core_mode`` is ``None`` and the fallback reads the
+    loaded backend's actual ``core_mode`` (populated from the release
+    config, e.g. a Qwen3-VL Batch16 release shipping with
+    ``text_config.core_mode = 'global4'``). Without this fallback a
+    batched MXQ under a release-configured ``global4`` runs to completion
+    without ever being validated against the batched-MXQ single-only
+    rule.
+    """
+    ctx = getattr(args, "_batched_mxq_guard_ctx", None)
+    if ctx is None:
+        return
+    model = getattr(pipeline, "model", None)
+    backend = _resolve_llm_npu_backend(model)
+    if backend is None:
+        return
+
+    effective_core_mode = ctx.effective_core_mode
+    flag_label = ctx.flag_label
+    if effective_core_mode is None:
+        # CLI omitted the role-specific mode flag. Fall back to the loaded
+        # backend's actual ``core_mode`` (populated from the release
+        # config) so the guard still fires when the release ships in
+        # global4/global8/multi.
+        effective_core_mode = getattr(backend, "core_mode", None)
+        flag_label = "backend core_mode"
+    if effective_core_mode not in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
+        return
+
+    k = getattr(backend, "k_per_model", None)
+    if not isinstance(k, int) or k <= 1:
+        return
+    raise SystemExit(
+        f"tps: batched MXQ only supports --core-mode single "
+        f"(model={ctx.model!r}, artifact K={k}, "
+        f"{flag_label}={effective_core_mode!r})"
+    )
+
+
+def _qwen3_vl_batched_non_batch_text_mxq_message(model: str, max_batch_size: int) -> str:
+    """Shared reject message for the Qwen3-VL batched sw-batch guard.
+
+    Kept between the pre-launch fast path
+    (:func:`_reject_qwen3_vl_batched_non_batch_text_mxq`) and the post-launch
+    verifier (:func:`_verify_qwen3_vl_batch_constraint_post_launch`) so both
+    surfaces raise the same ``SystemExit`` text.
+    """
+    return (
+        "tps: batched Qwen3-VL sw-batch requires a batched text MXQ (K > 1). "
+        "The selected release ships a non-batch text MXQ (K = 1) whose "
+        "[inputs, deepstack, rope] signature is incompatible with the Batch16 "
+        "[inputs, rope, deepstack] layout expected by the batched path. "
+        "Drop --batch-size or use a Batch16 release "
+        f"(model={model!r}, --batch-size={int(max_batch_size)})."
+    )
+
+
+def _reject_qwen3_vl_batched_non_batch_text_mxq(
+    *,
+    model: str,
+    task: str,
+    max_batch_size: int,
+    trust_remote_code: bool,
+    revision: str | None,
+    subconfig_options: SubconfigPipelineOptions | None,
+) -> None:
+    """Fast-path reject for ``--batch-size B > 1`` on a Qwen3-VL non-batch text MXQ.
+
+    ``MobilintQwen3VLTextModel._llm_forward_batch_deepstack`` only supports the
+    3-input ``[inputs, rope, deepstack]`` Batch16 layout. Routing ``B > 1`` onto
+    a ``K == 1`` text MXQ either raises mid-benchmark (static 2-input build) or
+    silently corrupts outputs (dynamic 3-input build whose compiled
+    ``[inputs, deepstack, rope]`` order does not match the batched helper's
+    packed ``[rope, deepstack]`` extras).
+
+    Probes the compiled ``K`` only through a locally-resolvable
+    ``--text-mxq-path`` (via :func:`_probe_mxq_artifact_k`). When the override
+    is Hub-relative or absent, the probe returns ``None`` and the guard defers
+    to :func:`_verify_qwen3_vl_batch_constraint_post_launch`, which reads the
+    authoritative ``k_per_model`` off the launched text backend. The release
+    config's ``text_config.max_batch_size`` is intentionally NOT consulted
+    here: it reflects the shipped artifact, not the ``--text-mxq-path``
+    override, so a Batch16 release with a non-batch override would be false-
+    approved and a non-batch release with a batched override would be false-
+    rejected.
+    """
+    if max_batch_size <= 1:
+        return
+    if not _detect_qwen3_vl_model(model, trust_remote_code=trust_remote_code, revision=revision):
+        return
+
+    text_override = subconfig_options.text_mxq_path if subconfig_options is not None else None
+    if not text_override:
+        return
+    probed_k = _probe_mxq_artifact_k(text_override)
+    if probed_k is None or probed_k > 1:
+        return
+
+    raise SystemExit(_qwen3_vl_batched_non_batch_text_mxq_message(model, max_batch_size))
+
+
+def _resolve_effective_qwen3_vl_batch(
+    args: argparse.Namespace,
+    pipeline: Any,
+    backend: Any,
+) -> int | None:
+    """Return the effective aggregate batch capacity for the Qwen3-VL text backend.
+
+    Under the sw-batch contract (AGENTS.md L171-L177) the aggregate
+    ``max_batch_size`` is ``N * K``, where ``K`` is the compiled MXQ batch
+    axis and ``N`` is the launched slot count. When the caller omits
+    ``--batch-size``, ``N`` is chosen from the release config's
+    ``text_config.max_batch_size`` — a Batch16 release with a Hub-relative
+    ``K == 1`` override still fans out to ``N = 16`` sw-batch slots. The
+    Qwen3-VL post-launch guard must fire on this true aggregate, not just
+    the explicit CLI flag.
+
+    Resolution priority:
+
+    1. ``args.batch_size`` when set — the CLI always wins.
+    2. ``backend.max_batch_size`` — authoritative post-launch aggregate stashed
+       by :class:`MobilintNPUBackend` at construction time (see
+       ``mblt_model_zoo/utils/npu_backend.py``).
+    3. ``pipeline.model.config.text_config.max_batch_size`` (then
+       ``config.max_batch_size``) — release-shipped fallback for backends
+       that do not expose the aggregate.
+
+    Returns ``None`` when no signal resolves; the caller then falls through.
+    """
+    explicit = getattr(args, "batch_size", None)
+    if explicit is not None:
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            return None
+    backend_batch = _normalize_max_batch_size(getattr(backend, "max_batch_size", None))
+    if backend_batch is not None:
+        return backend_batch
+    inner = getattr(pipeline, "model", None)
+    config = getattr(inner, "config", None)
+    if config is None:
+        return None
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        text_batch = _normalize_max_batch_size(getattr(text_config, "max_batch_size", None))
+        if text_batch is not None:
+            return text_batch
+    return _normalize_max_batch_size(getattr(config, "max_batch_size", None))
+
+
+def _verify_qwen3_vl_batch_constraint_post_launch(pipeline: Any, args: argparse.Namespace) -> None:
+    """Post-launch counterpart to :func:`_reject_qwen3_vl_batched_non_batch_text_mxq`.
+
+    The pre-launch guard only rejects when a locally-resolvable
+    ``--text-mxq-path`` override probes ``K == 1``; a Hub-relative override
+    (a filename inside the release repo, not a local path) or an unset
+    override yields ``probed_k is None`` and the pre-launch guard defers.
+    This post-launch verifier reads the authoritative ``k_per_model`` off the
+    constructed text backend — reflecting the actually loaded artifact, not
+    the shipped release config's ``text_config.max_batch_size`` — and raises
+    the same friendly :class:`SystemExit` when ``K == 1`` under an aggregate
+    batch capacity greater than one.
+
+    The effective aggregate capacity is resolved via
+    :func:`_resolve_effective_qwen3_vl_batch` so a config-configured
+    ``N > 1`` (Batch16 release with a Hub-relative ``K == 1`` text MXQ
+    override) still triggers the guard even when the CLI omits
+    ``--batch-size``. Under AGENTS.md L171-L177 the aggregate
+    ``max_batch_size`` is ``N * K``; inspecting only ``args.batch_size``
+    would lose the config-driven ``N``.
+
+    Non-VLM tasks, effective batch ``<= 1``, non-Qwen3-VL releases, and
+    unknown model structures fall through silently, matching the pre-launch
+    guard's fall-through discipline.
+
+    TODO(beomsu): unify with :func:`_verify_batched_mxq_core_mode_post_launch`
+    if a general ``_verify_backend_k(pipeline, k_predicate, error_factory)``
+    helper lands.
+    """
+    task = getattr(args, "task", None)
+    if not _is_vlm_task(task):
+        return
+    model = getattr(args, "model", None)
+    if not model:
+        return
+    trust_remote_code = getattr(args, "trust_remote_code", True)
+    revision = getattr(args, "revision", None)
+    if not _detect_qwen3_vl_model(model, trust_remote_code=trust_remote_code, revision=revision):
+        return
+    inner = getattr(pipeline, "model", None)
+    backend = _resolve_llm_npu_backend(inner)
+    if backend is None:
+        return
+    effective_batch = _resolve_effective_qwen3_vl_batch(args, pipeline, backend)
+    if effective_batch is None or effective_batch <= 1:
+        return
+    k = getattr(backend, "k_per_model", None)
+    if not isinstance(k, int) or k > 1:
+        return
+    raise SystemExit(_qwen3_vl_batched_non_batch_text_mxq_message(str(model), int(effective_batch)))
+
+
 def _default_single_target_cores_for_args(args: argparse.Namespace) -> Sequence[str] | None:
     """Return default single-mode target cores for the pipeline construction phase.
 
-    Explicit batched TPS runs should leave ``target_cores`` unset so qbruntime can use every
+    Batched TPS runs should leave ``target_cores`` unset so qbruntime can use every
     available core in single mode. User-provided ``--target-cores`` still takes precedence.
+    A list-shaped ``--dev-no`` (e.g. ``--dev-no 0,1``) also skips the default because
+    the legacy ``"0:0"`` sentinel would migrate to a single-device canonical target during
+    setter application and force the model-init re-normalization to warn about the mismatch.
+
+    The batched-vs-not classification routes through
+    :func:`_resolve_effective_batch_size_pre_launch` so the config-driven
+    aggregate is honored when the CLI omits ``--batch-size``. Under sw-batch,
+    a ``K == 1`` release with ``config.max_batch_size = 16`` still fans out
+    to ``N = 16`` slots; pinning every slot to ``"0:0"`` would collapse them
+    onto one core and trigger ``Model_NotAlive`` mid-launch (PR review
+    r3813611879).
     """
-    if getattr(args, "batch_size", None) is not None and int(args.batch_size) > 1:
+    effective_batch = _resolve_effective_batch_size_pre_launch(
+        args,
+        model=getattr(args, "model", None),
+        task=getattr(args, "task", None),
+        trust_remote_code=getattr(args, "trust_remote_code", True),
+        revision=getattr(args, "revision", None),
+    )
+    if effective_batch > 1:
+        return None
+    if isinstance(getattr(args, "dev_no", None), (list, tuple)):
         return None
     return ("0:0",)
 
@@ -586,6 +1469,77 @@ def _require_transformers_deps() -> None:
             file=sys.stderr,
         )
         raise SystemExit(2)
+
+
+_MOBILINT_REPO_PREFIX = "mobilint/"
+
+
+def _resolve_mobilint_config_mixins() -> tuple[type, ...] | None:
+    """Return the Mobilint config mixin classes, or ``None`` if unavailable.
+
+    The mixins live under the optional ``mblt_model_zoo.hf_transformers``
+    subpackage, which itself imports upstream ``transformers``. This helper
+    isolates the import so the CLI keeps working when the extra is missing;
+    a caller that fails to load the mixins simply treats every model as
+    non-Mobilint and skips backend-only kwarg injection.
+    """
+    try:
+        from mblt_model_zoo.hf_transformers.utils.configuration_utils import (
+            MobilintConfigMixin,
+            MobilintEagle3ConfigMixin,
+            MobilintEncoderDecoderConfigMixin,
+            MobilintVisionTextConfigMixin,
+        )
+    except ImportError:
+        return None
+    return (
+        MobilintConfigMixin,
+        MobilintEncoderDecoderConfigMixin,
+        MobilintVisionTextConfigMixin,
+        MobilintEagle3ConfigMixin,
+    )
+
+
+def _is_mobilint_model_target(
+    model: str,
+    *,
+    trust_remote_code: bool,
+    revision: str | None,
+) -> bool:
+    """Return ``True`` when ``model`` should be loaded as a Mobilint release.
+
+    Backend-only kwargs (``max_batch_size`` / ``text_max_batch_size`` /
+    ``base_max_batch_size``) are consumed only by Mobilint config mixins, so
+    forwarding them to a stock upstream config causes ``from_pretrained`` to
+    fail before measurement starts. Two positive signals are accepted:
+
+    1. The model repo string starts with ``mobilint/`` — the shipped Mobilint
+       namespace on Hugging Face Hub. This fast path avoids a config download
+       when the intent is obvious.
+    2. Resolving the model via :meth:`AutoConfig.from_pretrained` yields a
+       config that is an instance of a Mobilint mixin. Any failure to resolve
+       (missing extras, offline, wrong path) returns ``False`` and skips
+       injection — the caller's pipeline construction will still surface the
+       real error.
+    """
+    if isinstance(model, str) and model.startswith(_MOBILINT_REPO_PREFIX):
+        return True
+    mixins = _resolve_mobilint_config_mixins()
+    if mixins is None:
+        return False
+    try:
+        from transformers import AutoConfig
+    except ImportError:
+        return False
+    try:
+        config = AutoConfig.from_pretrained(
+            model,
+            trust_remote_code=trust_remote_code,
+            revision=revision,
+        )
+    except Exception:
+        return False
+    return isinstance(config, mixins)
 
 
 def _resolve_asr_pipeline_num_beams(pipeline: Any) -> int:
@@ -628,6 +1582,8 @@ def _build_pipeline(
     target_clusters: Union[list[int], None],
     default_single_target_cores: Sequence[str] | None = ("0:0",),
     subconfig_options: SubconfigPipelineOptions | None = None,
+    max_batch_size: Union[int, None] = None,
+    dev_no: Union[int, list[int], None] = None,
 ) -> Any:
     _require_transformers_deps()
     from transformers import pipeline as hf_pipeline
@@ -676,9 +1632,68 @@ def _build_pipeline(
             eagle3_options.base_target_clusters,
             eagle3_options.draft_target_clusters,
             eagle3_options.fc_target_clusters,
+            eagle3_options.base_dev_no,
+            eagle3_options.draft_dev_no,
+            eagle3_options.fc_dev_no,
         )
     )
+    # MobilintEagle3ConfigMixin only exposes base_/draft_/fc_-prefixed dev_no and max_batch_size
+    # setters, so a bare `--dev-no` or `--batch-size` on an EAGLE-3 release would otherwise be
+    # silently dropped. Detect the release once and broadcast either global into the prefixed
+    # trio (per-prefix explicit values still win via the coalesce below). Skip detection for VLM
+    # tasks, when a prefixed sugar option was already requested, and when neither global needs to
+    # be broadcast.
+    _eagle3_broadcast_needed = (
+        not _is_vlm_task(task) and not eagle3_prefix_requested and (dev_no is not None or max_batch_size is not None)
+    )
+    _is_eagle3_release = _eagle3_broadcast_needed and _detect_eagle3_model(
+        model, trust_remote_code=trust_remote_code, revision=revision
+    )
+    eagle3_broadcast_dev_no = _is_eagle3_release and dev_no is not None
+    eagle3_broadcast_batch = _is_eagle3_release and max_batch_size is not None
+    # EAGLE-3 speculative decoding hard-fails on batch > 1 inside
+    # ``MobilintEagle3GenerationMixin.generate`` (see generation_utils.py). Rejecting
+    # ``--batch-size > 1`` here avoids allocating a larger base backend for a run that
+    # cannot succeed downstream. Both bare ``--batch-size`` and prefixed EAGLE-3 sugar
+    # request the same base capacity, so ``eagle3_prefix_requested`` and detected
+    # ``_is_eagle3_release`` both trigger the guard; VLM tasks stay on the
+    # ``text_max_batch_size`` path and are excluded.
+    if (
+        max_batch_size is not None
+        and int(max_batch_size) > 1
+        and not _is_vlm_task(task)
+        and (eagle3_prefix_requested or _is_eagle3_release)
+    ):
+        raise SystemExit(
+            "tps: EAGLE-3 releases only support batch size 1 "
+            f"(model={model!r}, --batch-size={int(max_batch_size)}); "
+            "drop --batch-size or use a non-EAGLE-3 release."
+        )
     subconfig_options = subconfig_options or SubconfigPipelineOptions()
+    # Backend-only kwargs (``dev_no`` sugar and its prefixed variants, plus
+    # ``max_batch_size`` / ``text_max_batch_size`` / ``base_max_batch_size``) are
+    # consumed only by Mobilint config mixins; stock upstream configs reject
+    # unknown kwargs before measurement starts. Resolve the target class once
+    # here (``AutoConfig.from_pretrained`` is not free) and share the answer
+    # with every gate below. Skip the probe entirely when nothing that flows
+    # through the gate is set, so callers that never touch ``--dev-no`` /
+    # ``--batch-size`` do not pay the download. For non-Mobilint targets
+    # ``--dev-no`` is a silent no-op and ``--batch-size`` stays a
+    # measurement-only knob applied later via ``_resolve_cli_batch_size``.
+    _gate_input_present = (
+        dev_no is not None
+        or max_batch_size is not None
+        or subconfig_options.vision_dev_no is not None
+        or subconfig_options.text_dev_no is not None
+        or eagle3_options.base_dev_no is not None
+        or eagle3_options.draft_dev_no is not None
+        or eagle3_options.fc_dev_no is not None
+    )
+    is_mobilint = _gate_input_present and _is_mobilint_model_target(
+        model,
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+    )
     if _is_vlm_task(task):
         model_kwargs = _apply_vlm_core_mode_model_kwargs(
             model_kwargs,
@@ -692,12 +1707,27 @@ def _build_pipeline(
             text_target_cores=subconfig_options.text_target_cores,
             vision_target_clusters=subconfig_options.vision_target_clusters,
             text_target_clusters=subconfig_options.text_target_clusters,
+            dev_no=dev_no,
+            vision_dev_no=subconfig_options.vision_dev_no,
+            text_dev_no=subconfig_options.text_dev_no,
         )
         if subconfig_options.vision_mxq_path:
             model_kwargs["vision_mxq_path"] = subconfig_options.vision_mxq_path
         if subconfig_options.text_mxq_path:
             model_kwargs["text_mxq_path"] = subconfig_options.text_mxq_path
-    elif eagle3_prefix_requested:
+        # VLM sub-configs pop only their prefixed dev_no; expand bare --dev-no
+        # into both prefixes, honoring any per-prefix override. Only Mobilint
+        # VLM mixins consume ``vision_dev_no`` / ``text_dev_no``; skip injection
+        # on non-Mobilint targets to keep ``--dev-no`` a silent no-op there.
+        if is_mobilint:
+            for prefix, prefix_dev_no in (
+                ("vision", subconfig_options.vision_dev_no),
+                ("text", subconfig_options.text_dev_no),
+            ):
+                effective_dev_no = prefix_dev_no if prefix_dev_no is not None else dev_no
+                if effective_dev_no is not None:
+                    model_kwargs[f"{prefix}_dev_no"] = effective_dev_no
+    elif eagle3_prefix_requested or eagle3_broadcast_dev_no:
         _warn_eagle3_override("--core-mode", "--base-core-mode", core_mode, eagle3_options.base_core_mode)
         _warn_eagle3_override("--core-mode", "--draft-core-mode", core_mode, eagle3_options.draft_core_mode)
         _warn_eagle3_override("--core-mode", "--fc-core-mode", core_mode, eagle3_options.fc_core_mode)
@@ -725,28 +1755,34 @@ def _build_pipeline(
         _warn_eagle3_override("--mxq-path", "--base-mxq-path", mxq_path, eagle3_options.base_mxq_path)
         _warn_eagle3_override("--mxq-path", "--draft-mxq-path", mxq_path, eagle3_options.draft_mxq_path)
         _warn_eagle3_override("--mxq-path", "--fc-mxq-path", mxq_path, eagle3_options.fc_mxq_path)
+        _warn_eagle3_override("--dev-no", "--base-dev-no", dev_no, eagle3_options.base_dev_no)
+        _warn_eagle3_override("--dev-no", "--draft-dev-no", dev_no, eagle3_options.draft_dev_no)
+        _warn_eagle3_override("--dev-no", "--fc-dev-no", dev_no, eagle3_options.fc_dev_no)
 
         def _coalesce(preferred: Any, fallback: Any) -> Any:
             return preferred if preferred is not None else fallback
 
-        for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters in (
+        for prefix, prefix_core_mode, prefix_target_cores, prefix_target_clusters, prefix_dev_no in (
             (
                 "base",
                 _coalesce(eagle3_options.base_core_mode, core_mode),
                 _coalesce(eagle3_options.base_target_cores, target_cores),
                 _coalesce(eagle3_options.base_target_clusters, target_clusters),
+                _coalesce(eagle3_options.base_dev_no, dev_no),
             ),
             (
                 "draft",
                 _coalesce(eagle3_options.draft_core_mode, core_mode),
                 _coalesce(eagle3_options.draft_target_cores, target_cores),
                 _coalesce(eagle3_options.draft_target_clusters, target_clusters),
+                _coalesce(eagle3_options.draft_dev_no, dev_no),
             ),
             (
                 "fc",
                 _coalesce(eagle3_options.fc_core_mode, core_mode),
                 _coalesce(eagle3_options.fc_target_cores, target_cores),
                 _coalesce(eagle3_options.fc_target_clusters, target_clusters),
+                _coalesce(eagle3_options.fc_dev_no, dev_no),
             ),
         ):
             model_kwargs = _apply_core_mode_model_kwargs_common(
@@ -756,7 +1792,10 @@ def _build_pipeline(
                 target_clusters=prefix_target_clusters,
                 default_single_target_cores=default_single_target_cores,
                 prefix=prefix,
+                dev_no=prefix_dev_no,
             )
+            if prefix_dev_no is not None and is_mobilint:
+                model_kwargs[f"{prefix}_dev_no"] = prefix_dev_no
         _warn_eagle3_applied_options_summary(model_kwargs)
     else:
         model_kwargs = _apply_core_mode_model_kwargs_common(
@@ -765,7 +1804,42 @@ def _build_pipeline(
             target_cores=target_cores,
             target_clusters=target_clusters,
             default_single_target_cores=default_single_target_cores,
+            dev_no=dev_no,
         )
+        if dev_no is not None and is_mobilint:
+            model_kwargs["dev_no"] = dev_no
+    if max_batch_size is not None and is_mobilint:
+        # ``dev_no`` and ``max_batch_size`` share the Mobilint gate hoisted above the
+        # dispatch: stock upstream configs reject unknown kwargs before measurement
+        # starts, so on non-Mobilint targets ``--batch-size`` stays a measurement-only
+        # knob (synthetic batch around ``generate``) applied later via
+        # ``_resolve_cli_batch_size``.
+        # Propagate to the config layer so the backend launches N = ceil(B / K) slots at construction
+        # time. EAGLE-3 releases only accept base_/draft_/fc_-prefixed max_batch_size; broadcast the
+        # bare `--batch-size` onto `base_max_batch_size` to match the prefixed-sugar path when the
+        # release is detected as EAGLE-3.
+        if _is_vlm_task(task):
+            # Qwen3-VL batched sw-batch (``text_max_batch_size = B > 1`` on a non-batch text
+            # MXQ, ``K == 1``) enters ``MobilintQwen3VLTextModel._llm_forward_batch_deepstack``,
+            # which only supports the Batch16 3-input ``[inputs, rope, deepstack]`` MXQ signature.
+            # A static 2-input non-batch release raises ``ValueError`` mid-benchmark; a dynamic
+            # 3-input non-batch release passes the ``_uses_rope_input`` guard but the compiled
+            # ``[inputs, deepstack, rope]`` order does not match the batched helper's packed
+            # ``[rope, deepstack]`` extras, silently corrupting outputs. Reject early so the
+            # user does not pay the model-load cost before failing (or, worse, get wrong results).
+            _reject_qwen3_vl_batched_non_batch_text_mxq(
+                model=model,
+                task=task,
+                max_batch_size=int(max_batch_size),
+                trust_remote_code=trust_remote_code,
+                revision=revision,
+                subconfig_options=subconfig_options,
+            )
+            model_kwargs["text_max_batch_size"] = int(max_batch_size)
+        elif eagle3_prefix_requested or eagle3_broadcast_batch:
+            model_kwargs["base_max_batch_size"] = int(max_batch_size)
+        else:
+            model_kwargs["max_batch_size"] = int(max_batch_size)
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
@@ -812,6 +1886,8 @@ def _extract_subconfig_pipeline_kwargs(args: argparse.Namespace) -> SubconfigPip
         text_target_clusters=getattr(args, "text_target_clusters", None),
         vision_mxq_path=getattr(args, "vision_mxq_path", None),
         text_mxq_path=getattr(args, "text_mxq_path", None),
+        vision_dev_no=getattr(args, "vision_dev_no", None),
+        text_dev_no=getattr(args, "text_dev_no", None),
     )
 
 
@@ -832,6 +1908,9 @@ def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineO
         base_target_clusters=args.base_target_clusters,
         draft_target_clusters=args.draft_target_clusters,
         fc_target_clusters=args.fc_target_clusters,
+        base_dev_no=getattr(args, "base_dev_no", None),
+        draft_dev_no=getattr(args, "draft_dev_no", None),
+        fc_dev_no=getattr(args, "fc_dev_no", None),
     )
 
 
@@ -1633,6 +2712,7 @@ def _units_for_section(
 def _cmd_measure(args: argparse.Namespace) -> int:
     """Dispatch a single TPS measurement to the text or VLM measurement path."""
     _normalize_task_defaults(args)
+    _enforce_batched_mxq_core_mode_constraint(args)
     if _is_vlm_task(args.task):
         return _run_vlm_measure(args)
     return _run_text_measure(args)
@@ -1641,6 +2721,11 @@ def _cmd_measure(args: argparse.Namespace) -> int:
 def _run_text_measure(args: argparse.Namespace) -> int:
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
+    # ``core_mode=args.core_mode`` and ``max_batch_size=args.batch_size`` are
+    # intentional raw pass-through: the Mobilint config layer normalizes the
+    # aggregate downstream. See the "Batch and core-mode resolution" doc
+    # block near :func:`_resolve_cli_batch_size` for the canonical entry
+    # points if a new CLI-vs-config decision is needed here.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -1658,7 +2743,11 @@ def _run_text_measure(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
@@ -1982,6 +3071,9 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
             stacklevel=2,
         )
         args.print_output = False
+    # Raw pass-through of ``args.core_mode`` / ``args.batch_size`` — see the
+    # "Batch and core-mode resolution" doc block near
+    # :func:`_resolve_cli_batch_size` for the canonical resolvers.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -1999,7 +3091,11 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
 
     from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
@@ -2533,6 +3629,7 @@ def _run_vlm_measure(args: argparse.Namespace) -> int:
 def _cmd_sweep(args: argparse.Namespace) -> int:
     """Dispatch a TPS sweep to the text or VLM measurement path."""
     _normalize_task_defaults(args)
+    _enforce_batched_mxq_core_mode_constraint(args)
     if _is_vlm_task(args.task):
         return _run_vlm_sweep(args)
     return _run_text_sweep(args)
@@ -2542,6 +3639,9 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
     """Run a text-generation TPS prefill/decode sweep."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
+    # Raw pass-through of ``args.core_mode`` / ``args.batch_size`` — see the
+    # "Batch and core-mode resolution" doc block near
+    # :func:`_resolve_cli_batch_size` for the canonical resolvers.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -2559,7 +3659,11 @@ def _run_text_sweep(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
 
@@ -3028,6 +4132,9 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
     """Run a VLM TPS sweep including vision encoder and LLM phases."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     _normalize_runtime_defaults(args)
+    # Raw pass-through of ``args.core_mode`` / ``args.batch_size`` — see the
+    # "Batch and core-mode resolution" doc block near
+    # :func:`_resolve_cli_batch_size` for the canonical resolvers.
     pipeline = _build_pipeline(
         task=args.task,
         model=args.model,
@@ -3045,7 +4152,11 @@ def _run_vlm_sweep(args: argparse.Namespace) -> int:
         target_clusters=args.target_clusters,
         default_single_target_cores=_default_single_target_cores_for_args(args),
         subconfig_options=_extract_subconfig_pipeline_kwargs(args),
+        max_batch_size=args.batch_size,
+        dev_no=getattr(args, "dev_no", None),
     )
+    _verify_batched_mxq_core_mode_post_launch(pipeline, args)
+    _verify_qwen3_vl_batch_constraint_post_launch(pipeline, args)
     batch_size = _resolve_cli_batch_size(args, pipeline)
     _apply_sweep_batch_auto_scale(args, pipeline)
 
@@ -3737,13 +4848,34 @@ def add_tps_parser(
             "--target-cores",
             type=_parse_target_cores,
             default=None,
-            help='Target cores (e.g., "0:0;0:1;0:2;0:3")',
+            help=(
+                'Target cores as canonical "d:c:k" per entry (e.g., "0:0:0;0:0:1;1:0:0") '
+                'or legacy "c:k" (e.g., "0:0;0:1"). Legacy entries take their device prefix '
+                "from --dev-no or the model config."
+            ),
         )
         p.add_argument(
             "--target-clusters",
             type=_parse_target_clusters,
             default=None,
-            help='Target clusters (e.g., "0;1")',
+            help=(
+                'Target clusters as canonical "d:c" per entry (e.g., "0:0;1:0") or legacy '
+                'bare "c" (e.g., "0;1"). Legacy entries take their device prefix from '
+                "--dev-no or the model config."
+            ),
+        )
+        p.add_argument(
+            "--dev-no",
+            type=_parse_dev_no,
+            default=None,
+            help=(
+                "Device-prefix sugar for canonical NPU targets. Scalar (e.g., "
+                '"--dev-no 1") pins one device; comma-separated (e.g., "--dev-no 0,1") '
+                "expands the target set across those devices. Fills in the device "
+                "component of legacy target entries and, when target lists are omitted, "
+                "supplies the device set for --core-mode expansion. EAGLE-3 prefix "
+                "options take precedence."
+            ),
         )
         for prefix in ("base", "draft", "fc"):
             p.add_argument(
@@ -3756,13 +4888,22 @@ def add_tps_parser(
                 f"--{prefix}-target-cores",
                 type=_parse_target_cores,
                 default=None,
-                help=f'{prefix} target cores (e.g., "0:0;0:1")',
+                help=f'{prefix} target cores as canonical "d:c:k" (e.g., "0:0:0;1:0:0") or legacy "c:k".',
             )
             p.add_argument(
                 f"--{prefix}-target-clusters",
                 type=_parse_target_clusters,
                 default=None,
-                help=f'{prefix} target clusters (e.g., "0;1")',
+                help=f'{prefix} target clusters as canonical "d:c" (e.g., "0:0;1:0") or legacy bare "c".',
+            )
+            p.add_argument(
+                f"--{prefix}-dev-no",
+                type=_parse_dev_no,
+                default=None,
+                help=(
+                    f"{prefix} device-prefix sugar (scalar or comma-separated); falls back "
+                    "to --dev-no when unspecified."
+                ),
             )
         for prefix in ("vision", "text"):
             p.add_argument(
@@ -3775,13 +4916,28 @@ def add_tps_parser(
                 f"--{prefix}-target-cores",
                 type=_parse_target_cores,
                 default=None,
-                help=f'VLM only: {prefix} target cores override (e.g., "0:0;0:1")',
+                help=(
+                    f'VLM only: {prefix} target cores override as canonical "d:c:k" '
+                    '(e.g., "0:0:0;1:0:0") or legacy "c:k".'
+                ),
             )
             p.add_argument(
                 f"--{prefix}-target-clusters",
                 type=_parse_target_clusters,
                 default=None,
-                help=f'VLM only: {prefix} target clusters override (e.g., "0;1")',
+                help=(
+                    f'VLM only: {prefix} target clusters override as canonical "d:c" '
+                    '(e.g., "0:0;1:0") or legacy bare "c".'
+                ),
+            )
+            p.add_argument(
+                f"--{prefix}-dev-no",
+                type=_parse_dev_no,
+                default=None,
+                help=(
+                    f"VLM only: {prefix} device-prefix sugar (scalar or comma-separated); "
+                    "falls back to --dev-no when unspecified."
+                ),
             )
         p.add_argument("--device-map", default=None, help="transformers device_map (optional)")
         p.add_argument("--dtype", default=None, help="dtype (e.g., auto, float16, bfloat16)")
@@ -3813,7 +4969,14 @@ def add_tps_parser(
             "--batch-size",
             type=_parse_positive_int,
             default=None,
-            help="batch size for synthetic inputs; defaults to model max_batch_size when available",
+            help=(
+                "batch size for synthetic inputs; defaults to model max_batch_size when available. "
+                "max_batch_size is the aggregate capacity N*K, where K is the MXQ's compiled batch "
+                "axis and N = ceil(max_batch_size / K) Model slots are launched across the target "
+                "device set. Non-batch MXQ (K=1) uses sw-batch across N slots. EAGLE-3 releases "
+                "only support batch size 1. Qwen3-VL VLM batching requires a batched (Batch16) "
+                "text MXQ; non-batch text releases are rejected."
+            ),
         )
         _add_device_tracking_args(p)
         p.set_defaults(device_backend=None)
