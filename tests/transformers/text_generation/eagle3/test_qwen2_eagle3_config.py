@@ -91,6 +91,26 @@ def test_qwen2_eagle3_config_exposes_prefixed_backend_properties() -> None:
     assert all(str(cluster) for cluster in config.fc_target_clusters)
 
 
+def test_qwen2_eagle3_config_routes_prefixed_target_devices_to_backends() -> None:
+    """Board overrides must remain backend-backed after configuration loading."""
+    config = MobilintQwen2Eagle3Config(
+        vocab_size=10,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=2,
+    )
+
+    config.base_target_device = "regulus-ra"
+    config.draft_target_device = "regulus-rb"
+    config.fc_target_device = "aries-rb"
+
+    assert config.base_npu_backend.target_device == "regulus-ra"
+    assert config.draft_npu_backend.target_device == "regulus-rb"
+    assert config.fc_npu_backend.target_device == "aries-rb"
+
+
 def test_qwen2_eagle3_config_name_or_path_propagates_to_draft_config() -> None:
     """Setting name_or_path on parent config should propagate to nested draft config."""
     config = MobilintQwen2Eagle3Config(

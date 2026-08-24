@@ -10,7 +10,9 @@ from mblt_npu.npu_target import (
     _migrate_target_clusters,
     _migrate_target_cores,
     cluster_map,
+    cluster_to_int,
     core_map,
+    core_to_int,
 )
 
 __all__ = [
@@ -20,5 +22,7 @@ __all__ = [
     "_migrate_target_clusters",
     "_migrate_target_cores",
     "cluster_map",
+    "cluster_to_int",
     "core_map",
+    "core_to_int",
 ]

@@ -33,6 +33,7 @@ class TTS(nn.Module):
                 target_core: Optional[str] = None,
                 encoder_mxq_path: Optional[str] = None,
                 decoder_mxq_path: Optional[str] = None,
+                target_device: str = "aries-rb",
         ):
         nn.Module.__init__(self)
         if device == "auto":
@@ -58,6 +59,8 @@ class TTS(nn.Module):
         
         if decoder_mxq_path is not None:
             hps.model.decoder_mxq_path = decoder_mxq_path
+
+        hps.model.target_device = target_device
 
         num_languages = hps.num_languages
         num_tones = hps.num_tones
@@ -100,6 +103,7 @@ class TTS(nn.Module):
 
             dev_no=hps.model.dev_no,
             target_cores=[hps.model.target_core],
+            target_device=hps.model.target_device,
         ).to(device)
     
     @staticmethod

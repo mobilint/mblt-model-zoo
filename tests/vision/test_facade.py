@@ -5,11 +5,15 @@ from __future__ import annotations
 import importlib
 
 import mblt_vision
+from mblt_vision.compile.vision import DEFAULT_PERCENTILE as StandaloneDefaultPercentile
 from mblt_vision.datasets import get_dataset_config as standalone_dataset_config
 from mblt_vision.utils.letterbox import LetterBoxGeometry
+from mblt_vision.utils.preprocess.base import PreOps
 from mblt_vision.utils.results import Results
 
 import mblt_model_zoo.vision as compatibility_vision
+from mblt_model_zoo.compile.vision import DEFAULT_PERCENTILE as CompatibilityDefaultPercentile
+from mblt_model_zoo.utils.npu_target import cluster_to_int, core_to_int
 from mblt_model_zoo.vision.datasets import get_dataset_config
 from mblt_model_zoo.vision.utils import Results as CompatibilityResults
 
@@ -40,4 +44,13 @@ def test_legacy_utility_modules_are_standalone_aliases() -> None:
         assert importlib.import_module(f"mblt_model_zoo.vision.utils.{utility}") is importlib.import_module(
             f"mblt_vision.utils.{utility}"
         )
+    assert importlib.import_module("mblt_model_zoo.vision.utils.preprocess.base").PreOps is PreOps
     assert LetterBoxGeometry.__module__.startswith("mblt_vision.")
+
+
+def test_legacy_compilation_and_npu_target_exports_are_forwarded() -> None:
+    """Keep imported constants and conversion helpers available via Model Zoo."""
+
+    assert CompatibilityDefaultPercentile == StandaloneDefaultPercentile
+    assert callable(cluster_to_int)
+    assert callable(core_to_int)

@@ -328,6 +328,7 @@ class MobilintSynthesizerTrn(nn.Module):
         target_core="0:0",
         encoder_mxq_path="",
         decoder_mxq_path="",
+        target_device: str = "aries-rb",
         
         **kwargs
     ):
@@ -345,6 +346,7 @@ class MobilintSynthesizerTrn(nn.Module):
             dev_no=dev_no,
             core_mode="single",
             target_cores=[target_core],
+            target_device=target_device,
         )
 
         # self.dec, self.flow all in one mxq
@@ -357,6 +359,7 @@ class MobilintSynthesizerTrn(nn.Module):
             dev_no=dev_no,
             core_mode="single",
             target_cores=[target_core],
+            target_device=target_device,
         )
 
         if n_speakers <= 0:

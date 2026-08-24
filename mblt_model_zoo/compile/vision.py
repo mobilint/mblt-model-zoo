@@ -6,6 +6,12 @@ callers.
 """
 
 from mblt_vision.compile.vision import (
+    DEFAULT_MODEL_DIR,
+    DEFAULT_PERCENTILE,
+    DEFAULT_SEED,
+    DEFAULT_SUBSET_SIZES,
+    DEFAULT_TOPK_RATIO,
+    IMAGE_SUFFIXES,
     compile_vision_model,
     copy_calibration_subset,
     ensure_calibration_dataset,
@@ -18,6 +24,12 @@ from mblt_vision.compile.vision import (
 )
 
 __all__ = [
+    "DEFAULT_MODEL_DIR",
+    "DEFAULT_PERCENTILE",
+    "DEFAULT_SEED",
+    "DEFAULT_SUBSET_SIZES",
+    "DEFAULT_TOPK_RATIO",
+    "IMAGE_SUFFIXES",
     "compile_vision_model",
     "copy_calibration_subset",
     "ensure_calibration_dataset",

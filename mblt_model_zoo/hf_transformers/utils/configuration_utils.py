@@ -716,6 +716,30 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         self.fc_npu_backend.dev_no = value
 
     @property
+    def base_target_device(self) -> str:
+        return self.base_npu_backend.target_device
+
+    @base_target_device.setter
+    def base_target_device(self, value: str) -> None:
+        self.base_npu_backend.target_device = value
+
+    @property
+    def draft_target_device(self) -> str:
+        return self.draft_npu_backend.target_device
+
+    @draft_target_device.setter
+    def draft_target_device(self, value: str) -> None:
+        self.draft_npu_backend.target_device = value
+
+    @property
+    def fc_target_device(self) -> str:
+        return self.fc_npu_backend.target_device
+
+    @fc_target_device.setter
+    def fc_target_device(self, value: str) -> None:
+        self.fc_npu_backend.target_device = value
+
+    @property
     def base_max_batch_size(self) -> int:
         return self.base_npu_backend.max_batch_size
 
