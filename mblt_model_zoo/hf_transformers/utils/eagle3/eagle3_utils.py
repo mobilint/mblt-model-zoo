@@ -802,17 +802,23 @@ class MobilintEagle3DraftModelMixin:
 
         combined_attention_mask = buf[:, :, :target_length, :kv_length]
 
-        # In the draft path, callers only ever pass an all-visible bool
-        # ``attention_mask`` (via the default in ``forward``) or ``None``;
-        # ``expand_mask`` on all-ones produces an all-zero contribution that
-        # is added to ``combined_attention_mask`` as a no-op. Fall back to
-        # the slow path only when a caller supplies a non-trivial mask
-        # (dtype-driven check, no device sync).
-        if attention_mask is not None and attention_mask.dtype != torch.bool:
-            expanded_attn_mask = expand_mask(
-                attention_mask, torch.float32, tgt_len=target_length
-            ).to(hidden_states.device)
-            combined_attention_mask = combined_attention_mask + expanded_attn_mask
+        # Bool masks are asserted to be all-True (the invariant that the internal
+        # default in ``forward`` produces); a bool mask with any ``False`` entry
+        # is a caller error and raises immediately, because the buffer-reuse
+        # fast path would otherwise silently ignore the masked positions.
+        # Non-bool masks go through the slow ``expand_mask`` + add path.
+        if attention_mask is not None:
+            if attention_mask.dtype != torch.bool:
+                expanded_attn_mask = expand_mask(
+                    attention_mask, torch.float32, tgt_len=target_length
+                ).to(hidden_states.device)
+                combined_attention_mask = combined_attention_mask + expanded_attn_mask
+            elif not attention_mask.all():
+                raise ValueError(
+                    "draft _prepare_decoder_attention_mask fast path requires an all-True bool "
+                    "attention_mask; got a bool mask with False entries. Pass an fp32 mask "
+                    "instead if partial masking is needed."
+                )
 
         # Record the union of non-zero writes so the next call can restore it
         # to zero. The causal fill spans ``[past_key_values_length, kv_length]``
