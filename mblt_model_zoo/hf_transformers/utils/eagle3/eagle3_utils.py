@@ -686,8 +686,37 @@ class MobilintEagle3DraftModelMixin:
         self.register_buffer("t2d", torch.zeros(draft_config.vocab_size, dtype=torch.bool, device="cpu"))
         self.tree_mask_init = torch.eye(self.top_k, dtype=torch.float32, device="cpu")[None, None]
         self.position_ids = torch.zeros(self.top_k, dtype=torch.long, device="cpu")
+        # Reusable draft attention-mask buffer. Lazily allocated on the first
+        # ``_prepare_decoder_attention_mask`` call at worst-case shape
+        # ``(1, 1, tgt, kv)`` and grown on demand. Past-KV columns stay zero;
+        # each call only rewrites the small ``(tgt, tgt)`` tree region and
+        # restores the previous tree region to zero.
+        self._draft_mask_buf: Optional[torch.Tensor] = None
+        # Bool template for the strict upper-triangular ``finfo.min`` fill on
+        # the tree region. Sized to match ``_draft_mask_buf.size(-2)`` and
+        # re-materialized whenever the buffer's target-length grows.
+        self._draft_mask_upper_bool: Optional[torch.Tensor] = None
+        # (target_length, past_kv_length, past_kv_length + target_length) span
+        # written on the previous call; used to zero that region on the next
+        # call so it re-becomes valid past-KV.
+        self._draft_mask_prev_span: Optional[tuple[int, int, int]] = None
         for param in self.embed_tokens.parameters():
             param.requires_grad = False
+
+    def reset_draft_mask_state(self) -> None:
+        """Reset per-generate draft-mask buffer state.
+
+        Zeros any pending "previous tree region" and clears the tracker. Safe
+        to call between ``generate()`` invocations; a stale span from a prior
+        run would otherwise cause an unnecessary zero on the first call of the
+        new run (but never incorrect output — the buffer is still fully
+        zeroed after that call rewrites its own tree region).
+        """
+        if self._draft_mask_buf is not None and self._draft_mask_prev_span is not None:
+            prev_tgt, prev_start, prev_end = self._draft_mask_prev_span
+            if prev_end > prev_start:
+                self._draft_mask_buf[:, :, :prev_tgt, prev_start:prev_end].zero_()
+        self._draft_mask_prev_span = None
 
     def _build_draft_rotary_emb(self, draft_config) -> nn.Module:
         """Return the draft rotary embedding module for ``draft_config``.
@@ -714,30 +743,98 @@ class MobilintEagle3DraftModelMixin:
         cache: MobilintEagle3Cache,
         tree_mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        combined_attention_mask = None
-        if input_shape[-1] > 1:
-            combined_attention_mask = make_causal_mask(
-                torch.Size(input_shape),
-                torch.float32,
-                hidden_states.device,
-                past_key_values_length=past_key_values_length,
-            )
-        else:
-            batch_size, target_length = input_shape
-            combined_attention_mask = torch.zeros(
-                (batch_size, 1, target_length, past_key_values_length + target_length),
+        # Buffer-reuse fast path: the draft mask has the invariant structure
+        #   left ``past_key_values_length`` columns = 0        (visible past)
+        #   right ``target_length`` columns  = causal (upper = finfo.min)
+        #                                      + tree_mask overlay
+        # A persistent ``(1, 1, MAX_TGT, MAX_KV)`` fp32 buffer is initialised
+        # to zero. Each call only touches the ``(target_length, target_length)``
+        # tree block; the previous call's tree block is zeroed first so it
+        # re-becomes valid past-KV. Past-KV columns are never rewritten.
+        batch_size, target_length = input_shape
+        kv_length = past_key_values_length + target_length
+        finfo_min = torch.finfo(torch.float32).min
+
+        # Defensive attribute access so unit-test stubs that bypass the mixin
+        # ``__init__`` (via ``pass``) still work; the attributes are
+        # lazily populated on first call.
+        buf = getattr(self, "_draft_mask_buf", None)
+        need_alloc = (
+            buf is None
+            or buf.size(0) < batch_size
+            or buf.size(-2) < target_length
+            or buf.size(-1) < kv_length
+            or buf.device != hidden_states.device
+        )
+        if need_alloc:
+            new_batch = max(batch_size, buf.size(0) if buf is not None else 1)
+            new_tgt = max(target_length, buf.size(-2) if buf is not None else 0, 16)
+            new_kv = max(kv_length, buf.size(-1) if buf is not None else 0, 128)
+            self._draft_mask_buf = torch.zeros(
+                (new_batch, 1, new_tgt, new_kv),
                 dtype=torch.float32,
                 device=hidden_states.device,
             )
-        if attention_mask is not None:
-            expanded_attn_mask = expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(hidden_states.device)
-            combined_attention_mask = (
-                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
+            # Rebuild the strict-upper-triangular bool template at the new size.
+            self._draft_mask_upper_bool = torch.ones(
+                (new_tgt, new_tgt), dtype=torch.bool, device=hidden_states.device
+            ).triu_(1)
+            # A fresh buffer has no stale prior tree region.
+            self._draft_mask_prev_span = None
+            buf = self._draft_mask_buf
+
+        # Zero the tree region written on the previous call. It is now within
+        # the past-KV range and must be visible.
+        prev = getattr(self, "_draft_mask_prev_span", None)
+        if prev is not None:
+            prev_tgt, prev_start, prev_end = prev
+            if prev_end > prev_start:
+                buf[:, :, :prev_tgt, prev_start:prev_end].zero_()
+
+        # Build the current tree region in place. ``target_length == 1``
+        # (single-token step) needs no causal fill because the only tree
+        # column is already zero.
+        if target_length > 1:
+            block = buf[:, :, :target_length, past_key_values_length:kv_length]
+            block.masked_fill_(
+                self._draft_mask_upper_bool[:target_length, :target_length], finfo_min
             )
-        if tree_mask is not None and combined_attention_mask is not None:
+
+        combined_attention_mask = buf[:, :, :target_length, :kv_length]
+
+        # In the draft path, callers only ever pass an all-visible bool
+        # ``attention_mask`` (via the default in ``forward``) or ``None``;
+        # ``expand_mask`` on all-ones produces an all-zero contribution that
+        # is added to ``combined_attention_mask`` as a no-op. Fall back to
+        # the slow path only when a caller supplies a non-trivial mask
+        # (dtype-driven check, no device sync).
+        if attention_mask is not None and attention_mask.dtype != torch.bool:
+            expanded_attn_mask = expand_mask(
+                attention_mask, torch.float32, tgt_len=target_length
+            ).to(hidden_states.device)
+            combined_attention_mask = combined_attention_mask + expanded_attn_mask
+
+        # Record the union of non-zero writes so the next call can restore it
+        # to zero. The causal fill spans ``[past_key_values_length, kv_length]``
+        # when ``target_length > 1``; the tree-mask overlay spans
+        # ``[kv_length - tree_shape1, kv_length]``, which can dip into
+        # past-KV columns when ``tree_shape1 > target_length``.
+        write_start: Optional[int] = None
+        if target_length > 1:
+            write_start = past_key_values_length
+        if tree_mask is not None:
             _, _, tree_shape0, tree_shape1 = tree_mask.shape
-            combined_attention_mask[:, :, -tree_shape0:, -tree_shape1:][tree_mask == 0] = torch.finfo(torch.float32).min
-        assert combined_attention_mask is not None
+            combined_attention_mask[:, :, -tree_shape0:, -tree_shape1:].masked_fill_(
+                tree_mask == 0, finfo_min
+            )
+            overlay_start = kv_length - tree_shape1
+            write_start = overlay_start if write_start is None else min(write_start, overlay_start)
+
+        if write_start is not None and write_start < kv_length:
+            self._draft_mask_prev_span = (target_length, write_start, kv_length)
+        else:
+            self._draft_mask_prev_span = None
+
         return combined_attention_mask
 
     def forward(
@@ -786,8 +883,11 @@ class MobilintEagle3DraftModelMixin:
         if position_embs_numpy.ndim == 3:
             position_embs_numpy = np.expand_dims(position_embs_numpy, 1)
 
-        if attention_mask is None:
-            attention_mask = torch.ones((batch_size, seq_length_with_past), dtype=torch.bool, device=hidden_states.device)
+        # Passing ``None`` down skips the ``expand_mask`` no-op path when the
+        # caller did not supply an explicit mask. ``expand_mask`` on an all-
+        # ones ``(batch_size, seq_length_with_past)`` bool tensor produces an
+        # all-zero contribution — kept only for the (currently unused) code
+        # path where a non-trivial mask is passed in externally.
         attention_mask = self._prepare_decoder_attention_mask(
             attention_mask,
             (batch_size, seq_length),

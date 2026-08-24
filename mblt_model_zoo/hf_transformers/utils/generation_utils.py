@@ -797,6 +797,12 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             raise TypeError("past_key_values must be MobilintEagle3Cache for EAGLE-3 models.")
         cache.clear_tree_state()
         cache.sync_draft_seq_length_to_base()
+        # Reset the draft model's reusable attention-mask buffer bookkeeping
+        # so a stale "previous tree region" from a prior generate() call does
+        # not leak finfo.min into a now-visible past-KV column of the new run.
+        reset_draft_mask = getattr(self.eagle3_draft_model, "reset_draft_mask_state", None)
+        if callable(reset_draft_mask):
+            reset_draft_mask()
         return cache
 
     @staticmethod
