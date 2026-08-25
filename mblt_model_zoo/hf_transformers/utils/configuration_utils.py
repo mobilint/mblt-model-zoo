@@ -425,6 +425,40 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
             for key, value in vision_kwargs.items():
                 setattr(vision_config, key, value)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize composite configs without deepcopying nested NPU backends.
+
+        Transformers 4.57.x builds config reprs through ``to_diff_dict()``, whose
+        default implementation deep-copies ``self.__dict__`` before delegating to
+        nested sub-config ``to_dict()`` methods. The standalone ``mblt_npu`` wheel
+        currently uses ``object()`` as an internal ``_UNSET`` sentinel in the
+        backend pending target state; ``copy.deepcopy`` duplicates that sentinel
+        and breaks identity checks during lazy backend serialization. Temporarily
+        detach nested backends so upstream only deep-copies plain config fields,
+        then merge the original backend dictionaries back into the nested payload.
+        """
+        detached_backends: dict[str, Any] = {}
+        for key in ("text_config", "vision_config"):
+            sub_config = getattr(self, key, None)
+            backend = getattr(sub_config, "npu_backend", None) if sub_config is not None else None
+            if backend is not None:
+                detached_backends[key] = backend
+                del sub_config.npu_backend
+
+        try:
+            output = super().to_dict()
+        finally:
+            for key, backend in detached_backends.items():
+                sub_config = getattr(self, key, None)
+                if sub_config is not None:
+                    sub_config.npu_backend = backend
+
+        for key, backend in detached_backends.items():
+            nested = output.setdefault(key, {})
+            if isinstance(nested, dict):
+                nested.update(backend.to_dict(prefix=""))
+        return output
+
     @PretrainedConfig.name_or_path.setter
     def name_or_path(self, value):
         PretrainedConfig.name_or_path.fset(self, value)

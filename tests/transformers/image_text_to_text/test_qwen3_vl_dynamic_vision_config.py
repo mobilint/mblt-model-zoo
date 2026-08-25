@@ -111,6 +111,22 @@ def test_top_level_config_dynamic_vision_round_trip() -> None:
     assert restored.dynamic_vision is True
 
 
+def test_composite_config_repr_avoids_deepcopying_nested_npu_backends() -> None:
+    """Regression for Transformers 4.57.x ``to_diff_dict`` logging path.
+
+    Upstream config repr calls ``to_diff_dict()``, which creates a class-default
+    config via ``self.__class__().to_dict()``. Composite Mobilint configs must not
+    deepcopy nested ``npu_backend`` objects in that path because the current
+    standalone NPU wheel carries an ``object()`` sentinel that is not deepcopy-safe.
+    """
+    config = MobilintQwen3VLConfig(dynamic_vision=True)
+
+    text = repr(config)
+
+    assert "MobilintQwen3VLConfig" in text
+    assert config.dynamic_vision is True
+
+
 def test_vision_config_has_no_dynamic_vision_attribute() -> None:
     """The vision sub-config no longer carries ``dynamic_vision``.
 
