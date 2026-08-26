@@ -13,9 +13,10 @@ MeloTTS. `mblt-vision-python` owns all Vision implementation: models, preprocess
 postprocessing, datasets, evaluation, benchmarks, compilation, Vision tests, and the `mblt-vision`
 CLI. Model Zoo retains only a compatibility facade and CLI bridges for its legacy Vision API.
 
-`CLAUDE.md` imports this guide. Keep the shared Model Zoo skill at
-`.agents/skills/mblt-model-zoo` and its Claude entry point synchronized. Follow a more-specific
-`AGENTS.md` when one exists. User and system instructions take precedence.
+`CLAUDE.md` imports this guide. The Claude entry points at
+`.claude/skills/mblt-model-zoo/SKILL.md` and `.claude/skills/mblt-transformers/SKILL.md` are
+symlinks to their `.agents/skills/...` counterparts, so editing the `.agents` copy is enough.
+Follow a more-specific `AGENTS.md` when one exists. User and system instructions take precedence.
 
 Before editing, run `git status --short` and preserve unrelated work.
 
@@ -79,5 +80,5 @@ Before editing, run `git status --short` and preserve unrelated work.
 - Do not revert, format, or regenerate unrelated files. Do not add generated artifacts, model
   weights, caches, or benchmark output unless explicitly requested.
 - When a significant package change lands (public API, CLI bridge, dependency/runtime, or ownership
-  boundary), update this guide, `.agents/skills/mblt-model-zoo/SKILL.md`, the Claude skill entry
-  point when needed, and the relevant README in the same change.
+  boundary), update this guide, `.agents/skills/mblt-model-zoo/SKILL.md` (its `.claude` entry point
+  is a symlink, so no separate update is needed there), and the relevant README in the same change.
