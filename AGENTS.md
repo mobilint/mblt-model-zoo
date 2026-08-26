@@ -25,7 +25,9 @@ Before editing, run `git status --short` and preserve unrelated work.
 - `mblt_model_zoo/cli`: Model Zoo CLI; Vision command handlers are imported from `mblt_vision.cli`.
 - `mblt_model_zoo/vision`: compatibility imports and re-exports only. Every compatibility module
   must forward to `mblt_vision`; do not restore copied Vision implementation, model YAMLs, or
-  dataset YAMLs here.
+  dataset YAMLs here. Task submodules (`mblt_model_zoo.vision.<task>`) are registered dynamically
+  in `vision/__init__.py` from `mblt_vision.list_tasks()`; do not add a physical per-task stub
+  package here — a new mblt_vision task becomes importable with no Model Zoo change.
 - `mblt_model_zoo/compile`: compatibility exports for Vision compilation plus Model Zoo APIs.
 - `mblt_model_zoo/hf_transformers`: Hugging Face integrations and benchmark utilities.
 - `mblt_model_zoo/MeloTTS`: MeloTTS integration and text normalization.

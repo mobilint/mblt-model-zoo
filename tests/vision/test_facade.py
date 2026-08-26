@@ -28,6 +28,14 @@ def test_model_zoo_vision_exports_standalone_objects() -> None:
     assert get_dataset_config is standalone_dataset_config
 
 
+def test_every_standalone_task_is_deep_importable() -> None:
+    """A task added to mblt_vision must be reachable without a Model Zoo edit."""
+
+    for task in mblt_vision.list_tasks():
+        compatibility_task_module = importlib.import_module(f"mblt_model_zoo.vision.{task}")
+        assert compatibility_task_module is getattr(mblt_vision, task)
+
+
 def test_legacy_utility_modules_are_standalone_aliases() -> None:
     """Compatibility paths must not load copied Vision implementations."""
 

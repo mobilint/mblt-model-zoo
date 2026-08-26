@@ -10,16 +10,24 @@ import mblt_vision as _standalone_vision
 MBLT_Engine = _standalone_vision.MBLT_Engine
 list_models = _standalone_vision.list_models
 list_tasks = _standalone_vision.list_tasks
-depth_estimation = _standalone_vision.depth_estimation
-face_detection = _standalone_vision.face_detection
-image_classification = _standalone_vision.image_classification
-instance_segmentation = _standalone_vision.instance_segmentation
-object_detection = _standalone_vision.object_detection
-obb = _standalone_vision.obb
-pose_estimation = _standalone_vision.pose_estimation
-semantic_segmentation = _standalone_vision.semantic_segmentation
+
+
+def _register_task_modules() -> None:
+    """Expose every standalone Vision task as a deep-importable submodule here
+    (``from mblt_model_zoo.vision.<task> import X``) without a physical stub
+    package per task, so a new task added to mblt_vision needs no Model Zoo edit.
+    """
+
+    for task in _standalone_vision.list_tasks():
+        task_module = getattr(_standalone_vision, task)
+        globals()[task] = task_module
+        sys.modules[f"{__name__}.{task}"] = task_module
+
+
+_register_task_modules()
 
 # ``obb`` is canonical; retain the historical package alias.
+obb = _standalone_vision.obb
 oriented_bounding_boxes = obb
 sys.modules[f"{__name__}.oriented_bounding_boxes"] = obb
 
