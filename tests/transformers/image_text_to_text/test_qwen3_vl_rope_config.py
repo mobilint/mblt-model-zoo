@@ -11,6 +11,7 @@ must accept both layouts.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 
@@ -60,6 +61,27 @@ def test_rotary_embedding_reads_rope_theta_from_text_config() -> None:
 
     assert emb.rope_theta == 5_000_000
     assert emb.mrope_section == [24, 20, 20]
+
+
+def test_rotary_embedding_masks_follow_padded_second_half() -> None:
+    """Place the second-half masks at the same padded offset as the rope table."""
+    config = _minimal_text_config(
+        head_dim=48,
+        rope_scaling={
+            "mrope_interleaved": True,
+            "mrope_section": [8, 8, 8],
+            "rope_type": "default",
+        },
+    )
+
+    emb = MobilintQwen3VLRotaryEmbedding(config)
+
+    # head_dim=48 is padded to tgt_half=64, so channels 48..63 and 112..127
+    # are unused. The second half must mirror the first half at 64..111.
+    for mask in (emb.mask_t, emb.mask_h, emb.mask_w):
+        assert not mask[48:64].any()
+        assert not mask[112:].any()
+        assert np.array_equal(mask[:48], mask[64:112])
 
 
 def test_rotary_embedding_falls_back_to_rope_scaling_when_flat_attr_missing() -> None:

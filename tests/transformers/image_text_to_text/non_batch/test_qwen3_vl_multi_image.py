@@ -74,8 +74,12 @@ def test_qwen3_vl_8b_multi_image_two_turns(qwen3_vl_8b_model_and_processor, gene
 
     def generate_response(messages):
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = processor(text=[text], images=IMAGE_URLS, return_tensors="pt")
-        output_ids = model.generate(**inputs, max_new_tokens=generation_token_limit)
+        inputs = processor(text=[text], images=list(IMAGE_URLS), return_tensors="pt")
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=generation_token_limit,
+            streamer=TextStreamer(tokenizer=processor.tokenizer, skip_prompt=True),
+        )
         generated_ids = output_ids[:, inputs.input_ids.shape[1] :]
         response = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
         assert response

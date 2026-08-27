@@ -607,7 +607,7 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
             pe_dim[2 * fi + 1] = d   # -sin slot (first half)
         for fi in range(halfDim):
             d = freq_dim[fi]
-            base = dim + 2 * fi
+            base = (self.peSize // 2) + 2 * fi
             if base < self.peSize:
                 pe_dim[base] = d      # sin slot (second half)
             if base + 1 < self.peSize:
