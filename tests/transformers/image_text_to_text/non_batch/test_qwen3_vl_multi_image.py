@@ -18,7 +18,6 @@ IMAGE_URLS = (
     "https://images.unsplash.com/photo-1574158622682-e40e69881006?w=640",
 )
 
-
 def test_qwen3_vl_multi_image(pipe, generation_token_limit: int):
     skip_if_static_vision(pipe, "Multi-image input")
 

@@ -387,8 +387,12 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         rt = torch.zeros(n, pe_size, dtype=torch.float32)
         rt[:, 0:dim:2] = cos_val[:, :half_dim]
         rt[:, 1:dim:2] = -sin_val[:, :half_dim]
-        rt[:, dim : 2 * dim : 2] = sin_val[:, half_dim:]
-        rt[:, dim + 1 : 2 * dim : 2] = cos_val[:, half_dim:]
+        # Each half is padded to `tgt_half` independently, so the second half starts
+        # at `tgt_half`, not at `dim`. The MXQ confirms this: `get_input_scale()[0]`
+        # reports finite scales on ch 0..dim-1 and ch tgt_half..tgt_half+dim-1, and
+        # inf (unused) on the padding in between.
+        rt[:, tgt_half : tgt_half + dim : 2] = sin_val[:, half_dim:]
+        rt[:, tgt_half + 1 : tgt_half + dim : 2] = cos_val[:, half_dim:]
 
         return rt.reshape(1, n, pe_size).numpy()
 
@@ -603,7 +607,7 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
             pe_dim[2 * fi + 1] = d   # -sin slot (first half)
         for fi in range(halfDim):
             d = freq_dim[fi]
-            base = dim + 2 * fi
+            base = (self.peSize // 2) + 2 * fi
             if base < self.peSize:
                 pe_dim[base] = d      # sin slot (second half)
             if base + 1 < self.peSize:
@@ -644,16 +648,16 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
             cos_ = cos_val.unsqueeze(0).unsqueeze(0)  # [1, 1, T, dim]
             sin_ = sin_val.unsqueeze(0).unsqueeze(0)
 
-            rotateTensor = torch.zeros(1, 1, T, 2 * dim, device=device, dtype=torch.float32)
+            # draftMXQ `padRope` pads each half to `tgt_half` independently, so the
+            # second half starts at `tgt_half`, not at `dim`. Appending the whole
+            # pad at the tail instead (`F.pad(..., (0, pad))`) only coincides when
+            # `head_dim` is already 64-aligned, as it is for Qwen3-VL-8B (128).
+            tgt_half = self.peSize // 2
+            rotateTensor = torch.zeros(1, 1, T, self.peSize, device=device, dtype=torch.float32)
             rotateTensor[..., 0:dim:2] = cos_[..., :halfDim]
             rotateTensor[..., 1:dim:2] = -sin_[..., :halfDim]
-            rotateTensor[..., dim:2 * dim:2] = sin_[..., halfDim:dim]
-            rotateTensor[..., dim + 1:2 * dim:2] = cos_[..., halfDim:dim]
-
-            if rotateTensor.shape[-1] != self.peSize:
-                pad = self.peSize - rotateTensor.shape[-1]
-                if pad > 0:
-                    rotateTensor = torch.nn.functional.pad(rotateTensor, (0, pad))
+            rotateTensor[..., tgt_half:tgt_half + dim:2] = sin_[..., halfDim:dim]
+            rotateTensor[..., tgt_half + 1:tgt_half + dim:2] = cos_[..., halfDim:dim]
 
             self.position_table = rotateTensor.cpu().numpy()[0, 0]  # [T, peSize]
 
