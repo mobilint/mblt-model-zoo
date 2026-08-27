@@ -545,9 +545,23 @@ class MobilintVisionTextConfigMixin(PretrainedConfig):
     ) -> Union["MobilintVisionTextConfigMixin", tuple["MobilintVisionTextConfigMixin", dict[str, Any]]]:
         return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
 
+        # Buffer sub-backend NPU keys until after upstream's kwargs loop:
+        # ``PretrainedConfig.from_dict`` ``hasattr``-probes each override, which
+        # routes the prefixed NPU properties through the sub-config backends and
+        # forces a lazy finalize on the pending state visible at that moment.
+        # With a ``global8`` config_dict and a caller narrowing target_cores to
+        # a single cluster, that partial-state finalize trips
+        # ``_validate_global8_coverage`` before the matching ``core_mode='single'``
+        # override lands. Applying the overrides as one group via
+        # ``_apply_sub_backend_kwargs`` after upstream returns makes finalize see
+        # the fully-consistent override set.
+        text_sub_kwargs, vision_sub_kwargs = cls._split_sub_backend_kwargs(kwargs)
+
         config: MobilintVisionTextConfigMixin
         unused_kwargs: dict[str, Any]
         config, unused_kwargs = super().from_dict(config_dict, return_unused_kwargs=True, **kwargs)  # type: ignore
+
+        config._apply_sub_backend_kwargs(text_sub_kwargs, vision_sub_kwargs)
 
         for sub_config in (config.text_config, config.vision_config):
             sub_config.name_or_path = config.name_or_path
