@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
+from transformers.models.llama.configuration_llama import LlamaConfig
 
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.configuration_qwen2_eagle3 import (
     MobilintQwen2Eagle3Config,
@@ -47,7 +47,14 @@ def test_qwen2_eagle3_config_roundtrip_preserves_nested_draft_and_backend_fields
 
 
 def test_qwen2_eagle3_config_exposes_prefixed_backend_properties() -> None:
-    """EAGLE-3 config should expose base/draft/fc backend properties consistently."""
+    """EAGLE-3 config should expose base/draft/fc backend properties consistently.
+
+    NPUTargetSpec normalization unifies grain to the field appropriate for each
+    core_mode: single-mode backends surface per-core targets and empty their
+    cluster list, while global4/global8-mode backends surface cluster targets
+    and empty their per-core list. Feeding both grains here verifies the
+    normalizer picks the right one per prefix.
+    """
     config = MobilintQwen2Eagle3Config(
         vocab_size=10,
         hidden_size=8,
@@ -77,17 +84,20 @@ def test_qwen2_eagle3_config_exposes_prefixed_backend_properties() -> None:
     assert config.base_core_mode == "single"
     assert config.draft_core_mode == "global4"
     assert config.fc_core_mode == "global8"
+
+    # single-mode: per-core grain wins, cluster list is emptied
     assert len(config.base_target_cores) == 1
-    assert len(config.draft_target_cores) == 1
-    assert len(config.fc_target_cores) == 1
     assert str(config.base_target_cores[0])
-    assert str(config.draft_target_cores[0])
-    assert str(config.fc_target_cores[0])
-    assert len(config.base_target_clusters) == 1
+    assert config.base_target_clusters == []
+
+    # global4-mode: cluster grain wins, per-core list is emptied
+    assert config.draft_target_cores == []
     assert len(config.draft_target_clusters) == 1
-    assert len(config.fc_target_clusters) == 2
-    assert str(config.base_target_clusters[0])
     assert str(config.draft_target_clusters[0])
+
+    # global8-mode: cluster grain wins with two-cluster coverage
+    assert config.fc_target_cores == []
+    assert len(config.fc_target_clusters) == 2
     assert all(str(cluster) for cluster in config.fc_target_clusters)
 
 
@@ -137,7 +147,7 @@ def test_qwen2_eagle3_config_name_or_path_propagates_to_draft_config() -> None:
 
 def test_qwen2_eagle3_config_roundtrip_accepts_draft_config_object() -> None:
     """Round-trip should preserve draft_config when passed as a config object."""
-    draft = Qwen2Config(
+    draft = LlamaConfig(
         vocab_size=10,
         hidden_size=8,
         intermediate_size=16,
@@ -157,5 +167,5 @@ def test_qwen2_eagle3_config_roundtrip_accepts_draft_config_object() -> None:
 
     restored = MobilintQwen2Eagle3Config(**config.to_dict())
 
-    assert isinstance(restored.draft_config, Qwen2Config)
+    assert isinstance(restored.draft_config, LlamaConfig)
     assert restored.draft_config.vocab_size == 10

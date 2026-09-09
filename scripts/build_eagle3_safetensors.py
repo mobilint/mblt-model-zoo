@@ -17,7 +17,9 @@ must not appear in the release safetensors.
 
 Inputs (per release folder):
     - ``target_emb.pth``    : target-model input embedding, F32 ``(V, H)`` (fixed filename).
-    - ``<prefix>_emb.pth``  : draft-model input embedding, F32 ``(V, H)`` (auto-detected).
+    - ``<prefix>_emb.pth``  : draft-model input embedding, F32/F16/BF16 ``(V, H)`` (auto-detected).
+      Different training pipelines ship different source dtypes; all three are accepted and
+      cast to F16 before writing.
     - ``<draft-subdir>/model.safetensors`` : draft checkpoint holding ``d2t`` and ``t2d``.
 """
 
@@ -185,7 +187,13 @@ def main() -> int:
     draft_emb = torch.load(draft_emb_path, map_location="cpu", weights_only=True)
     assert isinstance(draft_emb, torch.Tensor), f"{draft_emb_path.name} is not a tensor (got {type(draft_emb)!r})"
     assert draft_emb.dim() == 2, f"draft embed must be rank-2 (V, H); got shape {tuple(draft_emb.shape)}"
-    assert draft_emb.dtype == torch.float32, f"draft embed expected float32, got {draft_emb.dtype}"
+    # The tensor is cast to float16 before writing, so any dtype whose fp16 cast is lossless-enough
+    # for embeddings is acceptable. Different trainers ship different source dtypes (fp32 historically,
+    # fp16 for the JPharmatron-7B release), so accept the common floating point widths and let the
+    # downstream cast normalize.
+    assert draft_emb.dtype in (torch.float32, torch.float16, torch.bfloat16), (
+        f"draft embed expected float32/float16/bfloat16, got {draft_emb.dtype}"
+    )
     # Contract: Mobilint EAGLE-3 releases train base and draft at a matched hidden size,
     # so packaged embeddings must be shape-identical. The runtime FCProjector branch in
     # MobilintEagle3DraftModelMixin is legacy/future scaffolding and is NOT grounds to relax
@@ -232,7 +240,7 @@ def main() -> int:
             f"regenerate or replace the draft artifact."
         )
 
-    print("[cast] draft embed float32 -> float16")
+    print(f"[cast] draft embed {draft_emb.dtype} -> float16")
     draft_emb_f16 = draft_emb.to(torch.float16).contiguous()
     target_emb_f32 = target_emb.contiguous()
 
