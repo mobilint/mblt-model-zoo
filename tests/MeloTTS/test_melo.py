@@ -5,6 +5,7 @@ import pytest
 
 from mblt_model_zoo.MeloTTS import api as melo_api
 from mblt_model_zoo.MeloTTS.api import TTS
+from tests.pipe_teardown import pipe_fixture
 
 LANGUAGES = (
     "EN_NEWEST",
@@ -12,17 +13,14 @@ LANGUAGES = (
 )
 
 
-@pytest.fixture(params=LANGUAGES, scope="module")
+@pipe_fixture(params=LANGUAGES)
 def pipe(request):
     language = request.param
-
-    pipe = TTS(
+    return TTS(
         language=language,
         device="auto",
         trust_remote_code=True,
     )
-    yield pipe
-    del pipe
 
 
 def test_melo(pipe: TTS):

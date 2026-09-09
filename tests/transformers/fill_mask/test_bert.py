@@ -3,6 +3,8 @@ from pprint import pprint
 import pytest
 from transformers import pipeline
 
+from tests.pipe_teardown import release_pipe
+
 MODEL_PATHS_AND_PROMPTS = (
     ("mobilint/bert-base-uncased", "Hello I'm a [MASK] model."),
     ("mobilint/bert-kor-base", "안녕하세요 저는 [MASK] 모델입니다."),
@@ -30,7 +32,7 @@ def pipe_and_prompt(request, revision, base_npu_params):
             revision=revision,
         )
     yield pipe, prompt
-    del pipe
+    release_pipe(pipe)
 
 
 def test_bert(pipe_and_prompt):
