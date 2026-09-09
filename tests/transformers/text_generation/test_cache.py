@@ -1,3 +1,5 @@
+import gc
+
 import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -42,6 +44,8 @@ def model(model_path, revision, base_npu_params):
     )
     yield model
     release_pipe(model)
+    del model
+    gc.collect()
 
 
 @pytest.fixture(scope="module")

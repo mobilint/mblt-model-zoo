@@ -1,3 +1,4 @@
+import gc
 from pprint import pprint
 
 import pytest
@@ -33,6 +34,8 @@ def pipe_and_prompt(request, revision, base_npu_params):
         )
     yield pipe, prompt
     release_pipe(pipe)
+    del pipe
+    gc.collect()
 
 
 def test_bert(pipe_and_prompt):

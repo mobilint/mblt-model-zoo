@@ -9,22 +9,46 @@ from typing import Any, Callable
 import pytest
 
 
-def release_pipe(pipe: Any) -> None:
-    """Dispose the NPU backend held by ``pipe``, drop the reference, force GC.
+def _try_dispose(target: Any) -> None:
+    """Call ``target.dispose()`` if it exists; swallow failures on the release path."""
+    dispose = getattr(target, "dispose", None)
+    if not callable(dispose):
+        return
+    try:
+        dispose()
+    except Exception:  # noqa: BLE001 — teardown must never raise
+        pass
 
-    Relying on ``del pipe`` alone leaves ``model.dispose()`` waiting on Python
-    to collect the object. On Windows the driver has not always reclaimed
-    LPDDR by the next module's ``pipeline(...)`` call, producing intermittent
-    :class:`MobilintBackendAllocError`. Calling ``dispose()`` synchronously
-    makes the release ordered against the next allocation.
+
+def release_pipe(pipe: Any) -> None:
+    """Dispose every NPU-backing submodule reachable from ``pipe``.
+
+    Composite HF pipelines (Qwen3-VL, Whisper, Qwen3-ASR) wrap the actual
+    NPU-loaded backends inside nested modules (``model.visual`` +
+    ``model.language_model``, ``model.encoder`` + ``model.decoder``,
+    ``thinker.audio_tower``, ...), and the outer ``pipe.model`` conditional-
+    generation wrapper has no ``dispose()`` of its own. Walk the
+    ``torch.nn.Module`` tree so every leaf that owns an NPU handle is
+    released. Non-torch objects (e.g. ``MeloTTS.TTS``) get their own
+    top-level ``dispose()`` call as a fallback.
+
+    Callers own the ``del`` + ``gc.collect()`` sequence themselves: this
+    helper's ``pipe`` local is not the caller's binding, so any ``del``
+    here only drops the helper's reference. :func:`pipe_fixture` — and the
+    hand-rolled callers under ``tests/`` — issue ``del`` and ``gc.collect``
+    on the caller-scope reference right after this returns so Python can
+    reclaim the Python-side objects before the next fixture allocates.
     """
-    model = getattr(pipe, "model", None)
-    if model is not None and hasattr(model, "dispose"):
-        model.dispose()
-    elif hasattr(pipe, "dispose"):
-        pipe.dispose()
-    del pipe
-    gc.collect()
+    subject = getattr(pipe, "model", None)
+    if subject is None:
+        subject = pipe
+
+    modules_attr = getattr(subject, "modules", None)
+    if callable(modules_attr):
+        for sub in modules_attr():
+            _try_dispose(sub)
+    else:
+        _try_dispose(subject)
 
 
 def pipe_fixture(*, scope: str = "module", **fixture_kwargs: Any):
@@ -51,6 +75,8 @@ def pipe_fixture(*, scope: str = "module", **fixture_kwargs: Any):
                 yield pipe
             finally:
                 release_pipe(pipe)
+                del pipe
+                gc.collect()
 
         return wrapper
 

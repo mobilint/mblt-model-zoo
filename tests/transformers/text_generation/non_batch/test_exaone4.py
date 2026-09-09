@@ -1,5 +1,6 @@
 """Non-batch tests for EXAONE 4 models."""
 
+import gc
 import random
 
 import pytest
@@ -22,6 +23,8 @@ def model(request, revision, base_npu_params):
     )
     yield model
     release_pipe(model)
+    del model
+    gc.collect()
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
