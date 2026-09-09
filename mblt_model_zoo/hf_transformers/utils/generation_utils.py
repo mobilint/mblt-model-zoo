@@ -1021,6 +1021,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         GenerationMixin.generate,
         "count_npu_time",
         "npu_prefill_chunk_size",
+        "num_assistant_tokens",
     )
     def generate(
         self,

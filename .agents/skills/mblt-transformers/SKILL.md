@@ -107,8 +107,9 @@ description: >-
 - Tune the draft-tree budget through `GenerationConfig.num_assistant_tokens` (default `64` in
   `mblt_model_zoo/hf_transformers/utils/generation_utils.py`). Qwen3-4B measures best in the
   `25`–`30` range: the Hugging Face default of `49` costs more iteration latency than its extra
-  acceptance recovers. Override either by editing the shipped `generation_config.json` or by
-  setting `model.generation_config.num_assistant_tokens = ...` before `generate`.
+  acceptance recovers. Override by editing the shipped `generation_config.json`, by setting
+  `model.generation_config.num_assistant_tokens = ...` before `generate`, or by passing
+  `num_assistant_tokens=<value>` directly to `generate(...)` for a per-call override.
 - Mobilint EAGLE-3 releases train base and draft at a matched hidden size by policy; the
   `draft_emb.shape == target_emb.shape` assert in `scripts/build_eagle3_safetensors.py` enforces
   it. The `MobilintEagle3DraftModelMixin` `hidden_states.shape[-1] != inputs_embeds.shape[-1]`

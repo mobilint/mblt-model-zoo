@@ -17,7 +17,9 @@ must not appear in the release safetensors.
 
 Inputs (per release folder):
     - ``target_emb.pth``    : target-model input embedding, F32 ``(V, H)`` (fixed filename).
-    - ``<prefix>_emb.pth``  : draft-model input embedding, F32 ``(V, H)`` (auto-detected).
+    - ``<prefix>_emb.pth``  : draft-model input embedding, F32/F16/BF16 ``(V, H)`` (auto-detected).
+      Different training pipelines ship different source dtypes; all three are accepted and
+      cast to F16 before writing.
     - ``<draft-subdir>/model.safetensors`` : draft checkpoint holding ``d2t`` and ``t2d``.
 """
 
