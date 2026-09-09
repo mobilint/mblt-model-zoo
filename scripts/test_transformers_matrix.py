@@ -20,7 +20,7 @@ For each target version this script:
 
 Version selection defaults to the latest patch of every major.minor release of
 `transformers` on PyPI that falls within the range declared in `pyproject.toml`
-(`>=4.54.0, <=5.3.0`).
+(`>=4.54.0, <=5.12.1`).
 
 Logs land under `logs/tx-matrix/<timestamp>/`:
   - install-<V>.log
@@ -52,8 +52,8 @@ Usage (Linux/macOS/Windows, uv required):
     python scripts/test_transformers_matrix.py                           # workers=8
     python scripts/test_transformers_matrix.py --workers 4
     python scripts/test_transformers_matrix.py --no-parallel             # workers=1
-    python scripts/test_transformers_matrix.py -v 5.2.0 5.3.0
-    python scripts/test_transformers_matrix.py --start-from 5.0.0
+    python scripts/test_transformers_matrix.py -v 5.11.0 5.12.1
+    python scripts/test_transformers_matrix.py --start-from 5.5.4
     python scripts/test_transformers_matrix.py --dry-run
     python scripts/test_transformers_matrix.py -- -k Qwen                # extra pytest args
     python scripts/test_transformers_matrix.py --rebuild-summary logs/tx-matrix/<ts>
@@ -77,7 +77,7 @@ VENV_DIR = REPO_ROOT / ".venv"
 UV_LOCK = REPO_ROOT / "uv.lock"
 DEFAULT_PYTHON = "3.12"
 VERSION_MIN = (4, 54, 0)
-VERSION_MAX = (5, 3, 0)
+VERSION_MAX = (5, 12, 1)
 
 TESTS_ROOT = REPO_ROOT / "tests" / "transformers"
 BATCH_DIRS = (

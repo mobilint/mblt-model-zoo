@@ -68,13 +68,6 @@ Before editing, run `git status --short` and preserve unrelated work.
 ## Transformers and MeloTTS
 
 - Install the matching optional extra before integration tests.
-- Supported transformers range: `>=4.54.0, <=5.3.0`. Both `[transformers]` and `[MeloTTS]`
-  extras in `pyproject.toml` and `scripts/test_transformers_matrix.py::VERSION_MAX` cap at
-  that value; the ceiling exists because transformers 5.4 changed the image-text-to-text
-  pipeline such that `_prepare_model_inputs` returns `inputs_tensor` as a Python list and
-  `generate` fails at `batch_size = inputs_tensor.shape[0]`. Lift the ceiling once upstream
-  restores tensor shape or the wrapper compensates, and update the range in all three
-  places (both extras + the runner) as one change.
 - Keep `mblt-model-zoo tps` table labels, JSON keys, units, and extraction behavior centralized in
   `mblt_model_zoo/cli/tps_table.py`; update its schema and focused tests together.
 - Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Run batch

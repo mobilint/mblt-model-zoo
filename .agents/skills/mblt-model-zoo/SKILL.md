@@ -26,10 +26,7 @@ description: >-
    through `_rebuild_backend_for_target_device` so cross-board overrides switch the destination
    backend class atomically.
 5. Keep TPS output driven by `mblt_model_zoo/cli/tps_table.py`. Preserve local conventions in
-   `hf_transformers` and `MeloTTS`. Supported transformers range is `>=4.54.0, <=5.3.0` (both
-   extras in `pyproject.toml` + `scripts/test_transformers_matrix.py::VERSION_MAX`); the ceiling
-   holds until upstream restores the image-text-to-text pipeline's `inputs_tensor` shape on 5.4+
-   or the wrapper compensates. Qwen3-VL 8B (regular and Batch16) is unsupported until the
+   `hf_transformers` and `MeloTTS`. Qwen3-VL 8B (regular and Batch16) is unsupported until the
    shipped MXQ matches the current runtime's expected output ordering.
 6. Start with focused tests. Report unavailable hardware, downloads, and optional extras instead of
    weakening validation. For docs, run `git diff --check`.

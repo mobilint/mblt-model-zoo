@@ -4,13 +4,6 @@
 
 ### Breaking Changes
 
-- **Supported `transformers` range narrowed to `>=4.54.0, <=5.3.0`** (both
-  `[transformers]` and `[MeloTTS]` extras + the compat matrix runner's
-  `VERSION_MAX`). Transformers 5.4 introduced an image-text-to-text
-  pipeline regression where `_prepare_model_inputs` returns
-  `inputs_tensor` as a Python list, breaking `generate` at
-  `batch_size = inputs_tensor.shape[0]`. Users who installed 2.4.x with
-  `transformers>=5.4` should pin `transformers<=5.3.0` before upgrading.
 - **Qwen3-VL 8B (regular and `Batch16`) is withdrawn.** Loading
   `mobilint/Qwen3-VL-8B-Instruct` or `mobilint/Qwen3-VL-8B-Instruct-Batch16`
   under `qbruntime` 1.4.0 / `mblt_npu` 0.1.0 hits
