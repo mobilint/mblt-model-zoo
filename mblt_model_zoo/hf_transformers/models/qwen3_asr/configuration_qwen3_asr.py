@@ -20,6 +20,19 @@ with guard_qwen_asr_import():
     )
 
 
+# Fields consumed by ``MobilintNPUBackend.from_dict`` that ``MobilintConfigMixin``
+# does not expose as a forwarding property. Routing them through
+# ``setattr(sub_config, k, v)`` would leave them on ``config.__dict__`` and
+# never reach the backend, so both the constructor and ``from_dict`` override
+# have to write them straight onto ``sub_config.npu_backend``. The value maps
+# the caller-facing kwarg name to the backend's storage-name — ``commit_hash``
+# is exposed publicly but stored as ``_commit_hash`` on the backend.
+_QWEN3_ASR_BACKEND_DIRECT_FIELDS: dict[str, str] = {
+    "revision": "revision",
+    "commit_hash": "_commit_hash",
+}
+
+
 class MobilintQwen3ASRAudioEncoderConfig(MobilintConfigMixin, Qwen3ASRAudioEncoderConfig):
     model_type = "mobilint-qwen3_asr_audio_encoder"
 
@@ -126,25 +139,21 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         # cross-board rebuild via ``_rebuild_backend_for_target_device``
         # (setting the string on the backend directly would leave an
         # Aries instance in place with a Regulus target_device string).
-        # Fields with no forwarding property (``revision``, ``commit_hash``)
-        # cannot round-trip through the config layer — a
-        # ``setattr(audio_config, "revision", ...)`` would land on
-        # ``config.__dict__`` and never reach ``npu_backend.revision``,
-        # so remote MXQ resolution would silently use the shipped
-        # revision. Route these two to the backend directly, mapping
-        # ``commit_hash`` to the backend's internal ``_commit_hash``
+        # Fields with no forwarding property
+        # (:data:`_QWEN3_ASR_BACKEND_DIRECT_FIELDS`) route straight to the
+        # nested backend, mapping ``commit_hash`` to its ``_commit_hash``
         # storage name.
-        _BACKEND_DIRECT_FIELDS: dict[str, str] = {
-            "revision": "revision",
-            "commit_hash": "_commit_hash",
-        }
         for sub_config, prefixed_kwargs in (
             (thinker_config.audio_config, encoder_kwargs),
             (thinker_config.text_config, decoder_kwargs),
         ):
             for k, v in prefixed_kwargs.items():
-                if k in _BACKEND_DIRECT_FIELDS:
-                    setattr(sub_config.npu_backend, _BACKEND_DIRECT_FIELDS[k], v)
+                if k in _QWEN3_ASR_BACKEND_DIRECT_FIELDS:
+                    setattr(
+                        sub_config.npu_backend,
+                        _QWEN3_ASR_BACKEND_DIRECT_FIELDS[k],
+                        v,
+                    )
                 else:
                     setattr(sub_config, k, v)
 
@@ -302,10 +311,30 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         replay them via ``_apply_npu_backend_kwargs`` in the shared apply
         order — ``target_device`` first — so the whole override set lands
         on the destination board atomically.
+
+        Fields without a top-level forwarding property on this facade
+        (``revision``, ``commit_hash``) cannot ride the shared setattr
+        helper — ``setattr(config, "encoder_revision", v)`` would land on
+        ``config.__dict__`` and leave the nested backend's own
+        ``revision`` / ``_commit_hash`` untouched, so remote MXQ
+        resolution would silently keep the shipped revision. Route those
+        two directly to the nested backend the same way the constructor
+        does (with ``commit_hash`` mapped to the internal
+        ``_commit_hash`` storage name).
         """
         return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
         encoder_sub = _split_npu_backend_kwargs(kwargs, prefix="encoder_")
         decoder_sub = _split_npu_backend_kwargs(kwargs, prefix="decoder_")
+        encoder_direct = {
+            k: encoder_sub.pop(k)
+            for k in list(encoder_sub)
+            if k in _QWEN3_ASR_BACKEND_DIRECT_FIELDS
+        }
+        decoder_direct = {
+            k: decoder_sub.pop(k)
+            for k in list(decoder_sub)
+            if k in _QWEN3_ASR_BACKEND_DIRECT_FIELDS
+        }
 
         config, unused_kwargs = super().from_dict(
             config_dict, return_unused_kwargs=True, **kwargs
@@ -313,6 +342,18 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
 
         _apply_npu_backend_kwargs(config, encoder_sub, prefix="encoder_")
         _apply_npu_backend_kwargs(config, decoder_sub, prefix="decoder_")
+        for k, v in encoder_direct.items():
+            setattr(
+                config.thinker_config.audio_config.npu_backend,
+                _QWEN3_ASR_BACKEND_DIRECT_FIELDS[k],
+                v,
+            )
+        for k, v in decoder_direct.items():
+            setattr(
+                config.thinker_config.text_config.npu_backend,
+                _QWEN3_ASR_BACKEND_DIRECT_FIELDS[k],
+                v,
+            )
 
         if return_unused_kwargs:
             return config, unused_kwargs

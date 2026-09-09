@@ -272,6 +272,43 @@ def test_qwen3_asr_ctor_routes_revision_and_commit_hash_to_backend(prefix: str) 
 
 
 @pytest.mark.parametrize("prefix", ["encoder", "decoder"])
+def test_qwen3_asr_from_dict_routes_revision_and_commit_hash_to_backend(prefix: str) -> None:
+    """Forward buffered ``revision`` / ``commit_hash`` kwargs to the nested backend.
+
+    The Qwen3-ASR ``from_dict`` override buffers every ``encoder_*`` /
+    ``decoder_*`` NPU kwarg to sidestep HF's hasattr-probe hazard and
+    replays them via ``_apply_npu_backend_kwargs``, which drives the
+    top-level config's setattr path. That path only reaches the nested
+    backend for fields with a forwarding property on
+    ``MobilintConfigMixin``. ``revision`` and ``commit_hash`` have no
+    such property, so the same direct-to-backend routing that the
+    constructor uses must apply on the ``from_dict`` path as well —
+    otherwise remote MXQ resolution silently keeps the shipped
+    revision.
+    """
+
+    pytest.importorskip("qwen_asr")
+    from mblt_model_zoo.hf_transformers.models.qwen3_asr.configuration_qwen3_asr import (
+        MobilintQwen3ASRConfig,
+    )
+
+    prefix_ = f"{prefix}_"
+    inner_config = "audio_config" if prefix == "encoder" else "text_config"
+
+    config = MobilintQwen3ASRConfig.from_dict(
+        {"model_type": MobilintQwen3ASRConfig.model_type},
+        **{
+            f"{prefix_}revision": "from-dict-release",
+            f"{prefix_}commit_hash": "fedcba9876543210",
+        },
+    )
+
+    sub_backend = getattr(config.thinker_config, inner_config).npu_backend
+    assert sub_backend.revision == "from-dict-release"
+    assert sub_backend._commit_hash == "fedcba9876543210"
+
+
+@pytest.mark.parametrize("prefix", ["encoder", "decoder"])
 def test_qwen3_asr_from_dict_buffers_prefixed_target_device_atomically(prefix: str) -> None:
     """Buffer ``encoder_*`` / ``decoder_*`` overrides on the Qwen3-ASR facade.
 
