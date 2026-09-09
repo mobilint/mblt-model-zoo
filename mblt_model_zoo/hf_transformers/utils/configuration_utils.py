@@ -1,6 +1,6 @@
 import inspect
 from inspect import Parameter, Signature
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 
 from transformers.configuration_utils import PretrainedConfig
 
@@ -183,7 +183,7 @@ def _apply_npu_backend_kwargs(
     sub_kwargs: dict[str, Any],
     prefix: str = "",
     *,
-    backend: Optional[MobilintNPUBackend] = None,
+    resolve_backend: Optional[Callable[[PretrainedConfig], MobilintNPUBackend]] = None,
 ) -> None:
     """Apply buffered NPU-backend fields to ``config`` in :data:`_NPU_APPLY_ORDER`.
 
@@ -198,15 +198,23 @@ def _apply_npu_backend_kwargs(
     ``MobilintConfigMixin`` (nor its multi-backend variants), so a plain
     ``setattr(config, f"{prefix}{field}", ...)`` would land on the outer
     config's ``__dict__`` and never reach the nested backend — remote MXQ
-    resolution would silently keep the shipped revision. When the caller
-    passes ``backend``, those fields are written straight onto it,
-    mapping the caller-facing kwarg name to the backend's storage-name
-    (``commit_hash`` → ``_commit_hash``).
+    resolution would silently keep the shipped revision.
+
+    When the caller passes ``resolve_backend``, those fields are written
+    straight onto the backend the callable returns, mapping the caller-
+    facing kwarg name to the backend's storage-name (``commit_hash`` →
+    ``_commit_hash``). The callable is invoked **per field**, not once,
+    so a preceding ``target_device`` override that rebuilds the config's
+    backend (:func:`_rebuild_backend_for_target_device` allocates a fresh
+    instance and reassigns ``config.<prefix>npu_backend``) is followed by
+    ``resolve_backend(config)`` returning the newly-installed backend —
+    ``revision`` / ``commit_hash`` therefore always land on the live
+    destination backend, never on the discarded source.
     """
 
     def _apply(field: str, value: Any) -> None:
-        if backend is not None and field in _NPU_BACKEND_DIRECT_FIELDS:
-            setattr(backend, _NPU_BACKEND_DIRECT_FIELDS[field], value)
+        if resolve_backend is not None and field in _NPU_BACKEND_DIRECT_FIELDS:
+            setattr(resolve_backend(config), _NPU_BACKEND_DIRECT_FIELDS[field], value)
         else:
             setattr(config, f"{prefix}{field}", value)
 
@@ -472,7 +480,11 @@ class MobilintConfigMixin(PretrainedConfig):
             config_dict, return_unused_kwargs=True, **kwargs
         )  # type: ignore[misc]
 
-        _apply_npu_backend_kwargs(config, npu_sub_kwargs, backend=config.npu_backend)
+        _apply_npu_backend_kwargs(
+            config,
+            npu_sub_kwargs,
+            resolve_backend=lambda c: c.npu_backend,
+        )
 
         if return_unused_kwargs:
             return config, unused_kwargs
@@ -670,10 +682,16 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
         )  # type: ignore[misc]
 
         _apply_npu_backend_kwargs(
-            config, encoder_sub, prefix="encoder_", backend=config.encoder_npu_backend
+            config,
+            encoder_sub,
+            prefix="encoder_",
+            resolve_backend=lambda c: c.encoder_npu_backend,
         )
         _apply_npu_backend_kwargs(
-            config, decoder_sub, prefix="decoder_", backend=config.decoder_npu_backend
+            config,
+            decoder_sub,
+            prefix="decoder_",
+            resolve_backend=lambda c: c.decoder_npu_backend,
         )
 
         if return_unused_kwargs:
@@ -1245,13 +1263,22 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         )  # type: ignore[misc]
 
         _apply_npu_backend_kwargs(
-            config, base_sub, prefix="base_", backend=config.base_npu_backend
+            config,
+            base_sub,
+            prefix="base_",
+            resolve_backend=lambda c: c.base_npu_backend,
         )
         _apply_npu_backend_kwargs(
-            config, draft_sub, prefix="draft_", backend=config.draft_npu_backend
+            config,
+            draft_sub,
+            prefix="draft_",
+            resolve_backend=lambda c: c.draft_npu_backend,
         )
         _apply_npu_backend_kwargs(
-            config, fc_sub, prefix="fc_", backend=config.fc_npu_backend
+            config,
+            fc_sub,
+            prefix="fc_",
+            resolve_backend=lambda c: c.fc_npu_backend,
         )
 
         if return_unused_kwargs:

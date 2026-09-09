@@ -324,13 +324,13 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
             config,
             encoder_sub,
             prefix="encoder_",
-            backend=config.thinker_config.audio_config.npu_backend,
+            resolve_backend=lambda c: c.thinker_config.audio_config.npu_backend,
         )
         _apply_npu_backend_kwargs(
             config,
             decoder_sub,
             prefix="decoder_",
-            backend=config.thinker_config.text_config.npu_backend,
+            resolve_backend=lambda c: c.thinker_config.text_config.npu_backend,
         )
 
         if return_unused_kwargs:

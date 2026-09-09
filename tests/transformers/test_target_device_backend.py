@@ -235,6 +235,31 @@ def test_from_dict_buffers_target_device_across_topology_probe_hazard() -> None:
     assert set(config.to_dict()["target_clusters"]) == {"0:0", "0:1"}
 
 
+def test_from_dict_target_device_rebuild_still_receives_revision_and_commit_hash() -> None:
+    """Land ``revision`` / ``commit_hash`` on the rebuilt backend, not the discarded source.
+
+    ``_apply_npu_backend_kwargs`` writes ``target_device`` first, which
+    routes through ``_rebuild_backend_for_target_device`` and reassigns
+    ``config.npu_backend`` to a freshly constructed instance for the new
+    board. If the direct-backend routing captured the source backend at
+    helper entry, ``revision`` / ``commit_hash`` would then land on the
+    detached object and the newly-installed backend would keep its
+    shipped defaults — remote MXQ resolution would fetch the wrong
+    artifact. The helper must resolve the backend per field so the
+    metadata reaches the live destination after the rebuild.
+    """
+
+    config = _TargetDeviceConfig.from_dict(
+        {"model_type": _TargetDeviceConfig.model_type, "target_device": "regulus-rb-usb"},
+        target_device="aries-rb",
+        revision="post-rebuild-release",
+        commit_hash="cafebabe12345678",
+    )
+    assert type(config.npu_backend).__name__ == "MobilintAriesBackend"
+    assert config.npu_backend.revision == "post-rebuild-release"
+    assert config.npu_backend._commit_hash == "cafebabe12345678"
+
+
 @pytest.mark.parametrize("prefix", ["encoder", "decoder"])
 def test_encoder_decoder_from_dict_routes_revision_and_commit_hash_to_backend(
     prefix: str,
