@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
+from transformers.models.llama.configuration_llama import LlamaConfig
 
 from mblt_model_zoo.hf_transformers.models.qwen2_eagle3.configuration_qwen2_eagle3 import (
     MobilintQwen2Eagle3Config,
@@ -137,7 +137,7 @@ def test_qwen2_eagle3_config_name_or_path_propagates_to_draft_config() -> None:
 
 def test_qwen2_eagle3_config_roundtrip_accepts_draft_config_object() -> None:
     """Round-trip should preserve draft_config when passed as a config object."""
-    draft = Qwen2Config(
+    draft = LlamaConfig(
         vocab_size=10,
         hidden_size=8,
         intermediate_size=16,
@@ -157,5 +157,5 @@ def test_qwen2_eagle3_config_roundtrip_accepts_draft_config_object() -> None:
 
     restored = MobilintQwen2Eagle3Config(**config.to_dict())
 
-    assert isinstance(restored.draft_config, Qwen2Config)
+    assert isinstance(restored.draft_config, LlamaConfig)
     assert restored.draft_config.vocab_size == 10
