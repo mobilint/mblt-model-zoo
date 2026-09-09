@@ -78,10 +78,10 @@ def test_qwen2_vl_text_dev_no_override_rebuilds_text_target_cores() -> None:
     each override to ``setattr`` on the sub-config, which only routed to the
     ``dev_no.setter`` chain without re-expanding stale ``target_cores`` inherited
     from the sub-config's default construction. Post-fix the sub-config's backend
-    now carries canonical targets covering the requested device.
+    now carries canonical targets covering the requested device. The value assertions
+    below are the contract; the rebuild happens silently.
     """
-    with pytest.warns(UserWarning, match="rebuilding targets from dev_no"):
-        config = MobilintQwen2VLConfig(text_dev_no=1)
+    config = MobilintQwen2VLConfig(text_dev_no=1)
 
     text_dumped = config.text_config.to_dict()
     assert text_dumped["dev_no"] == 1

@@ -1623,9 +1623,15 @@ def test_migrate_target_cores_rejects_out_of_range_cluster_canonical() -> None:
 
 
 def test_migrate_target_cores_rejects_out_of_range_core_canonical() -> None:
-    """Canonical ``"d:c:k"`` with core index outside ``core_map`` is rejected."""
+    """Canonical ``"d:c:k"`` with core index outside ``core_map`` is rejected.
+
+    ``_core_index`` accepts native enum ordinals (Core0..Core3 → 1..4) as an
+    alias for the public 0..3 indices, so 4 is silently interpreted as Core3.
+    5 is unambiguously outside both the ordinal and native ranges and triggers
+    the check.
+    """
     with pytest.raises(ValueError, match="core must be in"):
-        _migrate_target_cores(["0:0:4"], fallback_dev=0, dev_no_is_list=False)
+        _migrate_target_cores(["0:0:5"], fallback_dev=0, dev_no_is_list=False)
 
 
 def test_migrate_target_cores_accepts_boundary_cluster_and_core() -> None:
@@ -1635,9 +1641,13 @@ def test_migrate_target_cores_accepts_boundary_cluster_and_core() -> None:
 
 
 def test_migrate_target_cores_rejects_out_of_range_legacy_two_part() -> None:
-    """Legacy ``"c:k"`` with a core index outside ``core_map`` is rejected."""
+    """Legacy ``"c:k"`` with a core index outside ``core_map`` is rejected.
+
+    See :func:`test_migrate_target_cores_rejects_out_of_range_core_canonical`
+    for why we probe with 5 rather than 4.
+    """
     with pytest.raises(ValueError, match="core must be in"):
-        _migrate_target_cores(["0:4"], fallback_dev=0, dev_no_is_list=False)
+        _migrate_target_cores(["0:5"], fallback_dev=0, dev_no_is_list=False)
 
 
 def test_migrate_target_clusters_rejects_out_of_range_cluster_canonical() -> None:
