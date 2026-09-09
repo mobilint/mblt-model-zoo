@@ -892,16 +892,32 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             capped = min(desired, limit)
             return capped if existing is None else min(existing, capped)
 
+        # ``smart_resize`` rounds each upscaled dimension UP to a
+        # ``patch_size * merge_size`` multiple and does not reapply the
+        # maximum after alignment, so a small image with ``min_pixels ==
+        # limit`` upscales to more than ``limit`` post-align and can hit
+        # the documented NPU hang path (e.g. 100×100 with limit=401408
+        # aligns to 644×644 → 46×46 patch grid, 2116 tokens > 2048).
+        # Bound the mirrored floor at the area of the largest ``factor``-
+        # aligned square that still fits inside the token budget so the
+        # ceil-to-factor step cannot overshoot.
+        merge_size = int(getattr(self.image_processor, "merge_size", 2) or 2)
+        alignment_factor = int(self.image_processor.patch_size) * merge_size
+        aligned_safe_dim = (int(limit ** 0.5) // alignment_factor) * alignment_factor
+        aligned_safe_floor = aligned_safe_dim * aligned_safe_dim
+
         def _apply_lower_floor(existing, desired):
             """``min_pixels`` → ``shortest_edge`` is a floor the caller asks
             the resizer to respect (small images may be upscaled to it). Cap
-            ``desired`` at ``limit`` so the floor never breaches the NPU
-            budget, then take the larger of ``existing`` and the capped value
-            so a caller floor above the processor's default still wins.
+            ``desired`` at ``aligned_safe_floor`` (limit reduced by the worst-
+            case post-align overshoot) so the floor never breaches the NPU
+            budget after ``smart_resize`` rounds up, then take the larger of
+            ``existing`` and the capped value so a caller floor above the
+            processor's default still wins.
             """
             if desired is None:
                 return existing
-            capped = min(desired, limit)
+            capped = min(desired, aligned_safe_floor)
             return capped if existing is None else max(existing, capped)
 
         new_longest = _apply_upper_cap(longest, max_p)
