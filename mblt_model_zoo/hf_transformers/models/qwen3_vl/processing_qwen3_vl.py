@@ -816,16 +816,44 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         which bounds the patch count. Bounding ``min_pixels`` prevents the
         symmetric scale-*up* path where an oversized floor forces the
         rescaler to inflate a small input past the budget.
+
+        Transformers 5.x dropped support for both scalar kwargs on
+        ``Qwen2VLImageProcessor`` — passing ``max_pixels`` / ``min_pixels`` at
+        call time is silently ignored and only ``size`` controls the resize.
+        Mirror the (capped) scalar into the caller's ``size`` scope so the
+        limit still bites on 5.x while keeping 4.x's smaller-wins semantics
+        (``size`` and the scalar both point at the same ceiling).
         """
-        for field in ("max_pixels", "min_pixels"):
+        field_to_size_key = (("max_pixels", "longest_edge"), ("min_pixels", "shortest_edge"))
+        for field, size_key in field_to_size_key:
             value = scope.get(field)
-            if value is None or value <= limit:
+            if value is None:
                 continue
-            logger.info(
-                "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
-                kind, field, value, limit, self.max_vision_tokens,
-            )
-            scope[field] = limit
+            capped = min(value, limit)
+            if capped < value:
+                logger.info(
+                    "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
+                    kind, field, value, capped, self.max_vision_tokens,
+                )
+                scope[field] = capped
+            existing_size = scope.get("size")
+            current_edge = _size_get(existing_size, size_key) if existing_size is not None else None
+            if current_edge is None or current_edge > capped:
+                # Seed from the caller's ``size`` or the processor's default
+                # ``ip.size`` so 5.x's ``_standardize_kwargs`` invariant
+                # (both edges present) holds even when the caller only
+                # supplied a scalar. The 5.x kwargs surface validates a
+                # plain ``dict``/``int``/``list``/``None`` and rejects a
+                # ``SizeDict`` instance, so emit a plain dict here rather
+                # than routing through :func:`_update_size` (which mirrors
+                # the source shape).
+                base_size = existing_size if existing_size is not None else self.image_processor.size
+                size_dict = {
+                    "longest_edge": _size_get(base_size, "longest_edge"),
+                    "shortest_edge": _size_get(base_size, "shortest_edge"),
+                }
+                size_dict[size_key] = capped
+                scope["size"] = {k: v for k, v in size_dict.items() if v is not None}
 
     def _cap_size_edges(self, scope: dict, limit: int, kind: str) -> None:
         """Cap ``size.longest_edge`` / ``size.shortest_edge`` against ``limit``.

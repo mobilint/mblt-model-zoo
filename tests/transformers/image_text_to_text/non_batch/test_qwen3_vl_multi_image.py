@@ -3,9 +3,11 @@ from transformers import TextStreamer
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
     skip_if_static_vision,
     skip_if_transformers_lacks_qwen3_vl_support,
+    skip_qwen3_vl_pipeline_if_tf_5_4,
 )
 
 skip_if_transformers_lacks_qwen3_vl_support()
+skip_qwen3_vl_pipeline_if_tf_5_4()
 
 # 8B dropped: see QWEN3_VL_8B_MXQ_INCOMPATIBLE_REASON in qwen3_vl_compat.
 MODEL_PATHS = (
