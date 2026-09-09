@@ -872,8 +872,16 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         else:
             base_size = self.image_processor.size
 
-        longest = _size_get(base_size, "longest_edge")
-        shortest = _size_get(base_size, "shortest_edge")
+        # ``size`` may be an integer shorthand (HF convention: both edges
+        # equal the integer) that ``_size_get`` returns ``None`` for on
+        # every key. Normalize before extracting per-edge values so the
+        # caller's floor is preserved when we mirror the scalar cap.
+        if isinstance(base_size, int):
+            longest = base_size
+            shortest = base_size
+        else:
+            longest = _size_get(base_size, "longest_edge")
+            shortest = _size_get(base_size, "shortest_edge")
 
         def _cap_edge(existing, desired):
             if desired is None:
