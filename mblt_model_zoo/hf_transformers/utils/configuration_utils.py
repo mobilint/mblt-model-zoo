@@ -1,6 +1,6 @@
 import inspect
 from inspect import Parameter, Signature
-from typing import Any, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 
 from transformers.configuration_utils import PretrainedConfig
 
@@ -114,6 +114,21 @@ _NPU_APPLY_ORDER: tuple[str, ...] = (
 )
 
 
+# Kwargs consumed by ``MobilintNPUBackend.from_dict`` that
+# ``MobilintConfigMixin`` does not surface as a forwarding property (either
+# top-level or prefixed on the multi-backend mixins). Routing them through
+# ``setattr(config, f"{prefix}{field}", ...)`` would land on the outer
+# ``config.__dict__`` and never reach the nested backend, so
+# :func:`_apply_npu_backend_kwargs` writes them straight onto the caller-
+# supplied ``backend`` when one is given. The value maps the caller-facing
+# kwarg name to the backend's storage-name — ``commit_hash`` is exposed
+# publicly as a kwarg but stored as ``_commit_hash`` on the backend.
+_NPU_BACKEND_DIRECT_FIELDS: dict[str, str] = {
+    "revision": "revision",
+    "commit_hash": "_commit_hash",
+}
+
+
 def _pop_consumed_backend_kwargs(kwargs: dict[str, Any], prefix: str = "") -> None:
     """Remove NPU-backend fields from ``kwargs`` after the backend consumes them.
 
@@ -164,7 +179,11 @@ def _split_npu_backend_kwargs(
 
 
 def _apply_npu_backend_kwargs(
-    config: PretrainedConfig, sub_kwargs: dict[str, Any], prefix: str = ""
+    config: PretrainedConfig,
+    sub_kwargs: dict[str, Any],
+    prefix: str = "",
+    *,
+    backend: Optional[MobilintNPUBackend] = None,
 ) -> None:
     """Apply buffered NPU-backend fields to ``config`` in :data:`_NPU_APPLY_ORDER`.
 
@@ -173,13 +192,30 @@ def _apply_npu_backend_kwargs(
     subsequent topology / mode assignments land — the destination
     board's fresh pending then absorbs the remaining fields without a
     partial-state finalize against the source topology.
+
+    Fields listed in :data:`_NPU_BACKEND_DIRECT_FIELDS` (``revision`` /
+    ``commit_hash``) have no forwarding property on
+    ``MobilintConfigMixin`` (nor its multi-backend variants), so a plain
+    ``setattr(config, f"{prefix}{field}", ...)`` would land on the outer
+    config's ``__dict__`` and never reach the nested backend — remote MXQ
+    resolution would silently keep the shipped revision. When the caller
+    passes ``backend``, those fields are written straight onto it,
+    mapping the caller-facing kwarg name to the backend's storage-name
+    (``commit_hash`` → ``_commit_hash``).
     """
+
+    def _apply(field: str, value: Any) -> None:
+        if backend is not None and field in _NPU_BACKEND_DIRECT_FIELDS:
+            setattr(backend, _NPU_BACKEND_DIRECT_FIELDS[field], value)
+        else:
+            setattr(config, f"{prefix}{field}", value)
+
     remaining = dict(sub_kwargs)
     for field in _NPU_APPLY_ORDER:
         if field in remaining:
-            setattr(config, f"{prefix}{field}", remaining.pop(field))
+            _apply(field, remaining.pop(field))
     for field, value in remaining.items():
-        setattr(config, f"{prefix}{field}", value)
+        _apply(field, value)
 
 
 def _serialized_target_cores(backend: MobilintNPUBackend) -> list[str]:
@@ -436,7 +472,7 @@ class MobilintConfigMixin(PretrainedConfig):
             config_dict, return_unused_kwargs=True, **kwargs
         )  # type: ignore[misc]
 
-        _apply_npu_backend_kwargs(config, npu_sub_kwargs)
+        _apply_npu_backend_kwargs(config, npu_sub_kwargs, backend=config.npu_backend)
 
         if return_unused_kwargs:
             return config, unused_kwargs
@@ -633,8 +669,12 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
             config_dict, return_unused_kwargs=True, **kwargs
         )  # type: ignore[misc]
 
-        _apply_npu_backend_kwargs(config, encoder_sub, prefix="encoder_")
-        _apply_npu_backend_kwargs(config, decoder_sub, prefix="decoder_")
+        _apply_npu_backend_kwargs(
+            config, encoder_sub, prefix="encoder_", backend=config.encoder_npu_backend
+        )
+        _apply_npu_backend_kwargs(
+            config, decoder_sub, prefix="decoder_", backend=config.decoder_npu_backend
+        )
 
         if return_unused_kwargs:
             return config, unused_kwargs
@@ -1204,9 +1244,15 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
             config_dict, return_unused_kwargs=True, **kwargs
         )  # type: ignore[misc]
 
-        _apply_npu_backend_kwargs(config, base_sub, prefix="base_")
-        _apply_npu_backend_kwargs(config, draft_sub, prefix="draft_")
-        _apply_npu_backend_kwargs(config, fc_sub, prefix="fc_")
+        _apply_npu_backend_kwargs(
+            config, base_sub, prefix="base_", backend=config.base_npu_backend
+        )
+        _apply_npu_backend_kwargs(
+            config, draft_sub, prefix="draft_", backend=config.draft_npu_backend
+        )
+        _apply_npu_backend_kwargs(
+            config, fc_sub, prefix="fc_", backend=config.fc_npu_backend
+        )
 
         if return_unused_kwargs:
             return config, unused_kwargs

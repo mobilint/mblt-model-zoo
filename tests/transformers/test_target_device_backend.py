@@ -236,6 +236,62 @@ def test_from_dict_buffers_target_device_across_topology_probe_hazard() -> None:
 
 
 @pytest.mark.parametrize("prefix", ["encoder", "decoder"])
+def test_encoder_decoder_from_dict_routes_revision_and_commit_hash_to_backend(
+    prefix: str,
+) -> None:
+    """Route ``encoder_/decoder_revision`` and ``commit_hash`` to the prefixed backend.
+
+    ``MobilintEncoderDecoderConfigMixin`` exposes no forwarding property
+    for ``encoder_revision`` / ``decoder_revision`` (nor their
+    ``commit_hash`` counterparts), so the shared
+    ``_apply_npu_backend_kwargs`` helper must write those fields straight
+    onto the prefixed backend when the caller passes ``backend=...``.
+    Without that path the setattr replay would land the values on
+    ``config.__dict__`` and leave ``encoder_npu_backend.revision`` /
+    ``._commit_hash`` at the shipped defaults, so remote MXQ resolution
+    would silently pick the wrong artifact.
+    """
+
+    prefix_ = f"{prefix}_"
+    config = _EncoderDecoderTargetDeviceConfig.from_dict(
+        {"model_type": _EncoderDecoderTargetDeviceConfig.model_type},
+        **{
+            f"{prefix_}revision": "encdec-release",
+            f"{prefix_}commit_hash": "0011223344556677",
+        },
+    )
+    backend = getattr(config, f"{prefix}_npu_backend")
+    assert backend.revision == "encdec-release"
+    assert backend._commit_hash == "0011223344556677"
+
+
+@pytest.mark.parametrize("prefix", ["base", "draft", "fc"])
+def test_eagle3_from_dict_routes_revision_and_commit_hash_to_backend(
+    prefix: str,
+) -> None:
+    """Route ``base_/draft_/fc_revision`` and ``commit_hash`` to the prefixed backend.
+
+    ``MobilintEagle3ConfigMixin`` also has no forwarding property for
+    ``{base,draft,fc}_revision`` / ``_commit_hash``, so the same
+    backend-direct routing must land those fields on
+    ``{base,draft,fc}_npu_backend`` — otherwise the Eagle3 draft
+    resolver silently keeps the shipped revision.
+    """
+
+    prefix_ = f"{prefix}_"
+    config = _Eagle3TargetDeviceConfig.from_dict(
+        {"model_type": _Eagle3TargetDeviceConfig.model_type},
+        **{
+            f"{prefix_}revision": f"{prefix}-release",
+            f"{prefix_}commit_hash": f"deadbeef{prefix.ljust(8, 'x')}",
+        },
+    )
+    backend = getattr(config, f"{prefix}_npu_backend")
+    assert backend.revision == f"{prefix}-release"
+    assert backend._commit_hash == f"deadbeef{prefix.ljust(8, 'x')}"
+
+
+@pytest.mark.parametrize("prefix", ["encoder", "decoder"])
 def test_qwen3_asr_ctor_routes_revision_and_commit_hash_to_backend(prefix: str) -> None:
     """Forward ``revision`` / ``commit_hash`` kwargs to the nested NPU backend.
 

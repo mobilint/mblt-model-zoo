@@ -5,6 +5,7 @@ from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
 
 from ...utils.configuration_utils import (
+    _NPU_BACKEND_DIRECT_FIELDS,
     MobilintConfigMixin,
     _apply_npu_backend_kwargs,
     _split_npu_backend_kwargs,
@@ -20,17 +21,6 @@ with guard_qwen_asr_import():
     )
 
 
-# Fields consumed by ``MobilintNPUBackend.from_dict`` that ``MobilintConfigMixin``
-# does not expose as a forwarding property. Routing them through
-# ``setattr(sub_config, k, v)`` would leave them on ``config.__dict__`` and
-# never reach the backend, so both the constructor and ``from_dict`` override
-# have to write them straight onto ``sub_config.npu_backend``. The value maps
-# the caller-facing kwarg name to the backend's storage-name — ``commit_hash``
-# is exposed publicly but stored as ``_commit_hash`` on the backend.
-_QWEN3_ASR_BACKEND_DIRECT_FIELDS: dict[str, str] = {
-    "revision": "revision",
-    "commit_hash": "_commit_hash",
-}
 
 
 class MobilintQwen3ASRAudioEncoderConfig(MobilintConfigMixin, Qwen3ASRAudioEncoderConfig):
@@ -140,7 +130,7 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         # (setting the string on the backend directly would leave an
         # Aries instance in place with a Regulus target_device string).
         # Fields with no forwarding property
-        # (:data:`_QWEN3_ASR_BACKEND_DIRECT_FIELDS`) route straight to the
+        # (:data:`_NPU_BACKEND_DIRECT_FIELDS`) route straight to the
         # nested backend, mapping ``commit_hash`` to its ``_commit_hash``
         # storage name.
         for sub_config, prefixed_kwargs in (
@@ -148,10 +138,10 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
             (thinker_config.text_config, decoder_kwargs),
         ):
             for k, v in prefixed_kwargs.items():
-                if k in _QWEN3_ASR_BACKEND_DIRECT_FIELDS:
+                if k in _NPU_BACKEND_DIRECT_FIELDS:
                     setattr(
                         sub_config.npu_backend,
-                        _QWEN3_ASR_BACKEND_DIRECT_FIELDS[k],
+                        _NPU_BACKEND_DIRECT_FIELDS[k],
                         v,
                     )
                 else:
@@ -325,35 +315,23 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
         encoder_sub = _split_npu_backend_kwargs(kwargs, prefix="encoder_")
         decoder_sub = _split_npu_backend_kwargs(kwargs, prefix="decoder_")
-        encoder_direct = {
-            k: encoder_sub.pop(k)
-            for k in list(encoder_sub)
-            if k in _QWEN3_ASR_BACKEND_DIRECT_FIELDS
-        }
-        decoder_direct = {
-            k: decoder_sub.pop(k)
-            for k in list(decoder_sub)
-            if k in _QWEN3_ASR_BACKEND_DIRECT_FIELDS
-        }
 
         config, unused_kwargs = super().from_dict(
             config_dict, return_unused_kwargs=True, **kwargs
         )  # type: ignore[misc]
 
-        _apply_npu_backend_kwargs(config, encoder_sub, prefix="encoder_")
-        _apply_npu_backend_kwargs(config, decoder_sub, prefix="decoder_")
-        for k, v in encoder_direct.items():
-            setattr(
-                config.thinker_config.audio_config.npu_backend,
-                _QWEN3_ASR_BACKEND_DIRECT_FIELDS[k],
-                v,
-            )
-        for k, v in decoder_direct.items():
-            setattr(
-                config.thinker_config.text_config.npu_backend,
-                _QWEN3_ASR_BACKEND_DIRECT_FIELDS[k],
-                v,
-            )
+        _apply_npu_backend_kwargs(
+            config,
+            encoder_sub,
+            prefix="encoder_",
+            backend=config.thinker_config.audio_config.npu_backend,
+        )
+        _apply_npu_backend_kwargs(
+            config,
+            decoder_sub,
+            prefix="decoder_",
+            backend=config.thinker_config.text_config.npu_backend,
+        )
 
         if return_unused_kwargs:
             return config, unused_kwargs
