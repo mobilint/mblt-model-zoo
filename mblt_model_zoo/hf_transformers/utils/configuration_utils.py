@@ -149,7 +149,31 @@ class MobilintConfigMixin(PretrainedConfig):
 
     @target_device.setter
     def target_device(self, value: str) -> None:
-        self.npu_backend.target_device = value
+        # HF ``PretrainedConfig.from_dict`` instantiates the config with the
+        # values from ``config.json`` first and then applies any user
+        # ``from_pretrained`` kwargs (including ``target_device``) via
+        # ``setattr``. The initial __init__ has already dispatched
+        # ``MobilintNPUBackend.__new__`` to a concrete subclass based on the
+        # config-file value, so a plain string mutation here would leave
+        # ``self.npu_backend`` on the wrong board's class (e.g. Aries when
+        # the caller asked for ``regulus-rb-usb``). Rebuild the backend
+        # from its current serialized state whenever the requested board
+        # maps to a different subclass so the class matches the string.
+        from mblt_npu import MobilintNPUBackend, backend_class_for
+
+        try:
+            desired_cls = backend_class_for(value)
+        except (KeyError, ValueError):
+            # Let the backend layer raise its documented error for unknown
+            # target_device values instead of shadowing it here.
+            self.npu_backend.target_device = value
+            return
+        if type(self.npu_backend) is desired_cls:
+            self.npu_backend.target_device = value
+            return
+        state = self.npu_backend.to_dict()
+        state["target_device"] = value
+        self.npu_backend = MobilintNPUBackend.from_dict(state)
 
     @property
     def dev_no(self) -> int:
