@@ -7,7 +7,8 @@ from tests.transformers.image_text_to_text.qwen3_vl_compat import (
 
 skip_if_transformers_lacks_qwen3_vl_support()
 
-# 8B dropped: see QWEN3_VL_8B_MXQ_INCOMPATIBLE_REASON in qwen3_vl_compat.
+# 8B is withdrawn (see AGENTS.md "Transformers and MeloTTS"): the shipped
+# MXQ hits an NPU-only output-order mismatch under the current runtime.
 MODEL_PATHS = (
     "mobilint/Qwen3-VL-2B-Instruct",
     "mobilint/Qwen3-VL-4B-Instruct",
