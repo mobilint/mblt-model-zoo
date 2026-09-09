@@ -7,10 +7,10 @@ from tests.transformers.image_text_to_text.qwen3_vl_compat import (
 
 skip_if_transformers_lacks_qwen3_vl_support()
 
+# 8B dropped: see QWEN3_VL_8B_MXQ_INCOMPATIBLE_REASON in qwen3_vl_compat.
 MODEL_PATHS = (
     "mobilint/Qwen3-VL-2B-Instruct",
     "mobilint/Qwen3-VL-4B-Instruct",
-    "mobilint/Qwen3-VL-8B-Instruct",
 )
 
 VIDEO_URL = "https://test-videos.co.uk/vids/jellyfish/mp4/h264/360/Jellyfish_360_10s_1MB.mp4"

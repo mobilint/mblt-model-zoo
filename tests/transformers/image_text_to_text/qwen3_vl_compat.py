@@ -38,6 +38,19 @@ def skip_if_transformers_lacks_qwen3_vl_support() -> None:
     pytest.skip(_QWEN3_VL_SKIP_REASON, allow_module_level=True)
 
 
+QWEN3_VL_8B_MXQ_INCOMPATIBLE_REASON = (
+    "Qwen3-VL-8B MXQ (regular and Batch16) hits 'NPU-only model output order "
+    "mismatch' with qbruntime 1.4.0 / mblt_npu 0.1.0 and access-violation-"
+    "crashes at qbruntime.Model.__init__. Re-enable once an updated MXQ ships "
+    "that matches the current runtime output ordering."
+)
+
+
+def skip_qwen3_vl_8b_module() -> None:
+    """Module-level skip for 8B-only Qwen3-VL test files."""
+    pytest.skip(QWEN3_VL_8B_MXQ_INCOMPATIBLE_REASON, allow_module_level=True)
+
+
 def skip_if_static_vision(pipe, feature: str) -> None:
     """Skip the current test when the pipeline's processor is static-vision.
 

@@ -5,9 +5,11 @@ from transformers import TextStreamer
 
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
     skip_if_transformers_lacks_qwen3_vl_support,
+    skip_qwen3_vl_8b_module,
 )
 
 skip_if_transformers_lacks_qwen3_vl_support()
+skip_qwen3_vl_8b_module()
 
 from transformers import AutoModelForImageTextToText, AutoProcessor  # noqa: E402
 from transformers.image_utils import load_image  # noqa: E402
