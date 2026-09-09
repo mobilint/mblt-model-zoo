@@ -1233,7 +1233,18 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             text = self._strip_video_outer_wrap(text)
 
         result = super().__call__(images, text, videos, **kwargs)
-        _restack_list_shaped_token_outputs(result)
+        # Only apply the tf 5.4 tensor-restack workaround when the caller
+        # actually asked for PyTorch tensors — omitting ``return_tensors``
+        # (or explicitly passing ``None`` / a non-``"pt"`` value) is a
+        # documented upstream contract for Python-list token outputs and
+        # must survive.
+        text_kwargs = kwargs.get("text_kwargs") if isinstance(kwargs.get("text_kwargs"), dict) else None
+        effective_return_tensors = (
+            text_kwargs.get("return_tensors") if text_kwargs is not None and "return_tensors" in text_kwargs
+            else kwargs.get("return_tensors")
+        )
+        if effective_return_tensors == "pt":
+            _restack_list_shaped_token_outputs(result)
         return result
 
 
