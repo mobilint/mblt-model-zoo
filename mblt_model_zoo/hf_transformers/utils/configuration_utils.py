@@ -157,8 +157,8 @@ class MobilintConfigMixin(PretrainedConfig):
         # config-file value, so a plain string mutation here would leave
         # ``self.npu_backend`` on the wrong board's class (e.g. Aries when
         # the caller asked for ``regulus-rb-usb``). Rebuild the backend
-        # from its current serialized state whenever the requested board
-        # maps to a different subclass so the class matches the string.
+        # whenever the requested board maps to a different subclass so the
+        # class matches the string.
         from mblt_npu import MobilintNPUBackend, backend_class_for
 
         try:
@@ -171,7 +171,20 @@ class MobilintConfigMixin(PretrainedConfig):
         if type(self.npu_backend) is desired_cls:
             self.npu_backend.target_device = value
             return
+        # Cross-board rebuild: preserve board-agnostic runtime state
+        # (mxq_path, dev_no, revision, commit_hash, max_batch_size,
+        # name_or_path) but discard topology fields — the source board's
+        # target_cores / target_clusters / core_mode encode its own
+        # topology (e.g. Aries's 8-core grid or a multi-cluster mode)
+        # that the destination board's __init__ would reject. Dropping
+        # them lets the destination class's board-aware default sugar
+        # fill in a valid spec (e.g. Regulus's sole ``d:0:0`` core in
+        # ``single`` mode); subsequent HF kwargs (target_cores=...,
+        # core_mode=...) then override on the fresh backend via the
+        # per-field setters.
         state = self.npu_backend.to_dict()
+        for topology_key in ("target_cores", "target_clusters", "core_mode"):
+            state.pop(topology_key, None)
         state["target_device"] = value
         self.npu_backend = MobilintNPUBackend.from_dict(state)
 
