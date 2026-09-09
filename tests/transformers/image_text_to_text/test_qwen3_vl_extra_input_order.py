@@ -282,8 +282,20 @@ def _make_batched_model(
     )
     # ``_llm_forward_batch`` now dispatches through ``npu_backend.mxq_models``
     # so per-slot ``.infer`` calls can address individual Model handles; the
-    # single-Model fake keeps the historical single-group fast path.
-    model.npu_backend = SimpleNamespace(mxq_model=mxq, mxq_models=[mxq])
+    # single-Model fake keeps the historical single-group fast path. The
+    # ``dispatcher`` attribute is required post multi-slot refactor — the
+    # mixin's batched forward reads ``self.npu_backend.dispatcher`` before
+    # partitioning rows.
+    from mblt_model_zoo.hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+
+    backend = SimpleNamespace(
+        mxq_model=mxq,
+        mxq_models=[mxq],
+        k_per_model=1,
+        output_layout=None,
+    )
+    backend.dispatcher = MultiSlotDispatcher(backend)
+    model.npu_backend = backend
     model.num_deepstack_layers = num_deepstack_layers
     model.npu_time = None
     model._uses_rope_input = uses_rope_input
