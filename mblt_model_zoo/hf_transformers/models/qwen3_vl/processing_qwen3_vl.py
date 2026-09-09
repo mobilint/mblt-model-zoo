@@ -869,11 +869,17 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if max_p is None and min_p is None:
             return
 
-        if images_scope is not None and images_scope.get("size") is not None:
+        # Same key-presence precedence as ``_pick``: an explicit nested
+        # ``images_kwargs={"size": None}`` must survive as ``None`` (which we
+        # then fall through past to seed from ``ip.size``) rather than being
+        # overridden by the flat top-level ``size``.
+        if images_scope is not None and "size" in images_scope:
             base_size = images_scope["size"]
-        elif kwargs.get("size") is not None:
+        elif "size" in kwargs:
             base_size = kwargs["size"]
         else:
+            base_size = None
+        if base_size is None:
             base_size = self.image_processor.size
 
         # ``size`` may be an integer shorthand (HF convention: both edges
