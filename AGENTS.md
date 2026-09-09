@@ -68,6 +68,13 @@ Before editing, run `git status --short` and preserve unrelated work.
 ## Transformers and MeloTTS
 
 - Install the matching optional extra before integration tests.
+- Supported transformers range: `>=4.54.0, <=5.3.0`. Both `[transformers]` and `[MeloTTS]`
+  extras in `pyproject.toml` and `scripts/test_transformers_matrix.py::VERSION_MAX` cap at
+  that value; the ceiling exists because transformers 5.4 changed the image-text-to-text
+  pipeline such that `_prepare_model_inputs` returns `inputs_tensor` as a Python list and
+  `generate` fails at `batch_size = inputs_tensor.shape[0]`. Lift the ceiling once upstream
+  restores tensor shape or the wrapper compensates, and update the range in all three
+  places (both extras + the runner) as one change.
 - Keep `mblt-model-zoo tps` table labels, JSON keys, units, and extraction behavior centralized in
   `mblt_model_zoo/cli/tps_table.py`; update its schema and focused tests together.
 - Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Run batch
@@ -76,6 +83,13 @@ Before editing, run `git status --short` and preserve unrelated work.
   reject them with the documented `NotImplementedError`. Call
   `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model()` only for an MXQ override that differs
   from the shipped `config.dynamic_vision` setting.
+- Qwen3-VL 8B (regular and Batch16) is currently **unsupported**: the shipped MXQ hits
+  `NPU-only model output order mismatch` in `qbruntime` 1.4.0 / `mblt_npu` 0.1.0 and
+  access-violation-crashes at `qbruntime.Model.__init__::get_model_input_shape`. Do not
+  re-add `mobilint/Qwen3-VL-8B-Instruct(-Batch16)` to `MODEL_PATHS` or the batch/multi-image/
+  video test modules until the model repo ships an MXQ compatible with the current runtime.
+  Track the withdrawal in the release notes and lift it in the same change that restores the
+  test coverage.
 - Follow `.agents/skills/mblt-transformers/SKILL.md` for EAGLE-3 speculative-decoding contracts:
   preserve Hugging Face sampling semantics, keep TPS metrics centralized in `tps_table.py`, and
   use same-process repeats when measuring MXQ backends.

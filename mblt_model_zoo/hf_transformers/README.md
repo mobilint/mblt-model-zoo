@@ -26,6 +26,13 @@ pip install -e .[transformers]
 - NPU execution (`MobilintCache`, `MobilintLayer`, and all Mobilint LLM/VLM backends) requires
   `transformers>=4.54.0`, which introduced `transformers.cache_utils.CacheLayerMixin` — the class
   `MobilintLayer` subclasses.
+- The supported ceiling is `transformers<=5.3.0`. Both `[transformers]` and `[MeloTTS]` extras
+  in `pyproject.toml` and the compat matrix runner's `VERSION_MAX` in
+  `scripts/test_transformers_matrix.py` cap at that value. Transformers 5.4 introduced a
+  Qwen3-VL image-text-to-text pipeline regression where `_prepare_model_inputs` returns
+  `inputs_tensor` as a Python list and `generate` fails at
+  `batch_size = inputs_tensor.shape[0]`; the ceiling will lift once upstream restores tensor
+  shape or the mblt-model-zoo wrapper compensates.
 - GPU-only benchmark workflows (for example
   `benchmark/transformers/benchmark_text_generation_models.py sweep --original-models --device cuda:0`)
   can run against `transformers>=4.53,<4.54` via a compat shim in
