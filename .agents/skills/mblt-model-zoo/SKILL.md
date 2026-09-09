@@ -19,7 +19,12 @@ description: >-
    `compile` handlers must delegate to `mblt_vision.cli`.
 4. Preserve Model Zoo CLI help and README examples when its CLI integration changes. Pass
    board-specific `target_device` through to the standalone packages; do not reintroduce legacy
-   product/artifact selection in Model Zoo.
+   product/artifact selection in Model Zoo. Supported boards are `aries-rb`, `regulus-ra`,
+   `regulus-rb`, `regulus-ra-usb`, and `regulus-rb-usb`; the shared runtime floor is
+   `mblt-npu-python>=0.1.0` / `mobilint-qb-runtime>=1.4.0`. Route every `*target_device` setter
+   (top-level, `encoder_`, `decoder_`, `base_`, `draft_`, `fc_`, and the Qwen3-ASR facade)
+   through `_rebuild_backend_for_target_device` so cross-board overrides switch the destination
+   backend class atomically.
 5. Keep TPS output driven by `mblt_model_zoo/cli/tps_table.py`. Preserve local conventions in
    `hf_transformers` and `MeloTTS`.
 6. Start with focused tests. Report unavailable hardware, downloads, and optional extras instead of

@@ -154,6 +154,38 @@ def test_eagle3_prefixed_target_device_setter_rebuilds_backend(prefix: str) -> N
     assert config.to_dict()[f"{prefix}_target_cores"] == ["0:0:0"]
 
 
+def test_target_device_setter_reapplies_pending_topology_atomically() -> None:
+    """Preserve caller topology overrides across a cross-board setter switch.
+
+    HF ``PretrainedConfig.from_dict`` applies caller kwargs via ``setattr``
+    in insertion order, so ``core_mode="global8"`` may land on a Regulus
+    baseline before the accompanying ``target_device="aries-rb"`` kwarg.
+    The Regulus board rejects ``global8``; the previous rebuild
+    serialized the source via ``to_dict`` and thus finalized that
+    pending override against the wrong topology and raised. The atomic
+    rebuild reads only board-agnostic raw attributes from the source
+    backend and replays the caller's pending topology overrides
+    (``dev_no`` / ``core_mode`` / ``target_cores`` / ``target_clusters``)
+    onto the fresh destination pending accumulator, so the same override
+    set behaves the same regardless of setattr order.
+    """
+
+    config = _TargetDeviceConfig(target_device="regulus-rb-usb")
+    # Setter A: pending ``core_mode="global8"`` recorded against Regulus
+    # (not finalized yet — Regulus would reject it if finalize ran).
+    config.core_mode = "global8"
+    # Setter B: cross-board rebuild to Aries. Must not finalize the
+    # source pending; must replay ``core_mode="global8"`` on the fresh
+    # Aries backend so the final state honours the caller's intent.
+    config.target_device = "aries-rb"
+
+    assert type(config.npu_backend).__name__ == "MobilintAriesBackend"
+    assert config.target_device == "aries-rb"
+    assert config.core_mode == "global8"
+    # Aries's ``global8`` sugar covers both clusters.
+    assert set(config.to_dict()["target_clusters"]) == {"0:0", "0:1"}
+
+
 @pytest.mark.parametrize(
     "prefix",
     ["encoder", "decoder"],

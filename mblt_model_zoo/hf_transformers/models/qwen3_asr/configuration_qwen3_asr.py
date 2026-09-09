@@ -116,10 +116,17 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         elif thinker_config is None:
             thinker_config = MobilintQwen3ASRThinkerConfig()
 
+        # Route through the sub-config's property setters (which delegate
+        # to the underlying npu_backend and, for ``target_device``, run
+        # the cross-board rebuild helper) rather than mutating the
+        # backend attribute directly, so a constructor-time
+        # ``encoder_target_device`` / ``decoder_target_device`` override
+        # actually switches the destination backend class instead of
+        # leaving an Aries instance with a Regulus string.
         for k, v in encoder_kwargs.items():
-            setattr(thinker_config.audio_config.npu_backend, k, v)
+            setattr(thinker_config.audio_config, k, v)
         for k, v in decoder_kwargs.items():
-            setattr(thinker_config.text_config.npu_backend, k, v)
+            setattr(thinker_config.text_config, k, v)
 
         self.thinker_config = thinker_config
         self.support_languages = support_languages
@@ -145,6 +152,19 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
     @encoder_mxq_path.setter
     def encoder_mxq_path(self, value: str) -> None:
         self.thinker_config.audio_config.npu_backend.mxq_path = value
+
+    @property
+    def encoder_target_device(self) -> str:
+        """Board identifier used by the audio encoder NPU backend."""
+        return self.thinker_config.audio_config.npu_backend.target_device
+
+    @encoder_target_device.setter
+    def encoder_target_device(self, value: str) -> None:
+        # Route through the sub-config property setter so cross-board
+        # switches rebuild the backend via
+        # ``_rebuild_backend_for_target_device`` instead of leaving an
+        # Aries instance with a Regulus string.
+        self.thinker_config.audio_config.target_device = value
 
     @property
     def encoder_dev_no(self) -> int:
@@ -193,6 +213,17 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
     @decoder_mxq_path.setter
     def decoder_mxq_path(self, value: str) -> None:
         self.thinker_config.text_config.npu_backend.mxq_path = value
+
+    @property
+    def decoder_target_device(self) -> str:
+        """Board identifier used by the text decoder NPU backend."""
+        return self.thinker_config.text_config.npu_backend.target_device
+
+    @decoder_target_device.setter
+    def decoder_target_device(self, value: str) -> None:
+        # Route through the sub-config property setter (see the
+        # ``encoder_target_device`` counterpart).
+        self.thinker_config.text_config.target_device = value
 
     @property
     def decoder_dev_no(self) -> int:

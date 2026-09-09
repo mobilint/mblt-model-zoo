@@ -48,6 +48,13 @@ Before editing, run `git status --short` and preserve unrelated work.
 - Pass board selection through to the standalone Vision/NPU packages with normalized
   `target_device` values. Do not restore legacy Vision artifact lookup or product-specific backend
   code in Model Zoo.
+- Supported target-device identifiers are `aries-rb`, `regulus-ra`, `regulus-rb`,
+  `regulus-ra-usb`, and `regulus-rb-usb`; require `mblt-npu-python>=0.1.0` (which pulls
+  `mobilint-qb-runtime>=1.4.0`). Every board setter — the top-level `target_device` on
+  `MobilintConfigMixin` and its prefixed variants (`encoder_`, `decoder_`, `base_`, `draft_`,
+  `fc_` on the multi-backend mixins, plus the Qwen3-ASR facade) — must route through
+  `_rebuild_backend_for_target_device` so a cross-board `from_pretrained` kwarg actually
+  switches the destination class rather than leaving a stale board with an updated string.
 - Keep the Vision facade a thin, documented compatibility layer. Add no new Vision models,
   processing, datasets, evaluation, benchmarks, or compilation here. The only Vision tests kept
   here are generic, opt-in facade smoke tests under `tests/vision`; implementation-specific tests
