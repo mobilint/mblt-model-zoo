@@ -883,14 +883,29 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             longest = _size_get(base_size, "longest_edge")
             shortest = _size_get(base_size, "shortest_edge")
 
-        def _cap_edge(existing, desired):
+        def _apply_upper_cap(existing, desired):
+            """``max_pixels`` → ``longest_edge`` is a ceiling: cap ``desired``
+            at ``limit`` and take the tighter (smaller) of ``existing`` and
+            the capped value."""
             if desired is None:
                 return existing
             capped = min(desired, limit)
             return capped if existing is None else min(existing, capped)
 
-        new_longest = _cap_edge(longest, max_p)
-        new_shortest = _cap_edge(shortest, min_p)
+        def _apply_lower_floor(existing, desired):
+            """``min_pixels`` → ``shortest_edge`` is a floor the caller asks
+            the resizer to respect (small images may be upscaled to it). Cap
+            ``desired`` at ``limit`` so the floor never breaches the NPU
+            budget, then take the larger of ``existing`` and the capped value
+            so a caller floor above the processor's default still wins.
+            """
+            if desired is None:
+                return existing
+            capped = min(desired, limit)
+            return capped if existing is None else max(existing, capped)
+
+        new_longest = _apply_upper_cap(longest, max_p)
+        new_shortest = _apply_lower_floor(shortest, min_p)
 
         new_size: dict = {}
         if new_longest is not None:
