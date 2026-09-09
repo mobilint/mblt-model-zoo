@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mblt_model_zoo.hf_transformers.utils.configuration_utils import MobilintConfigMixin
 
 
@@ -18,10 +20,27 @@ def test_transformers_config_defaults_to_aries_rb() -> None:
     assert config.to_dict()["target_device"] == "aries-rb"
 
 
-def test_transformers_config_selects_regulus_backend() -> None:
-    """Forward an explicit Regulus board setting without direct class usage."""
+@pytest.mark.parametrize(
+    ("target_device", "backend_class_name"),
+    [
+        ("aries-rb", "MobilintAriesBackend"),
+        ("regulus-ra", "MobilintRegulusBackend"),
+        ("regulus-rb", "MobilintRegulusBackend"),
+        ("regulus-rb-usb", "MobilintRegulusBackend"),
+    ],
+)
+def test_transformers_config_forwards_target_device(
+    target_device: str, backend_class_name: str
+) -> None:
+    """Forward every documented Model Zoo target device without direct class usage.
 
-    config = _TargetDeviceConfig(target_device="regulus-rb")
+    ``regulus-rb-usb`` reaches ``MobilintRegulusBackend`` via mblt-npu-python's
+    dispatch table; it requires the qbruntime 1.4 shared package. The other
+    boards remain covered so a regression at the forwarding layer surfaces on
+    Aries, Regulus PCIe, and Regulus USB alike.
+    """
 
-    assert type(config.npu_backend).__name__ == "MobilintRegulusBackend"
-    assert config.to_dict()["target_device"] == "regulus-rb"
+    config = _TargetDeviceConfig(target_device=target_device)
+
+    assert type(config.npu_backend).__name__ == backend_class_name
+    assert config.to_dict()["target_device"] == target_device
