@@ -1,6 +1,6 @@
 import inspect
 from inspect import Parameter, Signature
-from typing import Any, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 
 from transformers.configuration_utils import PretrainedConfig
 
@@ -68,6 +68,164 @@ def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> No
     NPUTargetSpec.from_kwargs(kwargs, prefix=prefix)
 
 
+# NPU fields that ``MobilintNPUBackend.from_dict`` consumes. Buffering them
+# through :func:`_pop_consumed_backend_kwargs` / :func:`_split_npu_backend_kwargs`
+# keeps HF's downstream setattr loop from re-firing every property setter
+# (which would pollute :class:`NPUTargetSpecPending` with baseline echoes)
+# and from probing topology getters against a stale pending (which would
+# finalize the source spec against overrides intended for a different
+# board — the hasattr hazard called out for
+# :class:`MobilintVisionTextConfigMixin`).
+#
+# ``npu_prefill_chunk_size`` is deliberately excluded: it is a config-only
+# attribute stored directly on ``self.__dict__`` and is not consumed by the
+# shared backend, so leaving HF to apply it via the normal setattr loop
+# preserves the caller's configured value.
+_NPU_BACKEND_KWARG_FIELDS: tuple[str, ...] = (
+    "mxq_path",
+    "target_device",
+    "target_cores",
+    "target_clusters",
+    "core_mode",
+    "dev_no",
+    "max_batch_size",
+    "revision",
+    "commit_hash",
+)
+
+
+# Order in which :func:`_apply_npu_backend_kwargs` replays the buffered
+# NPU kwargs onto the config after :meth:`super().from_dict` returns.
+# ``target_device`` runs first so a cross-board override rebuilds the
+# backend before the topology / mode fields land on the (now-fresh)
+# destination. The remaining order is arbitrary — each subsequent
+# ``setattr`` accumulates on the fresh :class:`NPUTargetSpecPending` and
+# the canonical spec finalizes only on the next getter read.
+_NPU_APPLY_ORDER: tuple[str, ...] = (
+    "target_device",
+    "mxq_path",
+    "revision",
+    "commit_hash",
+    "max_batch_size",
+    "dev_no",
+    "core_mode",
+    "target_cores",
+    "target_clusters",
+)
+
+
+# Kwargs consumed by ``MobilintNPUBackend.from_dict`` that
+# ``MobilintConfigMixin`` does not surface as a forwarding property (either
+# top-level or prefixed on the multi-backend mixins). Routing them through
+# ``setattr(config, f"{prefix}{field}", ...)`` would land on the outer
+# ``config.__dict__`` and never reach the nested backend, so
+# :func:`_apply_npu_backend_kwargs` writes them straight onto the caller-
+# supplied ``backend`` when one is given. The value maps the caller-facing
+# kwarg name to the backend's storage-name — ``commit_hash`` is exposed
+# publicly as a kwarg but stored as ``_commit_hash`` on the backend.
+_NPU_BACKEND_DIRECT_FIELDS: dict[str, str] = {
+    "revision": "revision",
+    "commit_hash": "_commit_hash",
+}
+
+
+def _pop_consumed_backend_kwargs(kwargs: dict[str, Any], prefix: str = "") -> None:
+    """Remove NPU-backend fields from ``kwargs`` after the backend consumes them.
+
+    ``_ensure_*_npu_backend`` hands ``kwargs`` to
+    :meth:`MobilintNPUBackend.from_dict`, which reads the fields it needs
+    and constructs the backend. The caller-facing ``kwargs`` dict, however,
+    still carries the very same NPU keys — HF's downstream
+    ``PretrainedConfig.__init__(**kwargs)`` iterates every entry and calls
+    ``setattr``, which routes right back through the config's NPU property
+    setters. Each such setter appends a raw override to the backend's
+    :class:`NPUTargetSpecPending` accumulator (``raw_cores`` /
+    ``raw_clusters`` / etc.), so a freshly-loaded config ends up with
+    pending state that echoes the just-baked baseline instead of the
+    caller-neutral :data:`_UNSET`. That echo later corrupts any
+    cross-board rebuild in :func:`_rebuild_backend_for_target_device`,
+    which replays the source pending onto the destination backend on
+    the assumption that non-``_UNSET`` slots represent real user intent.
+    """
+    for field in _NPU_BACKEND_KWARG_FIELDS:
+        kwargs.pop(f"{prefix}{field}", None)
+
+
+def _split_npu_backend_kwargs(
+    kwargs: dict[str, Any], prefix: str = ""
+) -> dict[str, Any]:
+    """Pop the NPU-backend fields for ``prefix`` off ``kwargs``.
+
+    Callers use the returned unprefixed dict with
+    :func:`_apply_npu_backend_kwargs` after :meth:`super().from_dict` has
+    processed the remaining kwargs, so the buffered fields are never
+    exposed to HF's ``PretrainedConfig.from_dict`` kwargs loop. That loop
+    otherwise probes every override with ``hasattr`` before ``setattr``,
+    and the topology getters (``target_cores``, ``target_clusters``,
+    ``core_mode``, ``dev_no``) all trigger a spec finalize on the current
+    pending state. When a caller overrides ``target_device`` alongside
+    a topology field, the finalize fires against the source board's
+    topology before the target-device rebuild has a chance to run —
+    e.g. ``core_mode="global8"`` on a Regulus config raises during the
+    probe. Buffering routes the whole override set through
+    :meth:`_apply_npu_backend_kwargs` in a controlled order instead.
+    """
+    sub: dict[str, Any] = {}
+    for field in _NPU_BACKEND_KWARG_FIELDS:
+        key = f"{prefix}{field}"
+        if key in kwargs:
+            sub[field] = kwargs.pop(key)
+    return sub
+
+
+def _apply_npu_backend_kwargs(
+    config: PretrainedConfig,
+    sub_kwargs: dict[str, Any],
+    prefix: str = "",
+    *,
+    resolve_backend: Optional[Callable[[PretrainedConfig], MobilintNPUBackend]] = None,
+) -> None:
+    """Apply buffered NPU-backend fields to ``config`` in :data:`_NPU_APPLY_ORDER`.
+
+    Companion to :func:`_split_npu_backend_kwargs`. ``target_device`` is
+    applied first so a cross-board override rebuilds the backend before
+    subsequent topology / mode assignments land — the destination
+    board's fresh pending then absorbs the remaining fields without a
+    partial-state finalize against the source topology.
+
+    Fields listed in :data:`_NPU_BACKEND_DIRECT_FIELDS` (``revision`` /
+    ``commit_hash``) have no forwarding property on
+    ``MobilintConfigMixin`` (nor its multi-backend variants), so a plain
+    ``setattr(config, f"{prefix}{field}", ...)`` would land on the outer
+    config's ``__dict__`` and never reach the nested backend — remote MXQ
+    resolution would silently keep the shipped revision.
+
+    When the caller passes ``resolve_backend``, those fields are written
+    straight onto the backend the callable returns, mapping the caller-
+    facing kwarg name to the backend's storage-name (``commit_hash`` →
+    ``_commit_hash``). The callable is invoked **per field**, not once,
+    so a preceding ``target_device`` override that rebuilds the config's
+    backend (:func:`_rebuild_backend_for_target_device` allocates a fresh
+    instance and reassigns ``config.<prefix>npu_backend``) is followed by
+    ``resolve_backend(config)`` returning the newly-installed backend —
+    ``revision`` / ``commit_hash`` therefore always land on the live
+    destination backend, never on the discarded source.
+    """
+
+    def _apply(field: str, value: Any) -> None:
+        if resolve_backend is not None and field in _NPU_BACKEND_DIRECT_FIELDS:
+            setattr(resolve_backend(config), _NPU_BACKEND_DIRECT_FIELDS[field], value)
+        else:
+            setattr(config, f"{prefix}{field}", value)
+
+    remaining = dict(sub_kwargs)
+    for field in _NPU_APPLY_ORDER:
+        if field in remaining:
+            _apply(field, remaining.pop(field))
+    for field, value in remaining.items():
+        _apply(field, value)
+
+
 def _serialized_target_cores(backend: MobilintNPUBackend) -> list[str]:
     """Return JSON-safe core assignments for a Transformers configuration."""
 
@@ -78,6 +236,102 @@ def _serialized_target_clusters(backend: MobilintNPUBackend) -> list[int]:
     """Return JSON-safe cluster assignments for a Transformers configuration."""
 
     return list(backend._target_clusters_serialized)
+
+
+def _rebuild_backend_for_target_device(
+    backend: MobilintNPUBackend, value: str, prefix: str = ""
+) -> MobilintNPUBackend:
+    """Apply a ``target_device`` reassignment to an existing NPU backend.
+
+    HF :meth:`PretrainedConfig.from_dict` instantiates the config with the
+    ``config.json`` values first and then applies any caller
+    ``from_pretrained`` kwargs (including ``target_device``) via
+    :func:`setattr`. The initial ``__init__`` has already dispatched
+    :meth:`MobilintNPUBackend.__new__` to a concrete subclass based on the
+    config-file board, so a plain string mutation on the existing backend
+    would leave it on the wrong class (e.g. ``MobilintAriesBackend`` when
+    the caller asked for ``regulus-rb-usb``).
+
+    Three paths:
+
+    * Unknown / unresolvable ``value``: mutate the string and let the
+      backend layer raise its documented error on the next validation
+      check rather than shadowing it here.
+    * Same board class: mutate in place, but first normalize the value
+      so a legacy alias like ``"aries"`` becomes the canonical
+      ``"aries-rb"`` — otherwise ``to_dict`` would emit the alias and
+      :class:`qbruntime.Accelerator` would receive an identifier its
+      1.4 signature does not accept.
+    * Cross-board: rebuild via :meth:`MobilintNPUBackend.from_dict` from
+      the source backend's board-agnostic raw attributes (mxq_path,
+      dev_no baseline, revision, commit_hash, max_batch_size,
+      name_or_path). :meth:`to_dict` is deliberately avoided because it
+      would finalize the source :class:`NPUTargetSpecPending` — a
+      preceding kwarg like ``core_mode="global8"`` set on a Regulus
+      backend accumulates as a pending override that would raise here
+      against the source topology, making the rebuild order-dependent.
+      After ``from_dict`` seeds a fresh backend with the destination
+      board's default sugar (e.g. Regulus's sole ``d:0:0`` core in
+      ``single`` mode), the caller's raw pending overrides (``dev_no``,
+      ``core_mode``, ``target_cores``, ``target_clusters``) are replayed
+      onto the fresh backend's pending accumulator so the complete
+      override set applies atomically to the destination board
+      regardless of setattr order in the HF kwargs loop.
+
+    Args:
+        backend: The current NPU backend held by the config.
+        value: The requested board identifier (canonical name or legacy
+            alias like ``"aries"`` / ``"regulus"``).
+        prefix: Serialization prefix that scopes the NPU keys on this
+            backend (``""``, ``"encoder_"``, ``"decoder_"``, ``"base_"``,
+            ``"draft_"``, ``"fc_"``). Must match the prefix used by
+            :meth:`MobilintNPUBackend.to_dict` / :meth:`from_dict` for
+            the same backend.
+
+    Returns:
+        The backend to store on the config after the assignment. Either
+        the original ``backend`` (mutated in place for unknown-value or
+        same-class paths) or a freshly rebuilt one for the cross-board
+        path.
+    """
+    from mblt_npu import (
+        MobilintNPUBackend as _Backend,
+    )
+    from mblt_npu import (
+        backend_class_for,
+        normalize_target_device,
+    )
+
+    try:
+        desired_cls = backend_class_for(value)
+    except (KeyError, ValueError):
+        backend.target_device = value
+        return backend
+    if type(backend) is desired_cls:
+        backend.target_device = normalize_target_device(value)
+        return backend
+    source_pending = backend._pending
+    state = {
+        f"{prefix}mxq_path": backend.mxq_path,
+        f"{prefix}max_batch_size": backend.max_batch_size,
+        f"{prefix}revision": backend.revision,
+        f"{prefix}commit_hash": backend._commit_hash,
+        f"{prefix}name_or_path": backend.name_or_path,
+        f"{prefix}target_device": value,
+        # Baseline reads the last-finalized ``dev_no`` without triggering
+        # a pending-state finalize; any caller ``dev_no`` override still
+        # rides on ``source_pending.raw_dev_no`` and is replayed below.
+        f"{prefix}dev_no": source_pending.baseline.dev_no_public(),
+    }
+    fresh = _Backend.from_dict(state, prefix=prefix)
+    fresh._pending = fresh._pending._with(
+        dev_no=source_pending.raw_dev_no,
+        core_mode=source_pending.raw_core_mode,
+        target_cores=source_pending.raw_cores,
+        target_clusters=source_pending.raw_clusters,
+    )
+    fresh._finalized = None
+    return fresh
 
 
 class MobilintConfigMixin(PretrainedConfig):
@@ -125,6 +379,7 @@ class MobilintConfigMixin(PretrainedConfig):
         if not hasattr(self, "npu_backend"):
             _normalize_npu_target_kwargs(kwargs, prefix="")
             self.npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="")
+            _pop_consumed_backend_kwargs(kwargs, prefix="")
 
     def __init__(self, *args, **kwargs):
         self._ensure_npu_backend(kwargs)
@@ -149,7 +404,7 @@ class MobilintConfigMixin(PretrainedConfig):
 
     @target_device.setter
     def target_device(self, value: str) -> None:
-        self.npu_backend.target_device = value
+        self.npu_backend = _rebuild_backend_for_target_device(self.npu_backend, value)
 
     @property
     def dev_no(self) -> int:
@@ -199,6 +454,42 @@ class MobilintConfigMixin(PretrainedConfig):
     def npu_prefill_chunk_size(self, value: Any) -> None:
         self.__dict__["npu_prefill_chunk_size"] = value
 
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> Union["MobilintConfigMixin", tuple["MobilintConfigMixin", dict[str, Any]]]:
+        """Buffer NPU-backend kwargs across HF's ``from_dict`` kwargs loop.
+
+        HF ``PretrainedConfig.from_dict`` probes every override with
+        ``hasattr`` before ``setattr``. The topology getters
+        (``target_cores`` / ``target_clusters`` / ``core_mode`` /
+        ``dev_no``) all trigger a spec finalize on the current pending
+        state, so a caller override set that combines ``target_device``
+        with a board-specific mode (e.g. ``core_mode="global8"``) raises
+        during the probe against the source board's topology before the
+        target-device rebuild has a chance to run. Extract the NPU
+        fields ahead of time and apply them once ``super().from_dict``
+        has finished with the remaining kwargs; the shared apply order
+        (see :data:`_NPU_APPLY_ORDER`) runs ``target_device`` first, so
+        cross-board rebuilds land before topology / mode overrides.
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        npu_sub_kwargs = _split_npu_backend_kwargs(kwargs)
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(
+            config,
+            npu_sub_kwargs,
+            resolve_backend=lambda c: c.npu_backend,
+        )
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
+
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "npu_backend"):
             _ = d.pop("npu_backend", None)
@@ -236,10 +527,12 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
         if not hasattr(self, "encoder_npu_backend"):
             _normalize_npu_target_kwargs(kwargs, prefix="encoder_")
             self.encoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="encoder_")
+            _pop_consumed_backend_kwargs(kwargs, prefix="encoder_")
 
         if not hasattr(self, "decoder_npu_backend"):
             _normalize_npu_target_kwargs(kwargs, prefix="decoder_")
             self.decoder_npu_backend = MobilintNPUBackend.from_dict(kwargs, prefix="decoder_")
+            _pop_consumed_backend_kwargs(kwargs, prefix="decoder_")
 
     def __init__(self, **kwargs):
         self._ensure_encoder_decoder_npu_backends(kwargs)
@@ -256,6 +549,17 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @encoder_mxq_path.setter
     def encoder_mxq_path(self, value: str) -> None:
         self.encoder_npu_backend.mxq_path = value
+
+    @property
+    def encoder_target_device(self) -> str:
+        """Board identifier used by the encoder NPU backend."""
+        return self.encoder_npu_backend.target_device
+
+    @encoder_target_device.setter
+    def encoder_target_device(self, value: str) -> None:
+        self.encoder_npu_backend = _rebuild_backend_for_target_device(
+            self.encoder_npu_backend, value, prefix="encoder_"
+        )
 
     @property
     def encoder_dev_no(self) -> int:
@@ -306,6 +610,17 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
         self.decoder_npu_backend.mxq_path = value
 
     @property
+    def decoder_target_device(self) -> str:
+        """Board identifier used by the decoder NPU backend."""
+        return self.decoder_npu_backend.target_device
+
+    @decoder_target_device.setter
+    def decoder_target_device(self, value: str) -> None:
+        self.decoder_npu_backend = _rebuild_backend_for_target_device(
+            self.decoder_npu_backend, value, prefix="decoder_"
+        )
+
+    @property
     def decoder_dev_no(self) -> int:
         return self.decoder_npu_backend.dev_no
 
@@ -344,6 +659,44 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @decoder_target_clusters.setter
     def decoder_target_clusters(self, values: list) -> None:
         self.decoder_npu_backend.target_clusters = values
+
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> Union[
+        "MobilintEncoderDecoderConfigMixin",
+        tuple["MobilintEncoderDecoderConfigMixin", dict[str, Any]],
+    ]:
+        """Buffer ``encoder_*`` / ``decoder_*`` NPU kwargs across HF's ``from_dict``.
+
+        Mirrors :meth:`MobilintConfigMixin.from_dict` for the two prefixed
+        sub-backends. See that override's docstring for the hasattr-probe
+        rationale.
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        encoder_sub = _split_npu_backend_kwargs(kwargs, prefix="encoder_")
+        decoder_sub = _split_npu_backend_kwargs(kwargs, prefix="decoder_")
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(
+            config,
+            encoder_sub,
+            prefix="encoder_",
+            resolve_backend=lambda c: c.encoder_npu_backend,
+        )
+        _apply_npu_backend_kwargs(
+            config,
+            decoder_sub,
+            prefix="decoder_",
+            resolve_backend=lambda c: c.decoder_npu_backend,
+        )
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
 
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "encoder_npu_backend"):
@@ -660,6 +1013,14 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
             fc_kwargs = _resolve_backend_kwargs("fc_")
             _normalize_npu_target_kwargs(fc_kwargs, prefix="fc_")
             self.fc_npu_backend = MobilintNPUBackend.from_dict(fc_kwargs, prefix="fc_")
+        # Drop the base_/draft_/fc_ NPU keys and their unprefixed fallbacks
+        # from ``kwargs`` so downstream ``PretrainedConfig.__init__`` does
+        # not re-apply them via setattr and pollute the just-baked
+        # ``NPUTargetSpecPending`` state — see the top-level
+        # :func:`_pop_consumed_backend_kwargs` docstring for the underlying
+        # HF init pattern.
+        for prefix in ("base_", "draft_", "fc_", ""):
+            _pop_consumed_backend_kwargs(kwargs, prefix=prefix)
 
     def _ensure_eagle3_runtime_fields(self, kwargs: dict[str, Any]) -> None:
         for field_name, default_value, _annotation in self._EAGLE3_RUNTIME_FIELDS:
@@ -735,7 +1096,9 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @base_target_device.setter
     def base_target_device(self, value: str) -> None:
-        self.base_npu_backend.target_device = value
+        self.base_npu_backend = _rebuild_backend_for_target_device(
+            self.base_npu_backend, value, prefix="base_"
+        )
 
     @property
     def draft_target_device(self) -> str:
@@ -743,7 +1106,9 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @draft_target_device.setter
     def draft_target_device(self, value: str) -> None:
-        self.draft_npu_backend.target_device = value
+        self.draft_npu_backend = _rebuild_backend_for_target_device(
+            self.draft_npu_backend, value, prefix="draft_"
+        )
 
     @property
     def fc_target_device(self) -> str:
@@ -751,7 +1116,9 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @fc_target_device.setter
     def fc_target_device(self, value: str) -> None:
-        self.fc_npu_backend.target_device = value
+        self.fc_npu_backend = _rebuild_backend_for_target_device(
+            self.fc_npu_backend, value, prefix="fc_"
+        )
 
     @property
     def base_max_batch_size(self) -> int:
@@ -872,6 +1239,51 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
     @fc_mxq_path.setter
     def fc_mxq_path(self, value: str) -> None:
         self.fc_npu_backend.mxq_path = value
+
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> Union[
+        "MobilintEagle3ConfigMixin",
+        tuple["MobilintEagle3ConfigMixin", dict[str, Any]],
+    ]:
+        """Buffer ``base_*`` / ``draft_*`` / ``fc_*`` NPU kwargs across HF's ``from_dict``.
+
+        Mirrors :meth:`MobilintConfigMixin.from_dict` for Eagle3's three
+        prefixed sub-backends. See that override's docstring for the
+        hasattr-probe rationale.
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        base_sub = _split_npu_backend_kwargs(kwargs, prefix="base_")
+        draft_sub = _split_npu_backend_kwargs(kwargs, prefix="draft_")
+        fc_sub = _split_npu_backend_kwargs(kwargs, prefix="fc_")
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(
+            config,
+            base_sub,
+            prefix="base_",
+            resolve_backend=lambda c: c.base_npu_backend,
+        )
+        _apply_npu_backend_kwargs(
+            config,
+            draft_sub,
+            prefix="draft_",
+            resolve_backend=lambda c: c.draft_npu_backend,
+        )
+        _apply_npu_backend_kwargs(
+            config,
+            fc_sub,
+            prefix="fc_",
+            resolve_backend=lambda c: c.fc_npu_backend,
+        )
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
 
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         _ = d.pop("base_npu_backend", None)

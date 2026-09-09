@@ -1,9 +1,15 @@
 from functools import wraps
+from typing import Any
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
 
-from ...utils.configuration_utils import MobilintConfigMixin
+from ...utils.configuration_utils import (
+    _NPU_BACKEND_DIRECT_FIELDS,
+    MobilintConfigMixin,
+    _apply_npu_backend_kwargs,
+    _split_npu_backend_kwargs,
+)
 from ._errors import guard_qwen_asr_import
 
 with guard_qwen_asr_import():
@@ -13,6 +19,8 @@ with guard_qwen_asr_import():
         Qwen3ASRTextConfig,
         Qwen3ASRThinkerConfig,
     )
+
+
 
 
 class MobilintQwen3ASRAudioEncoderConfig(MobilintConfigMixin, Qwen3ASRAudioEncoderConfig):
@@ -116,10 +124,28 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         elif thinker_config is None:
             thinker_config = MobilintQwen3ASRThinkerConfig()
 
-        for k, v in encoder_kwargs.items():
-            setattr(thinker_config.audio_config.npu_backend, k, v)
-        for k, v in decoder_kwargs.items():
-            setattr(thinker_config.text_config.npu_backend, k, v)
+        # Fields with a config-level property setter on ``MobilintConfigMixin``
+        # go through the sub-config so ``target_device`` triggers the
+        # cross-board rebuild via ``_rebuild_backend_for_target_device``
+        # (setting the string on the backend directly would leave an
+        # Aries instance in place with a Regulus target_device string).
+        # Fields with no forwarding property
+        # (:data:`_NPU_BACKEND_DIRECT_FIELDS`) route straight to the
+        # nested backend, mapping ``commit_hash`` to its ``_commit_hash``
+        # storage name.
+        for sub_config, prefixed_kwargs in (
+            (thinker_config.audio_config, encoder_kwargs),
+            (thinker_config.text_config, decoder_kwargs),
+        ):
+            for k, v in prefixed_kwargs.items():
+                if k in _NPU_BACKEND_DIRECT_FIELDS:
+                    setattr(
+                        sub_config.npu_backend,
+                        _NPU_BACKEND_DIRECT_FIELDS[k],
+                        v,
+                    )
+                else:
+                    setattr(sub_config, k, v)
 
         self.thinker_config = thinker_config
         self.support_languages = support_languages
@@ -145,6 +171,19 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
     @encoder_mxq_path.setter
     def encoder_mxq_path(self, value: str) -> None:
         self.thinker_config.audio_config.npu_backend.mxq_path = value
+
+    @property
+    def encoder_target_device(self) -> str:
+        """Board identifier used by the audio encoder NPU backend."""
+        return self.thinker_config.audio_config.npu_backend.target_device
+
+    @encoder_target_device.setter
+    def encoder_target_device(self, value: str) -> None:
+        # Route through the sub-config property setter so cross-board
+        # switches rebuild the backend via
+        # ``_rebuild_backend_for_target_device`` instead of leaving an
+        # Aries instance with a Regulus string.
+        self.thinker_config.audio_config.target_device = value
 
     @property
     def encoder_dev_no(self) -> int:
@@ -195,6 +234,17 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         self.thinker_config.text_config.npu_backend.mxq_path = value
 
     @property
+    def decoder_target_device(self) -> str:
+        """Board identifier used by the text decoder NPU backend."""
+        return self.thinker_config.text_config.npu_backend.target_device
+
+    @decoder_target_device.setter
+    def decoder_target_device(self, value: str) -> None:
+        # Route through the sub-config property setter (see the
+        # ``encoder_target_device`` counterpart).
+        self.thinker_config.text_config.target_device = value
+
+    @property
     def decoder_dev_no(self) -> int:
         return self.thinker_config.text_config.npu_backend.dev_no
 
@@ -233,6 +283,59 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
     @decoder_target_clusters.setter
     def decoder_target_clusters(self, values: list) -> None:
         self.thinker_config.text_config.npu_backend.target_clusters = values
+
+    @classmethod
+    def from_dict(cls, config_dict: dict, **kwargs: Any):
+        """Buffer ``encoder_*`` / ``decoder_*`` NPU kwargs across HF's ``from_dict``.
+
+        This facade does not inherit ``MobilintEncoderDecoderConfigMixin``, so
+        the shared buffered ``from_dict`` there does not apply here. Without
+        buffering, HF's upstream ``PretrainedConfig.from_dict`` probes every
+        override with ``hasattr`` before ``setattr``; the encoder / decoder
+        topology getters exposed on this facade route through the nested
+        ``npu_backend._spec`` finalize, so a caller override that combines
+        ``encoder_target_device`` with a board-specific mode
+        (e.g. ``encoder_core_mode="global8"`` on a Regulus baseline) raises
+        during the probe before the target-device rebuild has a chance to
+        run. Extract the NPU fields ahead of ``super().from_dict`` and
+        replay them via ``_apply_npu_backend_kwargs`` in the shared apply
+        order — ``target_device`` first — so the whole override set lands
+        on the destination board atomically.
+
+        Fields without a top-level forwarding property on this facade
+        (``revision``, ``commit_hash``) cannot ride the shared setattr
+        helper — ``setattr(config, "encoder_revision", v)`` would land on
+        ``config.__dict__`` and leave the nested backend's own
+        ``revision`` / ``_commit_hash`` untouched, so remote MXQ
+        resolution would silently keep the shipped revision. Route those
+        two directly to the nested backend the same way the constructor
+        does (with ``commit_hash`` mapped to the internal
+        ``_commit_hash`` storage name).
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        encoder_sub = _split_npu_backend_kwargs(kwargs, prefix="encoder_")
+        decoder_sub = _split_npu_backend_kwargs(kwargs, prefix="decoder_")
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(
+            config,
+            encoder_sub,
+            prefix="encoder_",
+            resolve_backend=lambda c: c.thinker_config.audio_config.npu_backend,
+        )
+        _apply_npu_backend_kwargs(
+            config,
+            decoder_sub,
+            prefix="decoder_",
+            resolve_backend=lambda c: c.thinker_config.text_config.npu_backend,
+        )
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
 
 
 AutoConfig.register("mobilint-qwen3_asr", MobilintQwen3ASRConfig)
