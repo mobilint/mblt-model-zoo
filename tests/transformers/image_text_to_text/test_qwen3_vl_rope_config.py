@@ -166,10 +166,13 @@ def test_rotary_embedding_forward_builds_lazy_on_first_call() -> None:
     assert emb.position_table is None
 
     # Simulate HF materialization: move inv_freq off meta before forward.
+    # Read the theta off ``emb`` (mirrored in ``__init__``) rather than
+    # ``config`` because Transformers 5.x folds ``rope_theta`` into
+    # ``rope_parameters`` during ``__post_init__`` and drops the flat attribute.
     emb.inv_freq = torch.empty_like(emb.inv_freq, device="cpu")
     dim = config.head_dim
     emb.inv_freq.copy_(
-        1.0 / (config.rope_theta ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
+        1.0 / (emb.rope_theta ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
     )
 
     position_ids = torch.arange(8, dtype=torch.long)[None, None, :].expand(3, 1, -1)
