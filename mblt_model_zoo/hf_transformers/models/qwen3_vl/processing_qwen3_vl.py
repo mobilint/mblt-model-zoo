@@ -894,17 +894,34 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
 
         # ``smart_resize`` rounds each upscaled dimension UP to a
         # ``patch_size * merge_size`` multiple and does not reapply the
-        # maximum after alignment, so a small image with ``min_pixels ==
-        # limit`` upscales to more than ``limit`` post-align and can hit
-        # the documented NPU hang path (e.g. 100×100 with limit=401408
-        # aligns to 644×644 → 46×46 patch grid, 2116 tokens > 2048).
-        # Bound the mirrored floor at the area of the largest ``factor``-
-        # aligned square that still fits inside the token budget so the
-        # ceil-to-factor step cannot overshoot.
+        # maximum after alignment. A ``min_pixels`` floor at the token
+        # budget therefore overshoots on both square and high-aspect-ratio
+        # inputs — Codex's follow-up example: 28×2800 with ``min_pixels
+        # == 379456`` upscales to ~62×6160, ceil-aligns to 84×6160
+        # (2640 pre-merge patches, above the 2048-token ceiling and into
+        # the documented NPU hang path).
+        #
+        # Bound the mirrored floor by solving for the largest area whose
+        # worst-case post-align product still fits inside ``limit``:
+        #
+        #     (h + F)(w + F) <= limit, with h*w = M, aspect r = h/w
+        #     → M + F * sqrt(M) * (sqrt(r) + 1/sqrt(r)) + F**2 <= limit
+        #
+        # Qwen2VL's ``smart_resize`` rejects aspect ratios above 200:1, so
+        # substitute ``MAX_RATIO`` for r and solve the quadratic in
+        # ``sqrt(M)`` for the tightest safe floor. Falls back to zero when
+        # ``limit`` is smaller than the alignment overhead itself.
         merge_size = int(getattr(self.image_processor, "merge_size", 2) or 2)
         alignment_factor = int(self.image_processor.patch_size) * merge_size
-        aligned_safe_dim = (int(limit ** 0.5) // alignment_factor) * alignment_factor
-        aligned_safe_floor = aligned_safe_dim * aligned_safe_dim
+        max_ratio = 200
+        k_factor = max_ratio ** 0.5 + max_ratio ** -0.5
+        f_k = alignment_factor * k_factor
+        discriminant = f_k * f_k + 4 * (limit - alignment_factor * alignment_factor)
+        if discriminant < 0:
+            aligned_safe_floor = 0
+        else:
+            u_max = (-f_k + discriminant ** 0.5) / 2
+            aligned_safe_floor = max(0, int(u_max * u_max))
 
         def _apply_lower_floor(existing, desired):
             """``min_pixels`` → ``shortest_edge`` is a floor the caller asks
