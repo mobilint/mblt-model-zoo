@@ -598,6 +598,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             self._reject_do_resize_false(scope, "image")
             self._cap_pixel_kwargs(scope, limit, "image")
             self._cap_size_edges(scope, limit, "image")
+        self._mirror_pixel_caps_to_image_size(kwargs, limit)
 
     def _clamp_dynamic_video_size(self) -> None:
         """Cap `max_pixels` so dynamic-vision video frames fit the NPU sequence limit.
@@ -817,43 +818,88 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         symmetric scale-*up* path where an oversized floor forces the
         rescaler to inflate a small input past the budget.
 
-        Transformers 5.x dropped support for both scalar kwargs on
+        Transformers 5.x drops support for both scalar kwargs on
         ``Qwen2VLImageProcessor`` — passing ``max_pixels`` / ``min_pixels`` at
         call time is silently ignored and only ``size`` controls the resize.
-        Mirror the (capped) scalar into the caller's ``size`` scope so the
-        limit still bites on 5.x while keeping 4.x's smaller-wins semantics
-        (``size`` and the scalar both point at the same ceiling).
+        :meth:`_mirror_pixel_caps_to_image_size` re-encodes the effective cap
+        into an image-scoped ``size`` override so 5.x still honors the ceiling
+        while keeping 4.x's smaller-wins semantics.
         """
-        field_to_size_key = (("max_pixels", "longest_edge"), ("min_pixels", "shortest_edge"))
-        for field, size_key in field_to_size_key:
+        for field in ("max_pixels", "min_pixels"):
             value = scope.get(field)
-            if value is None:
+            if value is None or value <= limit:
                 continue
-            capped = min(value, limit)
-            if capped < value:
-                logger.info(
-                    "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
-                    kind, field, value, capped, self.max_vision_tokens,
-                )
-                scope[field] = capped
-            existing_size = scope.get("size")
-            current_edge = _size_get(existing_size, size_key) if existing_size is not None else None
-            if current_edge is None or current_edge > capped:
-                # Seed from the caller's ``size`` or the processor's default
-                # ``ip.size`` so 5.x's ``_standardize_kwargs`` invariant
-                # (both edges present) holds even when the caller only
-                # supplied a scalar. The 5.x kwargs surface validates a
-                # plain ``dict``/``int``/``list``/``None`` and rejects a
-                # ``SizeDict`` instance, so emit a plain dict here rather
-                # than routing through :func:`_update_size` (which mirrors
-                # the source shape).
-                base_size = existing_size if existing_size is not None else self.image_processor.size
-                size_dict = {
-                    "longest_edge": _size_get(base_size, "longest_edge"),
-                    "shortest_edge": _size_get(base_size, "shortest_edge"),
-                }
-                size_dict[size_key] = capped
-                scope["size"] = {k: v for k, v in size_dict.items() if v is not None}
+            logger.info(
+                "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
+                kind, field, value, limit, self.max_vision_tokens,
+            )
+            scope[field] = limit
+
+    def _mirror_pixel_caps_to_image_size(self, kwargs: dict, limit: int) -> None:
+        """Mirror ``max_pixels`` / ``min_pixels`` into image-scoped ``size``.
+
+        Transformers 5.x silently ignores the scalar kwargs on
+        ``Qwen2VLImageProcessor``, so the vision-token budget only bites when
+        ``size`` is set. Emit the derived cap into
+        ``kwargs["images_kwargs"]["size"]`` (not top-level ``kwargs``) —
+        upstream ``_merge_kwargs`` copies a flat top-level ``size`` into every
+        modality's kwarg dict, which would let an image-derived ceiling resize
+        video frames to an unintended budget. Route the synthesized value
+        through the ``images_kwargs`` nested scope so upstream keeps it
+        image-only. Emit as a plain ``dict`` because 5.x's
+        ``_standardize_kwargs`` rejects ``SizeDict`` instances from the caller
+        kwargs surface.
+        """
+        images_scope_raw = kwargs.get("images_kwargs")
+        images_scope = images_scope_raw if isinstance(images_scope_raw, dict) else None
+
+        def _pick(field: str):
+            # Nested images_kwargs wins over flat top-level for the image
+            # modality's effective value (same as upstream _merge_kwargs).
+            if images_scope is not None and images_scope.get(field) is not None:
+                return images_scope.get(field)
+            return kwargs.get(field)
+
+        max_p = _pick("max_pixels")
+        min_p = _pick("min_pixels")
+        if max_p is None and min_p is None:
+            return
+
+        if images_scope is not None and images_scope.get("size") is not None:
+            base_size = images_scope["size"]
+        elif kwargs.get("size") is not None:
+            base_size = kwargs["size"]
+        else:
+            base_size = self.image_processor.size
+
+        longest = _size_get(base_size, "longest_edge")
+        shortest = _size_get(base_size, "shortest_edge")
+
+        def _cap_edge(existing, desired):
+            if desired is None:
+                return existing
+            capped = min(desired, limit)
+            return capped if existing is None else min(existing, capped)
+
+        new_longest = _cap_edge(longest, max_p)
+        new_shortest = _cap_edge(shortest, min_p)
+
+        new_size: dict = {}
+        if new_longest is not None:
+            new_size["longest_edge"] = new_longest
+        if new_shortest is not None:
+            new_size["shortest_edge"] = new_shortest
+        if not new_size:
+            return
+
+        logger.info(
+            "[dynamic-vision] mirrored pixel caps into images_kwargs['size'] %s (<= %d vision tokens)",
+            new_size, self.max_vision_tokens,
+        )
+        if images_scope is None:
+            kwargs["images_kwargs"] = {"size": new_size}
+        else:
+            images_scope["size"] = new_size
 
     def _cap_size_edges(self, scope: dict, limit: int, kind: str) -> None:
         """Cap ``size.longest_edge`` / ``size.shortest_edge`` against ``limit``.
