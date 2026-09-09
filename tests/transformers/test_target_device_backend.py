@@ -236,6 +236,42 @@ def test_from_dict_buffers_target_device_across_topology_probe_hazard() -> None:
 
 
 @pytest.mark.parametrize("prefix", ["encoder", "decoder"])
+def test_qwen3_asr_ctor_routes_revision_and_commit_hash_to_backend(prefix: str) -> None:
+    """Forward ``revision`` / ``commit_hash`` kwargs to the nested NPU backend.
+
+    ``MobilintConfigMixin`` exposes no forwarding property for
+    ``revision`` or ``commit_hash``, so routing every prefixed kwarg
+    through the sub-config setter would land those two on
+    ``config.__dict__`` while leaving ``npu_backend.revision`` and
+    ``npu_backend._commit_hash`` at their init-time defaults. Remote
+    MXQ resolution then falls back to the shipped revision and can
+    load the wrong artifact. Route ``revision`` and ``commit_hash``
+    directly to the backend (mapping ``commit_hash`` to the internal
+    ``_commit_hash`` attribute) while keeping the target-device rebuild
+    routing intact for the fields that do have a config property.
+    """
+
+    pytest.importorskip("qwen_asr")
+    from mblt_model_zoo.hf_transformers.models.qwen3_asr.configuration_qwen3_asr import (
+        MobilintQwen3ASRConfig,
+    )
+
+    prefix_ = f"{prefix}_"
+    inner_config = "audio_config" if prefix == "encoder" else "text_config"
+
+    config = MobilintQwen3ASRConfig(
+        **{
+            f"{prefix_}revision": "test-release-1",
+            f"{prefix_}commit_hash": "0123456789abcdef",
+        }
+    )
+
+    sub_backend = getattr(config.thinker_config, inner_config).npu_backend
+    assert sub_backend.revision == "test-release-1"
+    assert sub_backend._commit_hash == "0123456789abcdef"
+
+
+@pytest.mark.parametrize("prefix", ["encoder", "decoder"])
 def test_qwen3_asr_from_dict_buffers_prefixed_target_device_atomically(prefix: str) -> None:
     """Buffer ``encoder_*`` / ``decoder_*`` overrides on the Qwen3-ASR facade.
 

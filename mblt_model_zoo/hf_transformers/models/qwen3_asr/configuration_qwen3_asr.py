@@ -121,17 +121,32 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
         elif thinker_config is None:
             thinker_config = MobilintQwen3ASRThinkerConfig()
 
-        # Route through the sub-config's property setters (which delegate
-        # to the underlying npu_backend and, for ``target_device``, run
-        # the cross-board rebuild helper) rather than mutating the
-        # backend attribute directly, so a constructor-time
-        # ``encoder_target_device`` / ``decoder_target_device`` override
-        # actually switches the destination backend class instead of
-        # leaving an Aries instance with a Regulus string.
-        for k, v in encoder_kwargs.items():
-            setattr(thinker_config.audio_config, k, v)
-        for k, v in decoder_kwargs.items():
-            setattr(thinker_config.text_config, k, v)
+        # Fields with a config-level property setter on ``MobilintConfigMixin``
+        # go through the sub-config so ``target_device`` triggers the
+        # cross-board rebuild via ``_rebuild_backend_for_target_device``
+        # (setting the string on the backend directly would leave an
+        # Aries instance in place with a Regulus target_device string).
+        # Fields with no forwarding property (``revision``, ``commit_hash``)
+        # cannot round-trip through the config layer — a
+        # ``setattr(audio_config, "revision", ...)`` would land on
+        # ``config.__dict__`` and never reach ``npu_backend.revision``,
+        # so remote MXQ resolution would silently use the shipped
+        # revision. Route these two to the backend directly, mapping
+        # ``commit_hash`` to the backend's internal ``_commit_hash``
+        # storage name.
+        _BACKEND_DIRECT_FIELDS: dict[str, str] = {
+            "revision": "revision",
+            "commit_hash": "_commit_hash",
+        }
+        for sub_config, prefixed_kwargs in (
+            (thinker_config.audio_config, encoder_kwargs),
+            (thinker_config.text_config, decoder_kwargs),
+        ):
+            for k, v in prefixed_kwargs.items():
+                if k in _BACKEND_DIRECT_FIELDS:
+                    setattr(sub_config.npu_backend, _BACKEND_DIRECT_FIELDS[k], v)
+                else:
+                    setattr(sub_config, k, v)
 
         self.thinker_config = thinker_config
         self.support_languages = support_languages
