@@ -235,6 +235,55 @@ def test_from_dict_buffers_target_device_across_topology_probe_hazard() -> None:
     assert set(config.to_dict()["target_clusters"]) == {"0:0", "0:1"}
 
 
+@pytest.mark.parametrize("prefix", ["encoder", "decoder"])
+def test_qwen3_asr_from_dict_buffers_prefixed_target_device_atomically(prefix: str) -> None:
+    """Buffer ``encoder_*`` / ``decoder_*`` overrides on the Qwen3-ASR facade.
+
+    ``MobilintQwen3ASRConfig`` does not inherit
+    ``MobilintEncoderDecoderConfigMixin``, so the mixin's buffered
+    ``from_dict`` does not apply. The facade's own ``from_dict`` must
+    mirror the buffering pattern; otherwise HF's ``hasattr`` probe on
+    e.g. ``encoder_target_clusters`` fires against a Regulus baseline
+    that already has ``core_mode="global8"`` pending and raises before
+    the ``encoder_target_device`` setter can rebuild to Aries.
+    """
+
+    pytest.importorskip("qwen_asr")
+    from mblt_model_zoo.hf_transformers.models.qwen3_asr.configuration_qwen3_asr import (
+        MobilintQwen3ASRConfig,
+    )
+
+    prefix_ = f"{prefix}_"
+    inner_config = "audio_config" if prefix == "encoder" else "text_config"
+    inner_model_type = (
+        "mobilint-qwen3_asr_audio_encoder" if prefix == "encoder"
+        else "mobilint-qwen3_asr_text"
+    )
+
+    config = MobilintQwen3ASRConfig.from_dict(
+        {
+            "model_type": MobilintQwen3ASRConfig.model_type,
+            "thinker_config": {
+                inner_config: {
+                    "model_type": inner_model_type,
+                    "target_device": "regulus-rb-usb",
+                }
+            },
+        },
+        **{
+            f"{prefix_}core_mode": "global8",
+            f"{prefix_}target_clusters": [0, 1],
+            f"{prefix_}target_device": "aries-rb",
+        },
+    )
+
+    sub_config = getattr(config.thinker_config, inner_config)
+    sub_backend = sub_config.npu_backend
+    assert type(sub_backend).__name__ == "MobilintAriesBackend"
+    assert getattr(config, f"{prefix_}core_mode") == "global8"
+    assert set(sub_config.to_dict()["target_clusters"]) == {"0:0", "0:1"}
+
+
 @pytest.mark.parametrize(
     "prefix",
     ["encoder", "decoder"],

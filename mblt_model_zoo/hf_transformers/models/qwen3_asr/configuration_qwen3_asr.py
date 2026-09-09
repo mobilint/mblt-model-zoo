@@ -1,9 +1,14 @@
 from functools import wraps
+from typing import Any
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.models.auto.configuration_auto import AutoConfig
 
-from ...utils.configuration_utils import MobilintConfigMixin
+from ...utils.configuration_utils import (
+    MobilintConfigMixin,
+    _apply_npu_backend_kwargs,
+    _split_npu_backend_kwargs,
+)
 from ._errors import guard_qwen_asr_import
 
 with guard_qwen_asr_import():
@@ -264,6 +269,39 @@ class MobilintQwen3ASRConfig(Qwen3ASRConfig):
     @decoder_target_clusters.setter
     def decoder_target_clusters(self, values: list) -> None:
         self.thinker_config.text_config.npu_backend.target_clusters = values
+
+    @classmethod
+    def from_dict(cls, config_dict: dict, **kwargs: Any):
+        """Buffer ``encoder_*`` / ``decoder_*`` NPU kwargs across HF's ``from_dict``.
+
+        This facade does not inherit ``MobilintEncoderDecoderConfigMixin``, so
+        the shared buffered ``from_dict`` there does not apply here. Without
+        buffering, HF's upstream ``PretrainedConfig.from_dict`` probes every
+        override with ``hasattr`` before ``setattr``; the encoder / decoder
+        topology getters exposed on this facade route through the nested
+        ``npu_backend._spec`` finalize, so a caller override that combines
+        ``encoder_target_device`` with a board-specific mode
+        (e.g. ``encoder_core_mode="global8"`` on a Regulus baseline) raises
+        during the probe before the target-device rebuild has a chance to
+        run. Extract the NPU fields ahead of ``super().from_dict`` and
+        replay them via ``_apply_npu_backend_kwargs`` in the shared apply
+        order — ``target_device`` first — so the whole override set lands
+        on the destination board atomically.
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        encoder_sub = _split_npu_backend_kwargs(kwargs, prefix="encoder_")
+        decoder_sub = _split_npu_backend_kwargs(kwargs, prefix="decoder_")
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(config, encoder_sub, prefix="encoder_")
+        _apply_npu_backend_kwargs(config, decoder_sub, prefix="decoder_")
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
 
 
 AutoConfig.register("mobilint-qwen3_asr", MobilintQwen3ASRConfig)
