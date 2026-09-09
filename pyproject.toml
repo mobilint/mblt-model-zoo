@@ -65,14 +65,14 @@ mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 
 [project.optional-dependencies]
 transformers = [
-    "transformers[serving]>=4.54.0, <=5.12.1",
+    "transformers[serving]>=4.54.0, <=5.3.0",
     "datasets>=3.2.0,<=3.6.0",
     "sentencepiece",
     "torchvision",
     "torchcodec",
 ]
 MeloTTS = [
-    "transformers>=4.54.0, <=5.12.1",
+    "transformers>=4.54.0, <=5.3.0",
     "g2p_en>=2.1.0",
     "anyascii>=0.3.2",
     "jamo>=0.4.1",

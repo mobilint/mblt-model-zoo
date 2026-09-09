@@ -38,32 +38,6 @@ def skip_if_transformers_lacks_qwen3_vl_support() -> None:
     pytest.skip(_QWEN3_VL_SKIP_REASON, allow_module_level=True)
 
 
-def _transformers_version_tuple() -> tuple[int, int]:
-    import transformers
-
-    parts = transformers.__version__.split(".")
-    try:
-        return (int(parts[0]), int(parts[1]))
-    except (IndexError, ValueError):
-        return (0, 0)
-
-
-QWEN3_VL_PIPELINE_TF_5_4_REGRESSION_REASON = (
-    "transformers>=5.4 broke the image-text-to-text pipeline / Qwen3-VL "
-    "generate integration: ``_prepare_model_inputs`` returns ``inputs_tensor`` "
-    "as a Python list, which raises ``AttributeError: 'list' object has no "
-    "attribute 'shape'`` at ``batch_size = inputs_tensor.shape[0]``. Skip until "
-    "either upstream restores tensor shape or the mblt_model_zoo wrapper "
-    "compensates."
-)
-
-
-def skip_qwen3_vl_pipeline_if_tf_5_4() -> None:
-    """Module-level skip for Qwen3-VL pipeline tests on transformers>=5.4."""
-    if _transformers_version_tuple() >= (5, 4):
-        pytest.skip(QWEN3_VL_PIPELINE_TF_5_4_REGRESSION_REASON, allow_module_level=True)
-
-
 QWEN3_VL_8B_MXQ_INCOMPATIBLE_REASON = (
     "Qwen3-VL-8B MXQ (regular and Batch16) hits 'NPU-only model output order "
     "mismatch' with qbruntime 1.4.0 / mblt_npu 0.1.0 and access-violation-"
