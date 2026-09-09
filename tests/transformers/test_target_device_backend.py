@@ -4,11 +4,23 @@ from __future__ import annotations
 
 import pytest
 
-from mblt_model_zoo.hf_transformers.utils.configuration_utils import MobilintConfigMixin
+from mblt_model_zoo.hf_transformers.utils.configuration_utils import (
+    MobilintConfigMixin,
+    MobilintEagle3ConfigMixin,
+    MobilintEncoderDecoderConfigMixin,
+)
 
 
 class _TargetDeviceConfig(MobilintConfigMixin):
     model_type = "target-device-test"
+
+
+class _EncoderDecoderTargetDeviceConfig(MobilintEncoderDecoderConfigMixin):
+    model_type = "target-device-encdec-test"
+
+
+class _Eagle3TargetDeviceConfig(MobilintEagle3ConfigMixin):
+    model_type = "target-device-eagle3-test"
 
 
 def test_transformers_config_defaults_to_aries_rb() -> None:
@@ -90,3 +102,81 @@ def test_target_device_setter_is_a_noop_when_the_class_does_not_change() -> None
 
     assert config.npu_backend is original_backend
     assert config.to_dict()["target_cores"] == original_cores
+
+
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    [("aries", "aries-rb"), ("regulus", "regulus-ra")],
+)
+def test_target_device_setter_normalizes_legacy_aliases(alias: str, canonical: str) -> None:
+    """Rewrite legacy family aliases to their canonical board identifier.
+
+    ``qbruntime>=1.4`` expects the canonical board name as the first
+    positional argument to ``Accelerator``; without normalization the
+    same-class fast path would leave the alias in place on the backend and
+    surface at inference time as a runtime error from ``qbruntime`` for an
+    unknown target device.
+    """
+
+    config = _TargetDeviceConfig(target_device=canonical)  # same class as alias
+    config.target_device = alias
+
+    assert config.target_device == canonical
+    assert config.to_dict()["target_device"] == canonical
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["base", "draft", "fc"],
+)
+def test_eagle3_prefixed_target_device_setter_rebuilds_backend(prefix: str) -> None:
+    """Rebuild the prefixed Eagle3 backend when its target_device setter switches boards.
+
+    Every ``MobilintEagle3ConfigMixin`` sub-backend (``base_*``, ``draft_*``,
+    ``fc_*``) exposes its own ``*_target_device`` property that HF's
+    ``from_dict`` kwargs loop applies via ``setattr``. Each setter must run
+    through the same cross-board rebuild logic as the single-backend mixin
+    so a caller override actually reaches the destination board's class.
+    """
+
+    config = _Eagle3TargetDeviceConfig()
+    backend_attr = f"{prefix}_npu_backend"
+    setattr_key = f"{prefix}_target_device"
+    original_backend = getattr(config, backend_attr)
+    assert type(original_backend).__name__ == "MobilintAriesBackend"
+
+    setattr(config, setattr_key, "regulus-rb-usb")
+
+    rebuilt = getattr(config, backend_attr)
+    assert type(rebuilt).__name__ == "MobilintRegulusBackend"
+    assert rebuilt.target_device == "regulus-rb-usb"
+    # Topology reset: the destination class fills its single-core default.
+    assert config.to_dict()[f"{prefix}_target_cores"] == ["0:0:0"]
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["encoder", "decoder"],
+)
+def test_encoder_decoder_target_device_property_rebuilds_backend(prefix: str) -> None:
+    """Expose ``encoder_target_device`` / ``decoder_target_device`` and rebuild across boards.
+
+    ``MobilintEncoderDecoderConfigMixin`` previously offered no
+    ``encoder_target_device`` / ``decoder_target_device`` property, so HF's
+    ``from_dict`` kwargs loop silently dropped those keys via its
+    ``hasattr`` gate. Advertising the setters — and routing them through
+    the shared rebuild helper — makes prefixed board overrides work
+    end-to-end for encoder-decoder models.
+    """
+
+    config = _EncoderDecoderTargetDeviceConfig()
+    backend_attr = f"{prefix}_npu_backend"
+    setattr_key = f"{prefix}_target_device"
+    assert type(getattr(config, backend_attr)).__name__ == "MobilintAriesBackend"
+
+    setattr(config, setattr_key, "regulus-rb-usb")
+
+    rebuilt = getattr(config, backend_attr)
+    assert type(rebuilt).__name__ == "MobilintRegulusBackend"
+    assert getattr(config, setattr_key) == "regulus-rb-usb"
+    assert config.to_dict()[f"{prefix}_target_cores"] == ["0:0:0"]

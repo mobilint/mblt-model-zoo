@@ -80,6 +80,85 @@ def _serialized_target_clusters(backend: MobilintNPUBackend) -> list[int]:
     return list(backend._target_clusters_serialized)
 
 
+def _rebuild_backend_for_target_device(
+    backend: MobilintNPUBackend, value: str, prefix: str = ""
+) -> MobilintNPUBackend:
+    """Apply a ``target_device`` reassignment to an existing NPU backend.
+
+    HF :meth:`PretrainedConfig.from_dict` instantiates the config with the
+    ``config.json`` values first and then applies any caller
+    ``from_pretrained`` kwargs (including ``target_device``) via
+    :func:`setattr`. The initial ``__init__`` has already dispatched
+    :meth:`MobilintNPUBackend.__new__` to a concrete subclass based on the
+    config-file board, so a plain string mutation on the existing backend
+    would leave it on the wrong class (e.g. ``MobilintAriesBackend`` when
+    the caller asked for ``regulus-rb-usb``).
+
+    Three paths:
+
+    * Unknown / unresolvable ``value``: mutate the string and let the
+      backend layer raise its documented error on the next validation
+      check rather than shadowing it here.
+    * Same board class: mutate in place, but first normalize the value
+      so a legacy alias like ``"aries"`` becomes the canonical
+      ``"aries-rb"`` — otherwise ``to_dict`` would emit the alias and
+      :class:`qbruntime.Accelerator` would receive an identifier its
+      1.4 signature does not accept.
+    * Cross-board: rebuild via :meth:`MobilintNPUBackend.from_dict` while
+      preserving board-agnostic runtime state (mxq_path, dev_no,
+      revision, commit_hash, max_batch_size, name_or_path) and dropping
+      topology fields (``target_cores`` / ``target_clusters`` /
+      ``core_mode``). The source board's topology encodes its own layout
+      (e.g. Aries's 2×4 grid or a multi-cluster mode) that the
+      destination board's ``__init__`` would reject; dropping them lets
+      the destination class's board-aware default sugar fill in a spec
+      its own validator accepts. Subsequent HF kwargs from the same
+      loop (``target_cores=...``, ``core_mode=...``) then override on
+      the fresh backend via the per-field setter chain.
+
+    Args:
+        backend: The current NPU backend held by the config.
+        value: The requested board identifier (canonical name or legacy
+            alias like ``"aries"`` / ``"regulus"``).
+        prefix: Serialization prefix that scopes the NPU keys on this
+            backend (``""``, ``"encoder_"``, ``"decoder_"``, ``"base_"``,
+            ``"draft_"``, ``"fc_"``). Must match the prefix used by
+            :meth:`MobilintNPUBackend.to_dict` / :meth:`from_dict` for
+            the same backend.
+
+    Returns:
+        The backend to store on the config after the assignment. Either
+        the original ``backend`` (mutated in place for unknown-value or
+        same-class paths) or a freshly rebuilt one for the cross-board
+        path.
+    """
+    from mblt_npu import (
+        MobilintNPUBackend as _Backend,
+    )
+    from mblt_npu import (
+        backend_class_for,
+        normalize_target_device,
+    )
+
+    try:
+        desired_cls = backend_class_for(value)
+    except (KeyError, ValueError):
+        backend.target_device = value
+        return backend
+    if type(backend) is desired_cls:
+        backend.target_device = normalize_target_device(value)
+        return backend
+    state = backend.to_dict(prefix=prefix)
+    for topology_key in (
+        f"{prefix}target_cores",
+        f"{prefix}target_clusters",
+        f"{prefix}core_mode",
+    ):
+        state.pop(topology_key, None)
+    state[f"{prefix}target_device"] = value
+    return _Backend.from_dict(state, prefix=prefix)
+
+
 class MobilintConfigMixin(PretrainedConfig):
     # ``dev_no`` is exposed as syntactic sugar for the device-prefix component
     # of the canonical target strings. It accepts either a single device index
@@ -149,44 +228,7 @@ class MobilintConfigMixin(PretrainedConfig):
 
     @target_device.setter
     def target_device(self, value: str) -> None:
-        # HF ``PretrainedConfig.from_dict`` instantiates the config with the
-        # values from ``config.json`` first and then applies any user
-        # ``from_pretrained`` kwargs (including ``target_device``) via
-        # ``setattr``. The initial __init__ has already dispatched
-        # ``MobilintNPUBackend.__new__`` to a concrete subclass based on the
-        # config-file value, so a plain string mutation here would leave
-        # ``self.npu_backend`` on the wrong board's class (e.g. Aries when
-        # the caller asked for ``regulus-rb-usb``). Rebuild the backend
-        # whenever the requested board maps to a different subclass so the
-        # class matches the string.
-        from mblt_npu import MobilintNPUBackend, backend_class_for
-
-        try:
-            desired_cls = backend_class_for(value)
-        except (KeyError, ValueError):
-            # Let the backend layer raise its documented error for unknown
-            # target_device values instead of shadowing it here.
-            self.npu_backend.target_device = value
-            return
-        if type(self.npu_backend) is desired_cls:
-            self.npu_backend.target_device = value
-            return
-        # Cross-board rebuild: preserve board-agnostic runtime state
-        # (mxq_path, dev_no, revision, commit_hash, max_batch_size,
-        # name_or_path) but discard topology fields — the source board's
-        # target_cores / target_clusters / core_mode encode its own
-        # topology (e.g. Aries's 8-core grid or a multi-cluster mode)
-        # that the destination board's __init__ would reject. Dropping
-        # them lets the destination class's board-aware default sugar
-        # fill in a valid spec (e.g. Regulus's sole ``d:0:0`` core in
-        # ``single`` mode); subsequent HF kwargs (target_cores=...,
-        # core_mode=...) then override on the fresh backend via the
-        # per-field setters.
-        state = self.npu_backend.to_dict()
-        for topology_key in ("target_cores", "target_clusters", "core_mode"):
-            state.pop(topology_key, None)
-        state["target_device"] = value
-        self.npu_backend = MobilintNPUBackend.from_dict(state)
+        self.npu_backend = _rebuild_backend_for_target_device(self.npu_backend, value)
 
     @property
     def dev_no(self) -> int:
@@ -295,6 +337,17 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
         self.encoder_npu_backend.mxq_path = value
 
     @property
+    def encoder_target_device(self) -> str:
+        """Board identifier used by the encoder NPU backend."""
+        return self.encoder_npu_backend.target_device
+
+    @encoder_target_device.setter
+    def encoder_target_device(self, value: str) -> None:
+        self.encoder_npu_backend = _rebuild_backend_for_target_device(
+            self.encoder_npu_backend, value, prefix="encoder_"
+        )
+
+    @property
     def encoder_dev_no(self) -> int:
         return self.encoder_npu_backend.dev_no
 
@@ -341,6 +394,17 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @decoder_mxq_path.setter
     def decoder_mxq_path(self, value: str) -> None:
         self.decoder_npu_backend.mxq_path = value
+
+    @property
+    def decoder_target_device(self) -> str:
+        """Board identifier used by the decoder NPU backend."""
+        return self.decoder_npu_backend.target_device
+
+    @decoder_target_device.setter
+    def decoder_target_device(self, value: str) -> None:
+        self.decoder_npu_backend = _rebuild_backend_for_target_device(
+            self.decoder_npu_backend, value, prefix="decoder_"
+        )
 
     @property
     def decoder_dev_no(self) -> int:
@@ -772,7 +836,9 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @base_target_device.setter
     def base_target_device(self, value: str) -> None:
-        self.base_npu_backend.target_device = value
+        self.base_npu_backend = _rebuild_backend_for_target_device(
+            self.base_npu_backend, value, prefix="base_"
+        )
 
     @property
     def draft_target_device(self) -> str:
@@ -780,7 +846,9 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @draft_target_device.setter
     def draft_target_device(self, value: str) -> None:
-        self.draft_npu_backend.target_device = value
+        self.draft_npu_backend = _rebuild_backend_for_target_device(
+            self.draft_npu_backend, value, prefix="draft_"
+        )
 
     @property
     def fc_target_device(self) -> str:
@@ -788,7 +856,9 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
 
     @fc_target_device.setter
     def fc_target_device(self, value: str) -> None:
-        self.fc_npu_backend.target_device = value
+        self.fc_npu_backend = _rebuild_backend_for_target_device(
+            self.fc_npu_backend, value, prefix="fc_"
+        )
 
     @property
     def base_max_batch_size(self) -> int:
