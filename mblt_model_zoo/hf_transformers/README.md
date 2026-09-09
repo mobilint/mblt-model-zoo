@@ -1,8 +1,7 @@
 # Pretrained Models with HuggingFace's Transformers
 
 **mblt-model-zoo** also provides generative AI models from HuggingFace's [Transformers](https://github.com/huggingface/transformers).
-Currently, these models are only available on Mobilint's [ARIES](https://www.mobilint.com/aries).
-Support for [REGULUS](https://www.mobilint.com/regulus) is planned and currently under development
+These models run on Mobilint's [ARIES](https://www.mobilint.com/aries) and [REGULUS](https://www.mobilint.com/regulus) NPU boards. Supported target-device identifiers are `aries-rb`, `regulus-ra`, `regulus-rb`, `regulus-ra-usb`, and `regulus-rb-usb`; a board is selected by the `target_device` value in the shipped `config.json` (see the [NPU settings](#npu-settings) section), and defaults to `aries-rb` when the config omits it. Each Mobilint model release on the Hub is compiled for a specific board — pick the repository whose name ends in the target-device suffix (for example `mobilint/Llama-3.2-1B-Instruct-regulus-rb-usb`) rather than overriding `target_device` on a repository compiled for a different board.
 
 Mobilint's Model Zoo provides a seamless experience for using `transformers` models with the same class/function interfaces. All of the auto classes in `transformers` can import our pre-quantized models (e.g., `mobilint/Llama-3.2-3B-Instruct`) and download the required files from HuggingFace hub. It also supports a locally downloaded model directory, just like the original `transformers`.
 
@@ -263,6 +262,12 @@ For `pipeline(...)`, pass them via `model_kwargs={...}`.
 
 These are custom keyword parameters for Mobilint NPU execution (the compiled model is stored in an `*.mxq` file).
 
+- `target_device` (`str`)
+
+  Selects the Mobilint NPU board that the runtime opens. Supported values are `aries-rb`, `regulus-ra`, `regulus-rb`, `regulus-ra-usb`, and `regulus-rb-usb`; the legacy identifiers `aries` and `regulus` remain accepted and are normalized to `aries-rb` and `regulus-ra`. When omitted, the value ships with the model's `config.json`; loaders default to `aries-rb` if the config does not declare one. The board choice also constrains `core_mode` / `target_cores` / `target_clusters` (see below): every Regulus variant exposes a single cluster with a single core (`d:0:0`), so only `single` and `auto` core modes are valid and multi-core / cluster options apply to `aries-rb` only.
+
+  Requires `mblt-npu-python>=0.1.0` (which pulls `mobilint-qb-runtime>=1.4.0`) for the USB variants and the board-aware runtime dispatch.
+
 - `mxq_path` (`str`)
 
   Overrides which `*.mxq` file to load.
@@ -285,19 +290,21 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
   - `global8`: global scheduling across all cores (requires all clusters)
 
   Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while others may only support the default stored in the model config.
-  For general inference and benchmarks in this repository, the default runtime mode is `global8` unless you explicitly override it.
+  For general inference and benchmarks in this repository, the default runtime mode is `global8` unless you explicitly override it. Regulus variants (`regulus-ra`, `regulus-rb`, `regulus-ra-usb`, `regulus-rb-usb`) expose only one cluster and one core, so only `single` and `auto` are valid on those boards; `multi`, `global4`, and `global8` apply to `aries-rb` only.
 
 - `target_cores` (`list[str]`)
 
-  Used only when `core_mode="single"`. Each entry must be in the form `"cluster:core"`.
-  - `cluster`: `0` or `1`
-  - `core`: `0`, `1`, `2`, or `3`
+  Used only when `core_mode="single"`. Each entry must be in the form `"cluster:core"` on `aries-rb`, or `"0:0"` on every Regulus variant (single-core topology).
+  - `cluster`: `0` or `1` on `aries-rb`; `0` on Regulus
+  - `core`: `0`, `1`, `2`, or `3` on `aries-rb`; `0` on Regulus
 
-  Example: `target_cores=["0:0", "0:1"]`
+  Example (Aries): `target_cores=["0:0", "0:1"]`
+  Example (Regulus): `target_cores=["0:0"]`
 
 - `target_clusters` (`list[int]`)
 
-  Used when `core_mode` is `multi`, `global4`, or `global8`. Each entry is a cluster index (`0` or `1`).
+  Used when `core_mode` is `multi`, `global4`, or `global8`; therefore Aries-only.
+  Each entry is a cluster index (`0` or `1`).
   - For `global8`, all clusters must be included (e.g. `target_clusters=[0, 1]`).
 
   Example: `target_clusters=[0]`
