@@ -68,6 +68,19 @@ def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> No
     NPUTargetSpec.from_kwargs(kwargs, prefix=prefix)
 
 
+# NPU fields that ``MobilintNPUBackend.from_dict`` consumes. Buffering them
+# through :func:`_pop_consumed_backend_kwargs` / :func:`_split_npu_backend_kwargs`
+# keeps HF's downstream setattr loop from re-firing every property setter
+# (which would pollute :class:`NPUTargetSpecPending` with baseline echoes)
+# and from probing topology getters against a stale pending (which would
+# finalize the source spec against overrides intended for a different
+# board — the hasattr hazard called out for
+# :class:`MobilintVisionTextConfigMixin`).
+#
+# ``npu_prefill_chunk_size`` is deliberately excluded: it is a config-only
+# attribute stored directly on ``self.__dict__`` and is not consumed by the
+# shared backend, so leaving HF to apply it via the normal setattr loop
+# preserves the caller's configured value.
 _NPU_BACKEND_KWARG_FIELDS: tuple[str, ...] = (
     "mxq_path",
     "target_device",
@@ -78,7 +91,26 @@ _NPU_BACKEND_KWARG_FIELDS: tuple[str, ...] = (
     "max_batch_size",
     "revision",
     "commit_hash",
-    "npu_prefill_chunk_size",
+)
+
+
+# Order in which :func:`_apply_npu_backend_kwargs` replays the buffered
+# NPU kwargs onto the config after :meth:`super().from_dict` returns.
+# ``target_device`` runs first so a cross-board override rebuilds the
+# backend before the topology / mode fields land on the (now-fresh)
+# destination. The remaining order is arbitrary — each subsequent
+# ``setattr`` accumulates on the fresh :class:`NPUTargetSpecPending` and
+# the canonical spec finalizes only on the next getter read.
+_NPU_APPLY_ORDER: tuple[str, ...] = (
+    "target_device",
+    "mxq_path",
+    "revision",
+    "commit_hash",
+    "max_batch_size",
+    "dev_no",
+    "core_mode",
+    "target_cores",
+    "target_clusters",
 )
 
 
@@ -102,6 +134,52 @@ def _pop_consumed_backend_kwargs(kwargs: dict[str, Any], prefix: str = "") -> No
     """
     for field in _NPU_BACKEND_KWARG_FIELDS:
         kwargs.pop(f"{prefix}{field}", None)
+
+
+def _split_npu_backend_kwargs(
+    kwargs: dict[str, Any], prefix: str = ""
+) -> dict[str, Any]:
+    """Pop the NPU-backend fields for ``prefix`` off ``kwargs``.
+
+    Callers use the returned unprefixed dict with
+    :func:`_apply_npu_backend_kwargs` after :meth:`super().from_dict` has
+    processed the remaining kwargs, so the buffered fields are never
+    exposed to HF's ``PretrainedConfig.from_dict`` kwargs loop. That loop
+    otherwise probes every override with ``hasattr`` before ``setattr``,
+    and the topology getters (``target_cores``, ``target_clusters``,
+    ``core_mode``, ``dev_no``) all trigger a spec finalize on the current
+    pending state. When a caller overrides ``target_device`` alongside
+    a topology field, the finalize fires against the source board's
+    topology before the target-device rebuild has a chance to run —
+    e.g. ``core_mode="global8"`` on a Regulus config raises during the
+    probe. Buffering routes the whole override set through
+    :meth:`_apply_npu_backend_kwargs` in a controlled order instead.
+    """
+    sub: dict[str, Any] = {}
+    for field in _NPU_BACKEND_KWARG_FIELDS:
+        key = f"{prefix}{field}"
+        if key in kwargs:
+            sub[field] = kwargs.pop(key)
+    return sub
+
+
+def _apply_npu_backend_kwargs(
+    config: PretrainedConfig, sub_kwargs: dict[str, Any], prefix: str = ""
+) -> None:
+    """Apply buffered NPU-backend fields to ``config`` in :data:`_NPU_APPLY_ORDER`.
+
+    Companion to :func:`_split_npu_backend_kwargs`. ``target_device`` is
+    applied first so a cross-board override rebuilds the backend before
+    subsequent topology / mode assignments land — the destination
+    board's fresh pending then absorbs the remaining fields without a
+    partial-state finalize against the source topology.
+    """
+    remaining = dict(sub_kwargs)
+    for field in _NPU_APPLY_ORDER:
+        if field in remaining:
+            setattr(config, f"{prefix}{field}", remaining.pop(field))
+    for field, value in remaining.items():
+        setattr(config, f"{prefix}{field}", value)
 
 
 def _serialized_target_cores(backend: MobilintNPUBackend) -> list[str]:
@@ -332,6 +410,38 @@ class MobilintConfigMixin(PretrainedConfig):
     def npu_prefill_chunk_size(self, value: Any) -> None:
         self.__dict__["npu_prefill_chunk_size"] = value
 
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> Union["MobilintConfigMixin", tuple["MobilintConfigMixin", dict[str, Any]]]:
+        """Buffer NPU-backend kwargs across HF's ``from_dict`` kwargs loop.
+
+        HF ``PretrainedConfig.from_dict`` probes every override with
+        ``hasattr`` before ``setattr``. The topology getters
+        (``target_cores`` / ``target_clusters`` / ``core_mode`` /
+        ``dev_no``) all trigger a spec finalize on the current pending
+        state, so a caller override set that combines ``target_device``
+        with a board-specific mode (e.g. ``core_mode="global8"``) raises
+        during the probe against the source board's topology before the
+        target-device rebuild has a chance to run. Extract the NPU
+        fields ahead of time and apply them once ``super().from_dict``
+        has finished with the remaining kwargs; the shared apply order
+        (see :data:`_NPU_APPLY_ORDER`) runs ``target_device`` first, so
+        cross-board rebuilds land before topology / mode overrides.
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        npu_sub_kwargs = _split_npu_backend_kwargs(kwargs)
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(config, npu_sub_kwargs)
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
+
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "npu_backend"):
             _ = d.pop("npu_backend", None)
@@ -501,6 +611,34 @@ class MobilintEncoderDecoderConfigMixin(PretrainedConfig):
     @decoder_target_clusters.setter
     def decoder_target_clusters(self, values: list) -> None:
         self.decoder_npu_backend.target_clusters = values
+
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> Union[
+        "MobilintEncoderDecoderConfigMixin",
+        tuple["MobilintEncoderDecoderConfigMixin", dict[str, Any]],
+    ]:
+        """Buffer ``encoder_*`` / ``decoder_*`` NPU kwargs across HF's ``from_dict``.
+
+        Mirrors :meth:`MobilintConfigMixin.from_dict` for the two prefixed
+        sub-backends. See that override's docstring for the hasattr-probe
+        rationale.
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        encoder_sub = _split_npu_backend_kwargs(kwargs, prefix="encoder_")
+        decoder_sub = _split_npu_backend_kwargs(kwargs, prefix="decoder_")
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(config, encoder_sub, prefix="encoder_")
+        _apply_npu_backend_kwargs(config, decoder_sub, prefix="decoder_")
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
 
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         if hasattr(self, "encoder_npu_backend"):
@@ -1043,6 +1181,36 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
     @fc_mxq_path.setter
     def fc_mxq_path(self, value: str) -> None:
         self.fc_npu_backend.mxq_path = value
+
+    @classmethod
+    def from_dict(
+        cls: type[SpecificPretrainedConfigType], config_dict: dict[str, Any], **kwargs
+    ) -> Union[
+        "MobilintEagle3ConfigMixin",
+        tuple["MobilintEagle3ConfigMixin", dict[str, Any]],
+    ]:
+        """Buffer ``base_*`` / ``draft_*`` / ``fc_*`` NPU kwargs across HF's ``from_dict``.
+
+        Mirrors :meth:`MobilintConfigMixin.from_dict` for Eagle3's three
+        prefixed sub-backends. See that override's docstring for the
+        hasattr-probe rationale.
+        """
+        return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
+        base_sub = _split_npu_backend_kwargs(kwargs, prefix="base_")
+        draft_sub = _split_npu_backend_kwargs(kwargs, prefix="draft_")
+        fc_sub = _split_npu_backend_kwargs(kwargs, prefix="fc_")
+
+        config, unused_kwargs = super().from_dict(
+            config_dict, return_unused_kwargs=True, **kwargs
+        )  # type: ignore[misc]
+
+        _apply_npu_backend_kwargs(config, base_sub, prefix="base_")
+        _apply_npu_backend_kwargs(config, draft_sub, prefix="draft_")
+        _apply_npu_backend_kwargs(config, fc_sub, prefix="fc_")
+
+        if return_unused_kwargs:
+            return config, unused_kwargs
+        return config
 
     def _remove_keys_not_serialized(self, d: dict[str, Any]) -> None:
         _ = d.pop("base_npu_backend", None)

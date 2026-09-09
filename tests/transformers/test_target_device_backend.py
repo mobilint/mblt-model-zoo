@@ -186,6 +186,55 @@ def test_target_device_setter_reapplies_pending_topology_atomically() -> None:
     assert set(config.to_dict()["target_clusters"]) == {"0:0", "0:1"}
 
 
+def test_npu_prefill_chunk_size_kwarg_survives_from_dict() -> None:
+    """Keep the caller's ``npu_prefill_chunk_size`` override across ``from_dict``.
+
+    ``MobilintNPUBackend.from_dict`` does not consume
+    ``npu_prefill_chunk_size`` — it is a config-only attribute stored
+    on ``self.__dict__`` and read by
+    ``resolve_npu_prefill_chunk_size`` as a fallback / per-core-mode
+    mapping. Including it in ``_NPU_BACKEND_KWARG_FIELDS`` (an earlier
+    revision did) caused ``_pop_consumed_backend_kwargs`` to delete it
+    before HF's ``PretrainedConfig.__init__`` could route it through
+    the property setter, so the config surfaced ``None`` and the
+    resolver silently fell back to 128.
+    """
+
+    config = _TargetDeviceConfig.from_dict(
+        {"model_type": _TargetDeviceConfig.model_type},
+        npu_prefill_chunk_size={"single": 64, "global4": 96, "global8": 192},
+    )
+    assert config.npu_prefill_chunk_size == {"single": 64, "global4": 96, "global8": 192}
+
+
+def test_from_dict_buffers_target_device_across_topology_probe_hazard() -> None:
+    """Apply cross-board overrides after the ``super().from_dict`` kwargs loop.
+
+    HF ``PretrainedConfig.from_dict`` probes every override with
+    ``hasattr`` before ``setattr``. The topology getters
+    (``target_cores`` / ``target_clusters`` / ``core_mode`` /
+    ``dev_no``) all trigger a spec finalize on the current pending
+    state, so a caller override that combines ``target_device`` with a
+    board-specific mode (e.g. ``core_mode="global8"``) raises during
+    the probe against the source board's topology before the target-
+    device rebuild has a chance to run. Buffering the NPU kwargs and
+    replaying them after ``super().from_dict`` returns lets the
+    complete override set land on the destination board atomically.
+    """
+
+    config = _TargetDeviceConfig.from_dict(
+        {"model_type": _TargetDeviceConfig.model_type, "target_device": "regulus-rb-usb"},
+        core_mode="global8",
+        target_clusters=[0, 1],
+        target_device="aries-rb",
+    )
+
+    assert type(config.npu_backend).__name__ == "MobilintAriesBackend"
+    assert config.target_device == "aries-rb"
+    assert config.core_mode == "global8"
+    assert set(config.to_dict()["target_clusters"]) == {"0:0", "0:1"}
+
+
 @pytest.mark.parametrize(
     "prefix",
     ["encoder", "decoder"],
