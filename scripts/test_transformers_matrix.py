@@ -52,8 +52,8 @@ Usage (Linux/macOS/Windows, uv required):
     python scripts/test_transformers_matrix.py                           # workers=8
     python scripts/test_transformers_matrix.py --workers 4
     python scripts/test_transformers_matrix.py --no-parallel             # workers=1
-    python scripts/test_transformers_matrix.py -v 5.11.0 5.12.1
-    python scripts/test_transformers_matrix.py --start-from 5.5.4
+    python scripts/test_transformers_matrix.py -v 5.2.0 5.3.0
+    python scripts/test_transformers_matrix.py --start-from 5.0.0
     python scripts/test_transformers_matrix.py --dry-run
     python scripts/test_transformers_matrix.py -- -k Qwen                # extra pytest args
     python scripts/test_transformers_matrix.py --rebuild-summary logs/tx-matrix/<ts>
