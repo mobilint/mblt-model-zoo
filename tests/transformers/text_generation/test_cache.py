@@ -3,6 +3,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
+from tests.pipe_teardown import release_pipe
 
 MODEL_PATHS = (
     "mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
@@ -40,7 +41,7 @@ def model(model_path, revision, base_npu_params):
         **model_kwargs,
     )
     yield model
-    del model
+    release_pipe(model)
 
 
 @pytest.fixture(scope="module")

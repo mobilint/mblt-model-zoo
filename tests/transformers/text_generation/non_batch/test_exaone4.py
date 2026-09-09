@@ -5,6 +5,8 @@ import random
 import pytest
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
+from tests.pipe_teardown import release_pipe
+
 MODEL_PATHS = ("mobilint/EXAONE-4.0-1.2B",)
 
 
@@ -19,7 +21,7 @@ def model(request, revision, base_npu_params):
         **model_kwargs,
     )
     yield model
-    del model
+    release_pipe(model)
 
 
 @pytest.fixture(params=MODEL_PATHS, scope="module")
