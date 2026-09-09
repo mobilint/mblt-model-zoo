@@ -29,8 +29,10 @@ def release_pipe(pipe: Any) -> None:
     ``thinker.audio_tower``, ...), and the outer ``pipe.model`` conditional-
     generation wrapper has no ``dispose()`` of its own. Walk the
     ``torch.nn.Module`` tree so every leaf that owns an NPU handle is
-    released. Non-torch objects (e.g. ``MeloTTS.TTS``) get their own
-    top-level ``dispose()`` call as a fallback.
+    released. Non-torch objects (e.g. ``MeloTTS.TTS``) — and any wrapper
+    with a top-level ``dispose()`` that bundles sibling NPU handles the
+    torch tree cannot reach (``TTS.bert`` is a sibling of ``TTS.model``,
+    not a submodule) — get their own top-level ``dispose()`` call first.
 
     Callers own the ``del`` + ``gc.collect()`` sequence themselves: this
     helper's ``pipe`` local is not the caller's binding, so any ``del``
@@ -39,16 +41,20 @@ def release_pipe(pipe: Any) -> None:
     on the caller-scope reference right after this returns so Python can
     reclaim the Python-side objects before the next fixture allocates.
     """
-    subject = getattr(pipe, "model", None)
-    if subject is None:
-        subject = pipe
+    # Top-level dispose first so wrappers like ``MeloTTS.TTS`` release the
+    # NPU handles they hold via sibling attributes the torch-module walk
+    # below never touches.
+    _try_dispose(pipe)
 
-    modules_attr = getattr(subject, "modules", None)
+    model = getattr(pipe, "model", None)
+    if model is None:
+        return
+    modules_attr = getattr(model, "modules", None)
     if callable(modules_attr):
         for sub in modules_attr():
             _try_dispose(sub)
     else:
-        _try_dispose(subject)
+        _try_dispose(model)
 
 
 def pipe_fixture(*, scope: str = "module", **fixture_kwargs: Any):
