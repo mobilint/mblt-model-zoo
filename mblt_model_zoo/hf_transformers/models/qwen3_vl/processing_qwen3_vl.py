@@ -856,8 +856,12 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         def _pick(field: str):
             # Nested images_kwargs wins over flat top-level for the image
             # modality's effective value (same as upstream _merge_kwargs).
-            if images_scope is not None and images_scope.get(field) is not None:
-                return images_scope.get(field)
+            # Key presence — not non-None — determines precedence: a caller
+            # who explicitly nulls a flat kwarg via ``images_kwargs={...:
+            # None}`` intends that None to reach the processor, and treating
+            # it as absent would resurrect the flat cap.
+            if images_scope is not None and field in images_scope:
+                return images_scope[field]
             return kwargs.get(field)
 
         max_p = _pick("max_pixels")
