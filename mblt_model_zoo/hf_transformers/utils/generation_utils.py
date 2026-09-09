@@ -742,6 +742,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         temperature: Optional[float],
         top_p: Optional[float],
         top_k: Optional[int],
+        num_assistant_tokens: Optional[int] = None,
     ) -> tuple[GenerationConfig, int, Optional[float], Optional[float], int]:
         """Resolve generation config values used by the EAGLE-3 loop."""
         generation_config = self.generation_config if generation_config is None else generation_config
@@ -781,9 +782,14 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         resolved_top_k = int(raw_top_k) if raw_top_k is not None else 0
         if not resolved_do_sample:
             resolved_temperature = 0.0
-        raw_num_assistant_tokens = getattr(generation_config, "num_assistant_tokens", None)
-        num_assistant_tokens = int(raw_num_assistant_tokens) if raw_num_assistant_tokens is not None else 64
-        self.eagle3_draft_model.max_draft_tokens = max(1, num_assistant_tokens - 1)
+        # Explicit ``num_assistant_tokens`` kwarg to ``generate`` overrides the value on
+        # ``generation_config``; fall back to the config, then to the historical default of 64.
+        if num_assistant_tokens is not None:
+            resolved_num_assistant_tokens = int(num_assistant_tokens)
+        else:
+            raw_num_assistant_tokens = getattr(generation_config, "num_assistant_tokens", None)
+            resolved_num_assistant_tokens = int(raw_num_assistant_tokens) if raw_num_assistant_tokens is not None else 64
+        self.eagle3_draft_model.max_draft_tokens = max(1, resolved_num_assistant_tokens - 1)
         return generation_config, resolved_max_new_tokens, resolved_temperature, resolved_top_p, resolved_top_k
 
     def _prepare_eagle3_cache(self, past_key_values: Optional[MobilintEagle3Cache]) -> MobilintEagle3Cache:
@@ -863,6 +869,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         past_key_values: Optional[MobilintEagle3Cache],
         stopping_criteria: Optional[StoppingCriteriaList | list[Any]],
         eos_token_id: Optional[int | list[int]],
+        num_assistant_tokens: Optional[int] = None,
     ) -> tuple[GenerationConfig, int, Any, MobilintEagle3Cache, torch.LongTensor, Optional[int | list[int]], StoppingCriteriaList]:
         """Prepare shared state used by the EAGLE-3 decoding loop."""
         from ..utils.eagle3.decoding import prepare_logits_processor
@@ -877,6 +884,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                 temperature=temperature,
                 top_p=top_p,
                 top_k=top_k,
+                num_assistant_tokens=num_assistant_tokens,
             )
         )
         cache = self._prepare_eagle3_cache(past_key_values)
@@ -1042,6 +1050,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         eos_token_id: Optional[int | list[int]] = None,
         count_npu_time: bool = False,
         npu_prefill_chunk_size: Optional[int] = None,
+        num_assistant_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> torch.Tensor | GenerateDecoderOnlyOutput:
         """Generate tokens with the Mobilint EAGLE-3 decoding loop.
@@ -1052,6 +1061,9 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
           unknown kwargs.
         - Hard error: beam search, ``assistant_model``, ``use_cache=False``,
           custom ``logits_processor``, negative prompts.
+        - ``num_assistant_tokens`` overrides ``generation_config.num_assistant_tokens``
+          for this call; it drives the draft's per-step ``max_draft_tokens``
+          (``= num_assistant_tokens - 1``).
         """
         if attention_mask is not None:
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["attention_mask"])
@@ -1101,6 +1113,7 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                 past_key_values=past_key_values,
                 stopping_criteria=stopping_criteria,
                 eos_token_id=eos_token_id,
+                num_assistant_tokens=num_assistant_tokens,
             )
         )
         if streamer is not None:
