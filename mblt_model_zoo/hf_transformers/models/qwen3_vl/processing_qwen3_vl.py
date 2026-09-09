@@ -268,6 +268,34 @@ def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]
     return (side, side)
 
 
+def _restack_list_shaped_token_outputs(result) -> None:
+    """Restack list-shaped token outputs into tensors in place.
+
+    Transformers 5.4 broke a shape invariant in ``Qwen3VLProcessor``: when the
+    caller passes ``text_kwargs['return_mm_token_type_ids']=True`` (required
+    for MRoPE by :meth:`MobilintQwen3VLProcessor._apply_safety_envelope`),
+    the tokenizer path leaves ``input_ids``, ``attention_mask``, and
+    ``mm_token_type_ids`` as plain Python lists even when the caller asks
+    for ``return_tensors='pt'``. The downstream ``model.generate()`` call
+    fails at ``batch_size = inputs_tensor.shape[0]`` because a list has no
+    ``.shape``. Restack any list-of-list-of-int payload into a tensor so
+    the pipeline / generate path sees the expected ``(batch, seq_len)``
+    shape. Skips fields that are already tensors or that fail to stack
+    (e.g. ragged lists — caller intent unclear, better to surface the
+    original than silently reshape).
+    """
+    for key in ("input_ids", "attention_mask", "mm_token_type_ids"):
+        val = result.get(key) if key in result else None
+        if val is None or hasattr(val, "shape"):
+            continue
+        if not isinstance(val, list):
+            continue
+        try:
+            result[key] = torch.tensor(val)
+        except (TypeError, ValueError):
+            continue
+
+
 def _update_size(size_obj, **updates):
     """Return an updated size, transparently across transformers versions.
 
@@ -1204,7 +1232,9 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             self._sync_dynamic_vision_to_video_processor()
             text = self._strip_video_outer_wrap(text)
 
-        return super().__call__(images, text, videos, **kwargs)
+        result = super().__call__(images, text, videos, **kwargs)
+        _restack_list_shaped_token_outputs(result)
+        return result
 
 
 AutoProcessor.register(MobilintQwen3VLConfig, MobilintQwen3VLProcessor)
