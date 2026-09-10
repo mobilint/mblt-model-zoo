@@ -897,39 +897,6 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if max_p is None and min_p is None:
             return
 
-        # Same key-presence precedence as ``_pick``: an explicit nested
-        # ``images_kwargs={"size": None}`` must survive as ``None`` (which we
-        # then fall through past to seed from ``ip.size``) rather than being
-        # overridden by the flat top-level ``size``.
-        if images_scope is not None and "size" in images_scope:
-            base_size = images_scope["size"]
-        elif "size" in kwargs:
-            base_size = kwargs["size"]
-        else:
-            base_size = None
-        if base_size is None:
-            base_size = self.image_processor.size
-
-        # ``size`` may be an integer shorthand (HF convention: both edges
-        # equal the integer) that ``_size_get`` returns ``None`` for on
-        # every key. Normalize before extracting per-edge values so the
-        # caller's floor is preserved when we mirror the scalar cap.
-        if isinstance(base_size, int):
-            longest = base_size
-            shortest = base_size
-        else:
-            longest = _size_get(base_size, "longest_edge")
-            shortest = _size_get(base_size, "shortest_edge")
-
-        def _apply_upper_cap(existing, desired):
-            """``max_pixels`` → ``longest_edge`` is a ceiling: cap ``desired``
-            at ``limit`` and take the tighter (smaller) of ``existing`` and
-            the capped value."""
-            if desired is None:
-                return existing
-            capped = min(desired, limit)
-            return capped if existing is None else min(existing, capped)
-
         # ``smart_resize`` rounds each upscaled dimension UP to a
         # ``patch_size * merge_size`` multiple and does not reapply the
         # maximum after alignment. A ``min_pixels`` floor at the token
@@ -960,6 +927,45 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         else:
             u_max = (-f_k + discriminant ** 0.5) / 2
             aligned_safe_floor = max(0, int(u_max * u_max))
+
+        # Same key-presence precedence as ``_pick``: an explicit nested
+        # ``images_kwargs={"size": None}`` must survive as ``None`` (which we
+        # then fall through past to seed from ``ip.size``) rather than being
+        # overridden by the flat top-level ``size``.
+        if images_scope is not None and "size" in images_scope:
+            base_size = images_scope["size"]
+        elif "size" in kwargs:
+            base_size = kwargs["size"]
+        else:
+            base_size = None
+        if base_size is None:
+            base_size = self.image_processor.size
+
+        # ``size`` may be an integer shorthand (HF convention: both edges
+        # equal the integer) that ``_size_get`` returns ``None`` for on
+        # every key. Normalize before extracting per-edge values so the
+        # caller's intent survives, AND clamp both edges to their
+        # respective safe ceilings up-front — otherwise a shorthand like
+        # ``size=limit * 8`` would land in ``shortest`` uncapped, and
+        # ``_apply_lower_floor``'s ``max(existing, capped)`` would keep the
+        # oversized value, inverting the ``shortest_edge > longest_edge``
+        # invariant that tf 5.x's ``_standardize_kwargs`` rejects and
+        # driving the aligned grid past the ``limit`` ceiling.
+        if isinstance(base_size, int):
+            longest = min(base_size, limit)
+            shortest = min(base_size, aligned_safe_floor)
+        else:
+            longest = _size_get(base_size, "longest_edge")
+            shortest = _size_get(base_size, "shortest_edge")
+
+        def _apply_upper_cap(existing, desired):
+            """``max_pixels`` → ``longest_edge`` is a ceiling: cap ``desired``
+            at ``limit`` and take the tighter (smaller) of ``existing`` and
+            the capped value."""
+            if desired is None:
+                return existing
+            capped = min(desired, limit)
+            return capped if existing is None else min(existing, capped)
 
         def _apply_lower_floor(existing, desired):
             """``min_pixels`` → ``shortest_edge`` is a floor the caller asks
