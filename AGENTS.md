@@ -76,6 +76,14 @@ Before editing, run `git status --short` and preserve unrelated work.
   reject them with the documented `NotImplementedError`. Call
   `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model()` only for an MXQ override that differs
   from the shipped `config.dynamic_vision` setting.
+- Qwen3-VL vision output order is a per-artifact property carried in
+  `MobilintQwen3VLVisionConfig.vision_output_order` (list of four indices for
+  `(merger, deepstack0, deepstack1, deepstack2)`). The four same-shape vision outputs cannot be
+  distinguished at runtime, so a recompile that permutes them must publish the new order in
+  `config.json`. Default `(0, 2, 3, 1)` matches shipped encoders and is applied when the field
+  is absent (backward compat). `MBLT_VISION_OUTPUT_ORDER=3,0,1,2` overrides the config field for
+  local recompile iteration. Malformed env or config value raises `ValueError`. See
+  `mblt_model_zoo/hf_transformers/README.md` "Vision output order".
 - Qwen3-VL 8B (regular and Batch16) is currently **unsupported**: the shipped MXQ hits
   `NPU-only model output order mismatch` in `qbruntime` 1.4.0 / `mblt_npu` 0.1.0 and
   access-violation-crashes at `qbruntime.Model.__init__::get_model_input_shape`. Do not

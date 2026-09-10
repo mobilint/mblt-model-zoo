@@ -1,5 +1,4 @@
 import inspect
-import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -41,11 +40,6 @@ from .configuration_qwen3_vl import (
     MobilintQwen3VLVisionConfig,
 )
 
-try:  # huggingface_hub raises this when a repo has no such file
-    from huggingface_hub.errors import EntryNotFoundError
-except ImportError:  # older hub releases
-    from huggingface_hub.utils import EntryNotFoundError
-
 logger = logging.get_logger(__name__)
 
 # Index of (merger, deepstack0, deepstack1, deepstack2) within the vision MXQ's
@@ -53,7 +47,6 @@ logger = logging.get_logger(__name__)
 # recompiled encoder can reorder them without any runtime signal -- see
 # MobilintQwen3VLVisionModel._resolve_vision_output_order.
 DEFAULT_VISION_OUTPUT_ORDER = (0, 2, 3, 1)
-VISION_OUTPUT_ORDER_FILENAME = "vision_output_order.json"
 VISION_OUTPUT_ORDER_ENV = "MBLT_VISION_OUTPUT_ORDER"
 
 try:
@@ -428,35 +421,6 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise ValueError(f"Unexpected total Qwen3-VL pixel token count: {hidden_states.shape[0]} vs {offset}")
         return chunks
 
-    def _resolved_vision_mxq_path(self) -> Optional[str]:
-        """Absolute path of the vision MXQ as the backend actually resolved it.
-
-        ``npu_backend.mxq_path`` keeps what the config declared, which is usually
-        a repository-relative filename. The backend resolves it against the local
-        model directory or downloads it into the Hub cache inside
-        ``check_model_path()`` but does not keep the result, so ask it again --
-        a stat for local files, a cache hit for Hub artifacts. Without this the
-        sidecar would be looked up relative to the process working directory, so
-        Hub releases and local model directories would silently fall back to
-        :data:`DEFAULT_VISION_OUTPUT_ORDER` even when they ship one.
-        """
-        backend = getattr(self, "npu_backend", None)
-        declared = getattr(backend, "mxq_path", None)
-        if not declared:
-            return None
-        resolver = getattr(backend, "check_model_path", None)
-        if callable(resolver):
-            try:
-                return str(resolver(str(declared)))
-            except (OSError, AttributeError, EntryNotFoundError) as exc:
-                logger.warning(
-                    "Could not resolve %r while looking for %s: %s",
-                    declared,
-                    VISION_OUTPUT_ORDER_FILENAME,
-                    exc,
-                )
-        return str(declared)
-
     def _resolve_vision_output_order(self) -> tuple[int, int, int, int]:
         """Indices of ``(merger, deepstack0, deepstack1, deepstack2)`` in the MXQ outputs.
 
@@ -464,21 +428,28 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         mapping cannot be recovered at runtime the way the input order can. A
         recompiled encoder may emit them in a different order, and a wrong mapping
         produces **no error** -- output quality degrades silently. The order is
-        therefore a property of the artifact and has to travel with it.
+        therefore a property of the artifact and has to travel with it inside
+        ``config.json`` (where HF Hub caching, revision pinning, and local-dir
+        resolution are already handled by ``from_pretrained``).
 
         Resolution order:
 
-        1. ``$MBLT_VISION_OUTPUT_ORDER`` -- comma separated, e.g. ``"3,0,1,2"``
-        2. ``vision_output_order.json`` next to the vision MXQ,
-           ``{"output_order": [3, 0, 1, 2]}``
-        3. :data:`DEFAULT_VISION_OUTPUT_ORDER`, the order the shipped releases use
+        1. ``$MBLT_VISION_OUTPUT_ORDER`` -- comma separated, e.g. ``"3,0,1,2"``.
+           Process-wide override for a local re-compile without re-uploading
+           ``config.json``. Wins over the config field on purpose so a developer
+           iterating on an encoder can point every load at the new order.
+        2. ``config.vision_output_order`` (``MobilintQwen3VLVisionConfig``),
+           populated from ``config.json`` alongside the vision MXQ.
+        3. :data:`DEFAULT_VISION_OUTPUT_ORDER`, the order the shipped releases
+           use. Kept for backward compatibility so existing repos whose
+           ``config.json`` predates this field keep working.
 
-        The two sources fail differently, on purpose. A malformed
-        ``$MBLT_VISION_OUTPUT_ORDER`` raises and stops the load: the user asked
-        for a specific order and silently ignoring that would hide their
-        mistake. A malformed sidecar is logged and ignored: it is packaging
-        metadata that travels with the artifact, and a model that already
-        works must not stop loading because a file next to it is broken.
+        A malformed ``$MBLT_VISION_OUTPUT_ORDER`` raises ``ValueError`` at the
+        first vision inference: the developer explicitly asked for a specific
+        order and silently ignoring their typo would hide the mistake. A
+        malformed ``config.vision_output_order`` raises the same way -- it is a
+        published release artifact and a broken value is a packaging bug that
+        should surface loudly, not degrade quality silently.
         """
         cached = getattr(self, "_vision_output_order", None)
         if cached is not None:
@@ -493,25 +464,18 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             source = VISION_OUTPUT_ORDER_ENV
 
         if order is None:
-            mxq_path = self._resolved_vision_mxq_path()
-            if mxq_path:
-                sidecar = os.path.join(os.path.dirname(mxq_path), VISION_OUTPUT_ORDER_FILENAME)
-                if os.path.isfile(sidecar):
-                    try:
-                        with open(sidecar, encoding="utf-8") as fh:
-                            payload = json.load(fh)
-                        order = self._parse_vision_output_order(payload["output_order"], sidecar)
-                        source = sidecar
-                    except (OSError, KeyError, ValueError) as exc:
-                        logger.warning("Ignoring %s: %s", sidecar, exc)
-                        source = "default (sidecar rejected)"
+            from_config = getattr(self.config, "vision_output_order", None)
+            if from_config is not None:
+                order = self._parse_vision_output_order(
+                    from_config, "config.vision_output_order"
+                )
+                source = "config.vision_output_order"
 
         if order is None:
             order = DEFAULT_VISION_OUTPUT_ORDER
 
         # Most loads take the default, so keep that at debug and let info mean
-        # "something overrode the default" -- including a sidecar we refused,
-        # which must not read like a clean no-sidecar load.
+        # "something overrode the default".
         log = logger.debug if source == "default" else logger.info
         log("Qwen3-VL vision output order %s (from %s)", order, source)
         self._vision_output_order = order
@@ -523,8 +487,8 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             items = value.split(",") if isinstance(value, str) else list(value)
             order = tuple(int(str(i).strip()) for i in items)
         except (TypeError, ValueError) as exc:
-            # list(None) / list(3) raise TypeError; keep every malformed value on
-            # the ValueError path so the caller logs it and uses the default.
+            # list(None) / list(3) raise TypeError; funnel every malformed value
+            # onto the ValueError path so callers only need one except clause.
             raise ValueError(f"{origin}: expected four integers, got {value!r}") from exc
         if sorted(order) != [0, 1, 2, 3]:
             raise ValueError(f"{origin}: expected a permutation of 0..3, got {order}")

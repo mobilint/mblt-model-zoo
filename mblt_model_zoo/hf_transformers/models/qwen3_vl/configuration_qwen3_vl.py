@@ -1,4 +1,5 @@
 from functools import wraps
+from typing import Optional, Sequence
 
 from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.qwen3_vl.configuration_qwen3_vl import (
@@ -17,8 +18,17 @@ class MobilintQwen3VLVisionConfig(MobilintConfigMixin, Qwen3VLVisionConfig):
     model_type = "mobilint-qwen3_vl"
 
     @wraps(Qwen3VLVisionConfig.__init__)
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, vision_output_order: Optional[Sequence[int]] = None, **kwargs):
         super().__init__(*args, **kwargs)
+        # Index of (merger, deepstack0, deepstack1, deepstack2) within the
+        # compiled vision MXQ's four same-shape outputs. Ships in
+        # ``config.json`` alongside the MXQ because it cannot be recovered
+        # at runtime -- a wrong mapping produces no error, just silent
+        # accuracy loss. Omitted / None => the shipped-encoder default
+        # ``(0, 2, 3, 1)`` applied in ``modeling_qwen3_vl``.
+        self.vision_output_order = (
+            None if vision_output_order is None else list(vision_output_order)
+        )
 
 
 class MobilintQwen3VLTextConfig(MobilintConfigMixin, Qwen3VLTextConfig):

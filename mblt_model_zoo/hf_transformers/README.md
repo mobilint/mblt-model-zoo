@@ -246,6 +246,41 @@ processor.sync_dynamic_vision_from_model(model)
 This is only needed for the paired-override case; the standard `from_pretrained` flow already
 keeps the processor and model in lock-step.
 
+#### Vision output order
+
+The Qwen3-VL vision MXQ emits four tensors of identical shape — the merger and three deepstack
+features. Their index-to-role mapping is a property of the compiled artifact (a recompile can
+permute them) and cannot be detected at runtime, so it ships with the release rather than being
+hardcoded. The shipped Mobilint encoders use
+`(merger, deepstack0, deepstack1, deepstack2) = (0, 2, 3, 1)`, which is the default applied
+when `config.json` omits `vision_output_order`.
+
+To ship a recompiled encoder with a different mapping, add `vision_output_order` to the
+`vision_config` block of `config.json`:
+
+```json
+{
+  "vision_config": {
+    "model_type": "mobilint-qwen3_vl",
+    "vision_output_order": [3, 0, 1, 2]
+  }
+}
+```
+
+`from_pretrained` loads it from the same repo/revision as the vision MXQ automatically — no
+sidecar files, no path resolution, no revision pinning. For local recompile iteration where
+`config.json` is not being re-uploaded, `MBLT_VISION_OUTPUT_ORDER=3,0,1,2` (comma-separated
+env var) wins over the config field. Resolution order:
+
+1. `MBLT_VISION_OUTPUT_ORDER=3,0,1,2` — process-wide developer override.
+2. `config.vision_output_order` — the release channel.
+3. The hardcoded default `(0, 2, 3, 1)` — backward compatibility for repos whose
+   `config.json` predates the field.
+
+A malformed env var or a malformed `config.vision_output_order` (wrong length, not a
+permutation, non-integer entries) raises `ValueError` at the first vision inference so a typo
+or a packaging bug cannot silently degrade output quality.
+
 ## Listing Available Models
 
 **mblt-model-zoo** offers a function to list all available models. You can use the following code snippet to list the models for a specific task (e.g., `text-generation`, `automatic-speech-recognition`, etc.):
