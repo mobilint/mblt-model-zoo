@@ -84,6 +84,13 @@ description: >-
   detected `visual._uses_dynamic_vision` value.
 - Qwen3-VL video decoding requires the `torchcodec` dependency shipped with the `transformers`
   extra; validate video paths only against a dynamic-vision release.
+- Qwen3-VL vision output order lives on `MobilintQwen3VLVisionConfig.vision_output_order`
+  (loaded from `config.json`, list of four indices for
+  `(merger, deepstack0, deepstack1, deepstack2)`). The vision MXQ's four outputs share one shape
+  so a recompile that permutes them must publish the new order in the config; a wrong mapping
+  raises nothing, it just degrades output. Default `(0, 2, 3, 1)` when the field is absent
+  (backward compat). `MBLT_VISION_OUTPUT_ORDER=3,0,1,2` (env) overrides the config field for
+  local iteration. Malformed env or config value raises `ValueError`.
 - Preserve local style in `mblt_model_zoo/hf_transformers`; it is excluded from repository-wide
   Ruff checks.
 

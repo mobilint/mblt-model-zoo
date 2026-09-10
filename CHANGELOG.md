@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 2.5.1
+
+### Added
+
+- Qwen3-VL vision output order is now configurable per compiled artifact via
+  `MobilintQwen3VLVisionConfig.vision_output_order` in `config.json`. The four same-shape vision
+  MXQ outputs default to `(merger, deepstack0, deepstack1, deepstack2) = (0, 2, 3, 1)` when the
+  field is omitted (shipped encoders are unaffected). Recompiles that permute those outputs
+  should publish the new order in the release's `config.json`. `MBLT_VISION_OUTPUT_ORDER=3,0,1,2`
+  overrides the config field for local recompile iteration. Malformed env or config value raises
+  `ValueError` at the first vision inference so a typo or packaging bug cannot silently degrade
+  accuracy. See `mblt_model_zoo/hf_transformers/README.md` "Vision output order".
+
 ## 2.5.0
 
 ### Breaking Changes
