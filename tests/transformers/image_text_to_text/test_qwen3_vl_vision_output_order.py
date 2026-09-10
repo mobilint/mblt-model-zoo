@@ -68,6 +68,8 @@ class TestConfigLoudFailure:
             ["a", "b", "c", "d"],  # non-integer
             3,                  # scalar (would raise TypeError from ``list(3)``)
             False,              # scalar (bool is int but ``list(False)`` raises)
+            {"0": 3, "1": 0, "2": 1, "3": 2},  # dict: ``list(...)`` would give keys
+            {0, 1, 2, 3},       # set: ``list(...)`` order is undefined
         ],
     )
     def test_bad_config_value_raises(self, monkeypatch, bad):
@@ -120,7 +122,18 @@ class TestParser:
         with pytest.raises(ValueError):
             MobilintQwen3VLVisionModel._parse_vision_output_order(bad, "test")
 
-    def test_accepts_string_and_sequence(self):
+    def test_accepts_string_list_and_tuple(self):
         f = MobilintQwen3VLVisionModel._parse_vision_output_order
         assert f("3, 0, 1, 2", "test") == (3, 0, 1, 2)
         assert f([3, 0, 1, 2], "test") == (3, 0, 1, 2)
+        assert f((3, 0, 1, 2), "test") == (3, 0, 1, 2)
+
+    def test_rejects_mapping_and_set(self):
+        """Dicts and sets are iterables that would slip past a naive
+        ``list(value)`` conversion -- dict keys and set order both mask the
+        intended mapping. Reject them explicitly."""
+        f = MobilintQwen3VLVisionModel._parse_vision_output_order
+        with pytest.raises(ValueError, match="expected a list"):
+            f({"0": 3, "1": 0, "2": 1, "3": 2}, "test")
+        with pytest.raises(ValueError, match="expected a list"):
+            f({0, 1, 2, 3}, "test")

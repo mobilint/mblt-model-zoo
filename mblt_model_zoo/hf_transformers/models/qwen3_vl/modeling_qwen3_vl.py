@@ -483,12 +483,22 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
 
     @staticmethod
     def _parse_vision_output_order(value, origin: str) -> tuple[int, int, int, int]:
+        if isinstance(value, str):
+            items = value.split(",")
+        elif isinstance(value, (list, tuple)):
+            items = value
+        else:
+            # Reject dicts, sets, and other iterables: ``list({"0": 3, "1": 0,
+            # "2": 1, "3": 2})`` collapses to the dict's keys and passes the
+            # permutation check, silently applying the wrong mapping.
+            # Scalars (``3``, ``None``, ``False``) land here too and get the
+            # same origin-aware ValueError.
+            raise ValueError(
+                f"{origin}: expected a list of four integers, got {value!r}"
+            )
         try:
-            items = value.split(",") if isinstance(value, str) else list(value)
             order = tuple(int(str(i).strip()) for i in items)
         except (TypeError, ValueError) as exc:
-            # list(None) / list(3) raise TypeError; funnel every malformed value
-            # onto the ValueError path so callers only need one except clause.
             raise ValueError(f"{origin}: expected four integers, got {value!r}") from exc
         if sorted(order) != [0, 1, 2, 3]:
             raise ValueError(f"{origin}: expected a permutation of 0..3, got {order}")
