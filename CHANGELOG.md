@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.5.1
+
 ### Added
 
 - Qwen3-VL vision output order is now configurable per compiled artifact via
