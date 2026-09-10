@@ -26,9 +26,16 @@ class MobilintQwen3VLVisionConfig(MobilintConfigMixin, Qwen3VLVisionConfig):
         # at runtime -- a wrong mapping produces no error, just silent
         # accuracy loss. Omitted / None => the shipped-encoder default
         # ``(0, 2, 3, 1)`` applied in ``modeling_qwen3_vl``.
-        self.vision_output_order = (
-            None if vision_output_order is None else list(vision_output_order)
-        )
+        #
+        # Store the raw value verbatim. Validation lives in
+        # ``MobilintQwen3VLVisionModel._resolve_vision_output_order`` /
+        # ``_parse_vision_output_order`` so a broken ``config.json`` (scalar
+        # like ``3``, wrong length, not a permutation, etc.) raises the same
+        # origin-aware ``ValueError`` at the first vision inference as a
+        # broken ``$MBLT_VISION_OUTPUT_ORDER`` -- rather than surfacing as
+        # an opaque ``TypeError`` from ``list(...)`` inside
+        # ``from_pretrained``.
+        self.vision_output_order = vision_output_order
 
 
 class MobilintQwen3VLTextConfig(MobilintConfigMixin, Qwen3VLTextConfig):

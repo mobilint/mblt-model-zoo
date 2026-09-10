@@ -66,6 +66,8 @@ class TestConfigLoudFailure:
             [0, 1, 2, 2],       # not a permutation
             [1, 2, 3, 4],       # wrong domain
             ["a", "b", "c", "d"],  # non-integer
+            3,                  # scalar (would raise TypeError from ``list(3)``)
+            False,              # scalar (bool is int but ``list(False)`` raises)
         ],
     )
     def test_bad_config_value_raises(self, monkeypatch, bad):
