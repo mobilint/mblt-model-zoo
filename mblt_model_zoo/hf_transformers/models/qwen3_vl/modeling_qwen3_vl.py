@@ -1,4 +1,6 @@
 import inspect
+import json
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Optional, Union, cast
@@ -40,6 +42,14 @@ from .configuration_qwen3_vl import (
 )
 
 logger = logging.get_logger(__name__)
+
+# Index of (merger, deepstack0, deepstack1, deepstack2) within the vision MXQ's
+# four outputs, for the encoders shipped so far. All four share one shape, so a
+# recompiled encoder can reorder them without any runtime signal -- see
+# MobilintQwen3VLVisionModel._resolve_vision_output_order.
+DEFAULT_VISION_OUTPUT_ORDER = (0, 2, 3, 1)
+VISION_OUTPUT_ORDER_FILENAME = "vision_output_order.json"
+VISION_OUTPUT_ORDER_ENV = "MBLT_VISION_OUTPUT_ORDER"
 
 try:
     from transformers.models.qwen3_vl.modeling_qwen3_vl import BaseModelOutputWithDeepstackFeatures
@@ -413,6 +423,65 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise ValueError(f"Unexpected total Qwen3-VL pixel token count: {hidden_states.shape[0]} vs {offset}")
         return chunks
 
+    def _resolve_vision_output_order(self) -> tuple[int, int, int, int]:
+        """Indices of ``(merger, deepstack0, deepstack1, deepstack2)`` in the MXQ outputs.
+
+        The vision MXQ emits four tensors that all share the same shape, so the
+        mapping cannot be recovered at runtime the way the input order can. A
+        recompiled encoder may emit them in a different order, and a wrong mapping
+        produces **no error** -- output quality degrades silently. The order is
+        therefore a property of the artifact and has to travel with it.
+
+        Resolution order:
+
+        1. ``$MBLT_VISION_OUTPUT_ORDER`` -- comma separated, e.g. ``"3,0,1,2"``
+        2. ``vision_output_order.json`` next to the vision MXQ,
+           ``{"output_order": [3, 0, 1, 2]}``
+        3. :data:`DEFAULT_VISION_OUTPUT_ORDER`, the order the shipped releases use
+        """
+        cached = getattr(self, "_vision_output_order", None)
+        if cached is not None:
+            return cached
+
+        order: tuple[int, int, int, int] | None = None
+        source = "default"
+
+        raw = os.environ.get(VISION_OUTPUT_ORDER_ENV)
+        if raw:
+            order = self._parse_vision_output_order(raw, VISION_OUTPUT_ORDER_ENV)
+            source = VISION_OUTPUT_ORDER_ENV
+
+        if order is None:
+            mxq_path = getattr(getattr(self, "npu_backend", None), "mxq_path", None)
+            if mxq_path:
+                sidecar = os.path.join(os.path.dirname(str(mxq_path)), VISION_OUTPUT_ORDER_FILENAME)
+                if os.path.isfile(sidecar):
+                    try:
+                        with open(sidecar, encoding="utf-8") as fh:
+                            payload = json.load(fh)
+                        order = self._parse_vision_output_order(payload["output_order"], sidecar)
+                        source = sidecar
+                    except (OSError, KeyError, ValueError) as exc:
+                        logger.warning("Ignoring %s: %s", sidecar, exc)
+
+        if order is None:
+            order = DEFAULT_VISION_OUTPUT_ORDER
+
+        logger.info("Qwen3-VL vision output order %s (from %s)", order, source)
+        self._vision_output_order = order
+        return order
+
+    @staticmethod
+    def _parse_vision_output_order(value, origin: str) -> tuple[int, int, int, int]:
+        items = value.split(",") if isinstance(value, str) else list(value)
+        try:
+            order = tuple(int(str(i).strip()) for i in items)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{origin}: expected four integers, got {value!r}") from exc
+        if sorted(order) != [0, 1, 2, 3]:
+            raise ValueError(f"{origin}: expected a permutation of 0..3, got {order}")
+        return order  # type: ignore[return-value]
+
     def _reorder_encoder_outputs(
         self,
         encoder_outputs: list[np.ndarray],
@@ -422,11 +491,13 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         if len(encoder_outputs) < 4:
             raise ValueError(f"Expected at least 4 encoder outputs, got {len(encoder_outputs)}")
 
-        image_embeds = self._flatten_encoder_output(encoder_outputs[0], device=device, batch_size=batch_size)
+        merger, *deepstack = self._resolve_vision_output_order()
+        image_embeds = self._flatten_encoder_output(
+            encoder_outputs[merger], device=device, batch_size=batch_size
+        )
         deepstack_embeds = [
-            self._flatten_encoder_output(encoder_outputs[2], device=device, batch_size=batch_size),
-            self._flatten_encoder_output(encoder_outputs[3], device=device, batch_size=batch_size),
-            self._flatten_encoder_output(encoder_outputs[1], device=device, batch_size=batch_size),
+            self._flatten_encoder_output(encoder_outputs[i], device=device, batch_size=batch_size)
+            for i in deepstack
         ]
         return image_embeds, deepstack_embeds
 
