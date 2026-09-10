@@ -52,3 +52,15 @@ class MobilintQwen3VLConfig(MobilintVisionTextConfigMixin, Qwen3VLConfig):
 
 
 AutoConfig.register("mobilint-qwen3_vl", MobilintQwen3VLConfig)
+
+
+# Force the modeling module to import at config-registration time so its
+# ``AutoModel.register`` / ``AutoModelForImageTextToText.register`` calls run
+# alongside the ``AutoConfig.register`` above. Without this, a fresh worker
+# whose first Qwen3-VL touch is a pipeline load can hit the config-only
+# import path (trust_remote_code / lazy ``__init__.py``) and reach
+# ``AutoModelForImageTextToText.from_pretrained`` before the model class
+# has been registered — surfacing on ``transformers>=5.5.4`` as
+# ``ValueError: Unrecognized configuration class MobilintQwen3VLConfig for
+# this kind of AutoModel: AutoModelForImageTextToText``.
+from . import modeling_qwen3_vl as _modeling_qwen3_vl  # noqa: F401,E402
