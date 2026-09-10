@@ -423,6 +423,35 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             raise ValueError(f"Unexpected total Qwen3-VL pixel token count: {hidden_states.shape[0]} vs {offset}")
         return chunks
 
+    def _resolved_vision_mxq_path(self) -> Optional[str]:
+        """Absolute path of the vision MXQ as the backend actually resolved it.
+
+        ``npu_backend.mxq_path`` keeps what the config declared, which is usually
+        a repository-relative filename. The backend resolves it against the local
+        model directory or downloads it into the Hub cache inside
+        ``check_model_path()`` but does not keep the result, so ask it again --
+        a stat for local files, a cache hit for Hub artifacts. Without this the
+        sidecar would be looked up relative to the process working directory, so
+        Hub releases and local model directories would silently fall back to
+        :data:`DEFAULT_VISION_OUTPUT_ORDER` even when they ship one.
+        """
+        backend = getattr(self, "npu_backend", None)
+        declared = getattr(backend, "mxq_path", None)
+        if not declared:
+            return None
+        resolver = getattr(backend, "check_model_path", None)
+        if callable(resolver):
+            try:
+                return str(resolver(str(declared)))
+            except Exception as exc:  # network, missing file, backend refactor
+                logger.warning(
+                    "Could not resolve %r while looking for %s: %s",
+                    declared,
+                    VISION_OUTPUT_ORDER_FILENAME,
+                    exc,
+                )
+        return str(declared)
+
     def _resolve_vision_output_order(self) -> tuple[int, int, int, int]:
         """Indices of ``(merger, deepstack0, deepstack1, deepstack2)`` in the MXQ outputs.
 
@@ -452,9 +481,9 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             source = VISION_OUTPUT_ORDER_ENV
 
         if order is None:
-            mxq_path = getattr(getattr(self, "npu_backend", None), "mxq_path", None)
+            mxq_path = self._resolved_vision_mxq_path()
             if mxq_path:
-                sidecar = os.path.join(os.path.dirname(str(mxq_path)), VISION_OUTPUT_ORDER_FILENAME)
+                sidecar = os.path.join(os.path.dirname(mxq_path), VISION_OUTPUT_ORDER_FILENAME)
                 if os.path.isfile(sidecar):
                     try:
                         with open(sidecar, encoding="utf-8") as fh:
@@ -473,10 +502,12 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
 
     @staticmethod
     def _parse_vision_output_order(value, origin: str) -> tuple[int, int, int, int]:
-        items = value.split(",") if isinstance(value, str) else list(value)
         try:
+            items = value.split(",") if isinstance(value, str) else list(value)
             order = tuple(int(str(i).strip()) for i in items)
         except (TypeError, ValueError) as exc:
+            # list(None) / list(3) raise TypeError; keep every malformed value on
+            # the ValueError path so the caller logs it and uses the default.
             raise ValueError(f"{origin}: expected four integers, got {value!r}") from exc
         if sorted(order) != [0, 1, 2, 3]:
             raise ValueError(f"{origin}: expected a permutation of 0..3, got {order}")
