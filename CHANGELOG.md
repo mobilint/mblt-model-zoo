@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.5.0
+
 ### Breaking Changes
 
 - **Qwen3-VL 8B (regular and `Batch16`) is withdrawn.** Loading
