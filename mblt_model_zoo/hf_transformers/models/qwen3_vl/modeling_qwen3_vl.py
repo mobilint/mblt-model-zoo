@@ -41,6 +41,11 @@ from .configuration_qwen3_vl import (
     MobilintQwen3VLVisionConfig,
 )
 
+try:  # huggingface_hub raises this when a repo has no such file
+    from huggingface_hub.errors import EntryNotFoundError
+except ImportError:  # older hub releases
+    from huggingface_hub.utils import EntryNotFoundError
+
 logger = logging.get_logger(__name__)
 
 # Index of (merger, deepstack0, deepstack1, deepstack2) within the vision MXQ's
@@ -443,7 +448,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         if callable(resolver):
             try:
                 return str(resolver(str(declared)))
-            except Exception as exc:  # network, missing file, backend refactor
+            except (OSError, AttributeError, EntryNotFoundError) as exc:
                 logger.warning(
                     "Could not resolve %r while looking for %s: %s",
                     declared,
@@ -467,6 +472,13 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         2. ``vision_output_order.json`` next to the vision MXQ,
            ``{"output_order": [3, 0, 1, 2]}``
         3. :data:`DEFAULT_VISION_OUTPUT_ORDER`, the order the shipped releases use
+
+        The two sources fail differently, on purpose. A malformed
+        ``$MBLT_VISION_OUTPUT_ORDER`` raises and stops the load: the user asked
+        for a specific order and silently ignoring that would hide their
+        mistake. A malformed sidecar is logged and ignored: it is packaging
+        metadata that travels with the artifact, and a model that already
+        works must not stop loading because a file next to it is broken.
         """
         cached = getattr(self, "_vision_output_order", None)
         if cached is not None:
@@ -492,11 +504,16 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                         source = sidecar
                     except (OSError, KeyError, ValueError) as exc:
                         logger.warning("Ignoring %s: %s", sidecar, exc)
+                        source = "default (sidecar rejected)"
 
         if order is None:
             order = DEFAULT_VISION_OUTPUT_ORDER
 
-        logger.info("Qwen3-VL vision output order %s (from %s)", order, source)
+        # Most loads take the default, so keep that at debug and let info mean
+        # "something overrode the default" -- including a sidecar we refused,
+        # which must not read like a clean no-sidecar load.
+        log = logger.debug if source == "default" else logger.info
+        log("Qwen3-VL vision output order %s (from %s)", order, source)
         self._vision_output_order = order
         return order
 

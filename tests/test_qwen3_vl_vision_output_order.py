@@ -77,6 +77,28 @@ class TestMalformedSidecarFallsBack:
         assert m._resolve_vision_output_order() == DEFAULT_VISION_OUTPUT_ORDER
 
 
+class TestLogging:
+    def test_rejected_sidecar_is_distinguishable_from_no_sidecar(self, monkeypatch, tmp_path, caplog):
+        """A refused sidecar must not read like a clean default load."""
+        import logging as _logging
+        monkeypatch.delenv(VISION_OUTPUT_ORDER_ENV, raising=False)
+        _write_sidecar(tmp_path, [0, 1, 2])           # 4개가 아니라 거부됨
+        m = _model(declared="v.mxq", resolved=str(tmp_path / "v.mxq"))
+        with caplog.at_level(_logging.DEBUG):
+            assert m._resolve_vision_output_order() == DEFAULT_VISION_OUTPUT_ORDER
+        text = " ".join(r.getMessage() for r in caplog.records)
+        assert "sidecar rejected" in text
+
+    def test_default_load_is_not_info(self, monkeypatch, tmp_path, caplog):
+        """The default path is the common case; it must not log at info."""
+        import logging as _logging
+        monkeypatch.delenv(VISION_OUTPUT_ORDER_ENV, raising=False)
+        m = _model(declared="v.mxq", resolved=str(tmp_path / "v.mxq"))
+        with caplog.at_level(_logging.INFO):
+            assert m._resolve_vision_output_order() == DEFAULT_VISION_OUTPUT_ORDER
+        assert not [r for r in caplog.records if r.levelno >= _logging.INFO]
+
+
 class TestParser:
     @pytest.mark.parametrize("bad", [None, 3, 3.5])
     def test_non_iterable_raises_value_error_not_type_error(self, bad):
