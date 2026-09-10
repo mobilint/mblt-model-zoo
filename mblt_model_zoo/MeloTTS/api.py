@@ -195,3 +195,11 @@ class TTS(nn.Module):
 
     def dispose(self):
         self.model.dispose()
+        # ``self.bert`` is a sibling NPU-backed module built via
+        # ``AutoModelForMaskedLM.from_pretrained``; if the loaded class is a
+        # Mobilint Bert (``MobilintBertForMaskedLM``) it owns its own NPU
+        # backend and must be released alongside the synthesizer, otherwise
+        # LPDDR stays pinned between TTS instances.
+        bert_dispose = getattr(getattr(self, "bert", None), "dispose", None)
+        if callable(bert_dispose):
+            bert_dispose()

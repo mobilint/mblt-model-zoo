@@ -76,6 +76,13 @@ Before editing, run `git status --short` and preserve unrelated work.
   reject them with the documented `NotImplementedError`. Call
   `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model()` only for an MXQ override that differs
   from the shipped `config.dynamic_vision` setting.
+- Qwen3-VL 8B (regular and Batch16) is currently **unsupported**: the shipped MXQ hits
+  `NPU-only model output order mismatch` in `qbruntime` 1.4.0 / `mblt_npu` 0.1.0 and
+  access-violation-crashes at `qbruntime.Model.__init__::get_model_input_shape`. Do not
+  re-add `mobilint/Qwen3-VL-8B-Instruct(-Batch16)` to `MODEL_PATHS` or the batch/multi-image/
+  video test modules until the model repo ships an MXQ compatible with the current runtime.
+  Track the withdrawal in the release notes and lift it in the same change that restores the
+  test coverage.
 - Follow `.agents/skills/mblt-transformers/SKILL.md` for EAGLE-3 speculative-decoding contracts:
   preserve Hugging Face sampling semantics, keep TPS metrics centralized in `tps_table.py`, and
   use same-process repeats when measuring MXQ backends.

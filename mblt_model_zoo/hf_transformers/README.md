@@ -168,6 +168,13 @@ Further usage examples can be found in the [tests](../../tests/transformers) dir
 
 ### Qwen3-VL release contract
 
+> **Note:** `mobilint/Qwen3-VL-8B-Instruct` and `mobilint/Qwen3-VL-8B-Instruct-Batch16` are
+> currently **unsupported**. Loading either under `qbruntime` 1.4.0 / `mblt_npu` 0.1.0 hits
+> `NPU-only model output order mismatch` and access-violation-crashes at
+> `qbruntime.Model.__init__::get_model_input_shape`. Use the 2B or 4B variants until the 8B
+> repo ships an MXQ compatible with the current runtime; see `CHANGELOG.md` Unreleased for the
+> full withdrawal note.
+
 Qwen3-VL ships on Mobilint as one release per Hugging Face branch: the vision `*.mxq`, the text
 `*.mxq`, `MobilintQwen3VLProcessor`, and `MobilintQwen3VLConfig` are compiled and calibrated
 together. The release-level flag is `dynamic_vision`, exposed as a top-level attribute on

@@ -1,8 +1,11 @@
+import gc
+
 import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from mblt_model_zoo.hf_transformers.utils.cache_utils import MobilintCache
+from tests.pipe_teardown import release_pipe
 
 MODEL_PATHS = (
     "mobilint/HyperCLOVAX-SEED-Text-Instruct-1.5B",
@@ -40,7 +43,9 @@ def model(model_path, revision, base_npu_params):
         **model_kwargs,
     )
     yield model
+    release_pipe(model)
     del model
+    gc.collect()
 
 
 @pytest.fixture(scope="module")
@@ -117,8 +122,24 @@ def test_cache(model, tokenizer, generation_token_limit: int):
         max_new_tokens=generation_token_limit,
     )
 
+    # Dispose the loaded slots and rebuild them from scratch to simulate a
+    # process restart between the cache dump and the cache load. Post
+    # multi-slot refactor ``dispose()`` clears ``mxq_models`` so ``launch()``
+    # must be preceded by an explicit ``create()``; the old
+    # ``dispose() → launch()`` sequence now raises "requires create() to
+    # succeed first".
     model.dispose()
+    model.npu_backend.create()
     model.launch()
+
+    # Rebind the cache to the recreated backend. ``MobilintCache`` and each
+    # ``MobilintLayer`` hold direct references to the pre-dispose
+    # ``mxq_model``; calling ``load_cache_memory`` on those disposed handles
+    # would raise ``Model_NotLaunched``.
+    new_mxq = model.get_cache_mxq_model()
+    past_key_values.mxq_models = [new_mxq]
+    for layer in past_key_values.layers:
+        layer.mxq_model = new_mxq
 
     past_key_values.load_cache_memory()
     restored_output_ids = model.generate(

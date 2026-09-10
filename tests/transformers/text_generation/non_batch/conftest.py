@@ -7,6 +7,8 @@ from typing import Optional
 import pytest
 from transformers import AutoTokenizer, TextStreamer, pipeline
 
+from tests.pipe_teardown import pipe_fixture
+
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize the shared pipeline fixture from module-level model paths."""
@@ -20,7 +22,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     metafunc.parametrize("pipe", model_paths, indirect=True, ids=list(model_paths), scope="module")
 
 
-@pytest.fixture(scope="module")
+@pipe_fixture()
 def pipe(request: pytest.FixtureRequest, revision: Optional[str], base_npu_params):
     """Create a text-generation pipeline for the parametrized model."""
     model_path = request.param
@@ -33,7 +35,7 @@ def pipe(request: pytest.FixtureRequest, revision: Optional[str], base_npu_param
     )
 
     if model_kwargs:
-        pipe = pipeline(
+        return pipeline(
             "text-generation",
             model=model_path,
             streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
@@ -41,14 +43,10 @@ def pipe(request: pytest.FixtureRequest, revision: Optional[str], base_npu_param
             revision=revision,
             model_kwargs=model_kwargs,
         )
-    else:
-        pipe = pipeline(
-            "text-generation",
-            model=model_path,
-            streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
-            trust_remote_code=True,
-            revision=revision,
-        )
-
-    yield pipe
-    del pipe
+    return pipeline(
+        "text-generation",
+        model=model_path,
+        streamer=TextStreamer(tokenizer=tokenizer, skip_prompt=False),
+        trust_remote_code=True,
+        revision=revision,
+    )

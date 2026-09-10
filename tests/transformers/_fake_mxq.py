@@ -115,16 +115,16 @@ class DynamicAxisMxq:
 
 
 class FakeBackend:
-    def __init__(self, mxq_model):
+    def __init__(self, mxq_model, *, n_slots: int = 1, k_per_model: int = 1):
         self.mxq_model = mxq_model
-        # ``_llm_forward_batch`` uses ``npu_backend.mxq_models`` for
-        # per-group dispatch; single-Model fakes still land on the
-        # single-group fast path.
-        self.mxq_models = [mxq_model]
-        # Compiled batch axis probed off slot 0 in the real backend; the
-        # cacheless dispatch path reads this to derive ``(row // K, row % K)``
-        # routing when ``past_key_values`` is absent.
-        self.k_per_model = 1
+        # Static-last-only Batch<K> MXQs compile a real batch axis K and a
+        # single Model handles the whole batch; dynamic-axis MXQs are Batch1
+        # per Model and multi-slot dispatch scales across ``n_slots`` copies.
+        # ``make_model`` picks the parametrization that matches the MXQ
+        # variant so ``N * K >= max_batch_size`` clears the cacheless
+        # dispatch guard without perturbing the path-selection heuristics.
+        self.mxq_models = [mxq_model] * n_slots
+        self.k_per_model = k_per_model
         self._output_layout_cached = None
         self._dispatcher = None
 
@@ -158,9 +158,28 @@ class FakeBackend:
 
 
 def make_model(mxq, *, max_batch_size: int = 1) -> MobilintModelMixin:
-    """Construct a bare ``MobilintModelMixin`` without triggering NPU init."""
+    """Construct a bare ``MobilintModelMixin`` without triggering NPU init.
+
+    ``max_batch_size`` scales the fake backend so ``N * K >= max_batch_size``
+    and the cacheless dispatch guard (``n_items <= N * K``) clears. The
+    scaling target matches how a real backend would handle ``max_batch_size``
+    for each MXQ variant:
+
+    * Static-last-only MXQs are compiled with a real batch axis K, so a
+      Batch<N> model runs as a single Model with ``k_per_model=N``. The
+      call-sequence assertions in :class:`TestLlmForwardBatch` rely on the
+      single-slot dispatch that this parametrization produces.
+    * Dynamic-axis MXQs are Batch1 per Model in production; multi-slot
+      dispatch spreads a Batch<N> request across ``n_slots=N`` copies with
+      ``k_per_model=1`` so the K-aware probe still classifies the MXQ as
+      Path-2 eligible.
+    """
     model = MobilintModelMixin.__new__(MobilintModelMixin)
-    model.npu_backend = FakeBackend(mxq)
+    scale = max(max_batch_size, 1)
+    if isinstance(mxq, StaticLastOnlyMxq):
+        model.npu_backend = FakeBackend(mxq, k_per_model=scale)
+    else:
+        model.npu_backend = FakeBackend(mxq, n_slots=scale)
     config_kwargs = {"npu_prefill_chunk_size": None}
     if max_batch_size > 1:
         config_kwargs["max_batch_size"] = max_batch_size

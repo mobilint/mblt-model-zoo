@@ -13,6 +13,7 @@ from tests.npu_backend_options import (
     option_value_was_provided,
     validate_single_only_core_mode,
 )
+from tests.pipe_teardown import pipe_fixture
 from tests.transformers.text_generation.utils import BatchTextStreamer
 
 
@@ -45,7 +46,7 @@ def base_npu_params(
     return params
 
 
-@pytest.fixture(scope="module")
+@pipe_fixture()
 def pipe(
     request: pytest.FixtureRequest,
     revision: Optional[str],
@@ -65,7 +66,7 @@ def pipe(
     tokenizer.padding_side = "left"
 
     if model_kwargs:
-        pipe = pipeline(
+        return pipeline(
             "text-generation",
             model=model_path,
             tokenizer=tokenizer,
@@ -73,17 +74,13 @@ def pipe(
             revision=revision,
             model_kwargs=model_kwargs,
         )
-    else:
-        pipe = pipeline(
-            "text-generation",
-            model=model_path,
-            tokenizer=tokenizer,
-            trust_remote_code=True,
-            revision=revision,
-        )
-
-    yield pipe
-    del pipe
+    return pipeline(
+        "text-generation",
+        model=model_path,
+        tokenizer=tokenizer,
+        trust_remote_code=True,
+        revision=revision,
+    )
 
 
 @pytest.fixture

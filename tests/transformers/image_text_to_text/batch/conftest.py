@@ -13,6 +13,7 @@ from tests.npu_backend_options import (
     option_value_was_provided,
     validate_single_only_core_mode,
 )
+from tests.pipe_teardown import pipe_fixture
 from tests.transformers.text_generation.utils import BatchTextStreamer
 
 
@@ -55,7 +56,7 @@ def vision_text_npu_params(
     return VisionTextNpuParams(vision=vision_kwargs, text=text_kwargs)
 
 
-@pytest.fixture(scope="module")
+@pipe_fixture()
 def pipe(
     request: pytest.FixtureRequest,
     revision: Optional[str],
@@ -75,7 +76,7 @@ def pipe(
         tokenizer.pad_token_id = tokenizer.eos_token_id
     tokenizer.padding_side = "left"
 
-    pipe = pipeline(
+    return pipeline(
         "image-text-to-text",
         model=model_path,
         processor=processor,
@@ -83,9 +84,6 @@ def pipe(
         revision=revision,
         model_kwargs=model_kwargs or None,
     )
-
-    yield pipe
-    del pipe
 
 
 @pytest.fixture

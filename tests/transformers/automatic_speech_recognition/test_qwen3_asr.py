@@ -2,12 +2,14 @@ import pytest
 from datasets import load_dataset
 from transformers import pipeline
 
+from tests.pipe_teardown import pipe_fixture
+
 MODEL_PATHS = (
     "mobilint/Qwen3-ASR-1.7B",
 )
 
 
-@pytest.fixture(params=MODEL_PATHS, scope="module")
+@pipe_fixture(params=MODEL_PATHS)
 def pipe(request, revision, encoder_decoder_npu_params):
     """HuggingFace AutomaticSpeechRecognition pipeline fixture.
 
@@ -21,17 +23,13 @@ def pipe(request, revision, encoder_decoder_npu_params):
 
     model_path = request.param
     model_kwargs = {**encoder_decoder_npu_params.encoder, **encoder_decoder_npu_params.decoder}
-
-    pipe = pipeline(
+    return pipeline(
         "automatic-speech-recognition",
         model=model_path,
         trust_remote_code=True,
         revision=revision,
         model_kwargs=model_kwargs or None,
     )
-    yield pipe
-
-    del pipe
 
 
 def test_via_huggingface_pipeline(pipe):

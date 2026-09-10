@@ -266,8 +266,15 @@ def test_huge_max_pixels_still_produces_within_budget_image_grid() -> None:
     kwargs: dict = {"max_pixels": limit * 8}
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
+    # Simulate upstream ``_merge_kwargs``: flat top-level kwargs are copied
+    # into every modality; nested per-modality overrides win on collision.
+    # The image processor itself doesn't accept the ``images_kwargs`` /
+    # ``videos_kwargs`` scoping keys, so we merge them here before dispatch.
+    image_kwargs = {k: v for k, v in kwargs.items() if k not in ("images_kwargs", "videos_kwargs")}
+    image_kwargs.update(kwargs.get("images_kwargs") or {})
+
     image = torch.zeros((3, 2160, 3840), dtype=torch.uint8).numpy()
-    result = ip(images=[image], **kwargs)
+    result = ip(images=[image], **image_kwargs)
     grid_thw = result["image_grid_thw"]
     per_image_tokens = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
 

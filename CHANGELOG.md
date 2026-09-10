@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 2.5.0
+
+### Breaking Changes
+
+- **Qwen3-VL 8B (regular and `Batch16`) is withdrawn.** Loading
+  `mobilint/Qwen3-VL-8B-Instruct` or `mobilint/Qwen3-VL-8B-Instruct-Batch16`
+  under `qbruntime` 1.4.0 / `mblt_npu` 0.1.0 hits
+  `NPU-only model output order mismatch` and access-violation-crashes at
+  `qbruntime.Model.__init__::get_model_input_shape`. The four 8B-only
+  tests (`test_qwen3_vl_multi_image_two_turn`, `test_qwen3_vl_batch`,
+  `test_qwen3_vl_multi_image_batch`, `test_qwen3_vl_video_batch`) and
+  the 8B rows in the parametrized non-batch tuples are removed until the
+  model repo ships an MXQ compatible with the current runtime. 2B and 4B
+  variants remain supported.
+
 ### Changed
 
 - `mblt_model_zoo.vision` is now a forwarding-only compatibility facade. Vision model metadata,

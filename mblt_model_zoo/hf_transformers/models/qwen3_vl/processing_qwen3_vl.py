@@ -268,6 +268,34 @@ def _compute_npu_frame_size(patch_size: int, merge_size: int) -> tuple[int, int]
     return (side, side)
 
 
+def _restack_list_shaped_token_outputs(result) -> None:
+    """Restack list-shaped token outputs into tensors in place.
+
+    Transformers 5.4 broke a shape invariant in ``Qwen3VLProcessor``: when the
+    caller passes ``text_kwargs['return_mm_token_type_ids']=True`` (required
+    for MRoPE by :meth:`MobilintQwen3VLProcessor._apply_safety_envelope`),
+    the tokenizer path leaves ``input_ids``, ``attention_mask``, and
+    ``mm_token_type_ids`` as plain Python lists even when the caller asks
+    for ``return_tensors='pt'``. The downstream ``model.generate()`` call
+    fails at ``batch_size = inputs_tensor.shape[0]`` because a list has no
+    ``.shape``. Restack any list-of-list-of-int payload into a tensor so
+    the pipeline / generate path sees the expected ``(batch, seq_len)``
+    shape. Skips fields that are already tensors or that fail to stack
+    (e.g. ragged lists — caller intent unclear, better to surface the
+    original than silently reshape).
+    """
+    for key in ("input_ids", "attention_mask", "mm_token_type_ids"):
+        val = result.get(key) if key in result else None
+        if val is None or hasattr(val, "shape"):
+            continue
+        if not isinstance(val, list):
+            continue
+        try:
+            result[key] = torch.tensor(val)
+        except (TypeError, ValueError):
+            continue
+
+
 def _update_size(size_obj, **updates):
     """Return an updated size, transparently across transformers versions.
 
@@ -598,6 +626,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             self._reject_do_resize_false(scope, "image")
             self._cap_pixel_kwargs(scope, limit, "image")
             self._cap_size_edges(scope, limit, "image")
+        self._mirror_pixel_caps_to_image_size(kwargs, limit)
 
     def _clamp_dynamic_video_size(self) -> None:
         """Cap `max_pixels` so dynamic-vision video frames fit the NPU sequence limit.
@@ -816,6 +845,13 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         which bounds the patch count. Bounding ``min_pixels`` prevents the
         symmetric scale-*up* path where an oversized floor forces the
         rescaler to inflate a small input past the budget.
+
+        Transformers 5.x drops support for both scalar kwargs on
+        ``Qwen2VLImageProcessor`` — passing ``max_pixels`` / ``min_pixels`` at
+        call time is silently ignored and only ``size`` controls the resize.
+        :meth:`_mirror_pixel_caps_to_image_size` re-encodes the effective cap
+        into an image-scoped ``size`` override so 5.x still honors the ceiling
+        while keeping 4.x's smaller-wins semantics.
         """
         for field in ("max_pixels", "min_pixels"):
             value = scope.get(field)
@@ -826,6 +862,144 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 kind, field, value, limit, self.max_vision_tokens,
             )
             scope[field] = limit
+
+    def _mirror_pixel_caps_to_image_size(self, kwargs: dict, limit: int) -> None:
+        """Mirror ``max_pixels`` / ``min_pixels`` into image-scoped ``size``.
+
+        Transformers 5.x silently ignores the scalar kwargs on
+        ``Qwen2VLImageProcessor``, so the vision-token budget only bites when
+        ``size`` is set. Emit the derived cap into
+        ``kwargs["images_kwargs"]["size"]`` (not top-level ``kwargs``) —
+        upstream ``_merge_kwargs`` copies a flat top-level ``size`` into every
+        modality's kwarg dict, which would let an image-derived ceiling resize
+        video frames to an unintended budget. Route the synthesized value
+        through the ``images_kwargs`` nested scope so upstream keeps it
+        image-only. Emit as a plain ``dict`` because 5.x's
+        ``_standardize_kwargs`` rejects ``SizeDict`` instances from the caller
+        kwargs surface.
+        """
+        images_scope_raw = kwargs.get("images_kwargs")
+        images_scope = images_scope_raw if isinstance(images_scope_raw, dict) else None
+
+        def _pick(field: str):
+            # Nested images_kwargs wins over flat top-level for the image
+            # modality's effective value (same as upstream _merge_kwargs).
+            # Key presence — not non-None — determines precedence: a caller
+            # who explicitly nulls a flat kwarg via ``images_kwargs={...:
+            # None}`` intends that None to reach the processor, and treating
+            # it as absent would resurrect the flat cap.
+            if images_scope is not None and field in images_scope:
+                return images_scope[field]
+            return kwargs.get(field)
+
+        max_p = _pick("max_pixels")
+        min_p = _pick("min_pixels")
+        if max_p is None and min_p is None:
+            return
+
+        # ``smart_resize`` rounds each upscaled dimension UP to a
+        # ``patch_size * merge_size`` multiple and does not reapply the
+        # maximum after alignment. A ``min_pixels`` floor at the token
+        # budget therefore overshoots on both square and high-aspect-ratio
+        # inputs — Codex's follow-up example: 28×2800 with ``min_pixels
+        # == 379456`` upscales to ~62×6160, ceil-aligns to 84×6160
+        # (2640 pre-merge patches, above the 2048-token ceiling and into
+        # the documented NPU hang path).
+        #
+        # Bound the mirrored floor by solving for the largest area whose
+        # worst-case post-align product still fits inside ``limit``:
+        #
+        #     (h + F)(w + F) <= limit, with h*w = M, aspect r = h/w
+        #     → M + F * sqrt(M) * (sqrt(r) + 1/sqrt(r)) + F**2 <= limit
+        #
+        # Qwen2VL's ``smart_resize`` rejects aspect ratios above 200:1, so
+        # substitute ``MAX_RATIO`` for r and solve the quadratic in
+        # ``sqrt(M)`` for the tightest safe floor. Falls back to zero when
+        # ``limit`` is smaller than the alignment overhead itself.
+        merge_size = int(getattr(self.image_processor, "merge_size", 2) or 2)
+        alignment_factor = int(self.image_processor.patch_size) * merge_size
+        max_ratio = 200
+        k_factor = max_ratio ** 0.5 + max_ratio ** -0.5
+        f_k = alignment_factor * k_factor
+        discriminant = f_k * f_k + 4 * (limit - alignment_factor * alignment_factor)
+        if discriminant < 0:
+            aligned_safe_floor = 0
+        else:
+            u_max = (-f_k + discriminant ** 0.5) / 2
+            aligned_safe_floor = max(0, int(u_max * u_max))
+
+        # Same key-presence precedence as ``_pick``: an explicit nested
+        # ``images_kwargs={"size": None}`` must survive as ``None`` (which we
+        # then fall through past to seed from ``ip.size``) rather than being
+        # overridden by the flat top-level ``size``.
+        if images_scope is not None and "size" in images_scope:
+            base_size = images_scope["size"]
+        elif "size" in kwargs:
+            base_size = kwargs["size"]
+        else:
+            base_size = None
+        if base_size is None:
+            base_size = self.image_processor.size
+
+        # ``size`` may be an integer shorthand (HF convention: both edges
+        # equal the integer) that ``_size_get`` returns ``None`` for on
+        # every key. Normalize before extracting per-edge values so the
+        # caller's intent survives, AND clamp both edges to their
+        # respective safe ceilings up-front — otherwise a shorthand like
+        # ``size=limit * 8`` would land in ``shortest`` uncapped, and
+        # ``_apply_lower_floor``'s ``max(existing, capped)`` would keep the
+        # oversized value, inverting the ``shortest_edge > longest_edge``
+        # invariant that tf 5.x's ``_standardize_kwargs`` rejects and
+        # driving the aligned grid past the ``limit`` ceiling.
+        if isinstance(base_size, int):
+            longest = min(base_size, limit)
+            shortest = min(base_size, aligned_safe_floor)
+        else:
+            longest = _size_get(base_size, "longest_edge")
+            shortest = _size_get(base_size, "shortest_edge")
+
+        def _apply_upper_cap(existing, desired):
+            """``max_pixels`` → ``longest_edge`` is a ceiling: cap ``desired``
+            at ``limit`` and take the tighter (smaller) of ``existing`` and
+            the capped value."""
+            if desired is None:
+                return existing
+            capped = min(desired, limit)
+            return capped if existing is None else min(existing, capped)
+
+        def _apply_lower_floor(existing, desired):
+            """``min_pixels`` → ``shortest_edge`` is a floor the caller asks
+            the resizer to respect (small images may be upscaled to it). Cap
+            ``desired`` at ``aligned_safe_floor`` (limit reduced by the worst-
+            case post-align overshoot) so the floor never breaches the NPU
+            budget after ``smart_resize`` rounds up, then take the larger of
+            ``existing`` and the capped value so a caller floor above the
+            processor's default still wins.
+            """
+            if desired is None:
+                return existing
+            capped = min(desired, aligned_safe_floor)
+            return capped if existing is None else max(existing, capped)
+
+        new_longest = _apply_upper_cap(longest, max_p)
+        new_shortest = _apply_lower_floor(shortest, min_p)
+
+        new_size: dict = {}
+        if new_longest is not None:
+            new_size["longest_edge"] = new_longest
+        if new_shortest is not None:
+            new_size["shortest_edge"] = new_shortest
+        if not new_size:
+            return
+
+        logger.info(
+            "[dynamic-vision] mirrored pixel caps into images_kwargs['size'] %s (<= %d vision tokens)",
+            new_size, self.max_vision_tokens,
+        )
+        if images_scope is None:
+            kwargs["images_kwargs"] = {"size": new_size}
+        else:
+            images_scope["size"] = new_size
 
     def _cap_size_edges(self, scope: dict, limit: int, kind: str) -> None:
         """Cap ``size.longest_edge`` / ``size.shortest_edge`` against ``limit``.
@@ -1064,7 +1238,20 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             self._sync_dynamic_vision_to_video_processor()
             text = self._strip_video_outer_wrap(text)
 
-        return super().__call__(images, text, videos, **kwargs)
+        result = super().__call__(images, text, videos, **kwargs)
+        # Only apply the tf 5.4 tensor-restack workaround when the caller
+        # actually asked for PyTorch tensors — omitting ``return_tensors``
+        # (or explicitly passing ``None`` / a non-``"pt"`` value) is a
+        # documented upstream contract for Python-list token outputs and
+        # must survive.
+        text_kwargs = kwargs.get("text_kwargs") if isinstance(kwargs.get("text_kwargs"), dict) else None
+        effective_return_tensors = (
+            text_kwargs.get("return_tensors") if text_kwargs is not None and "return_tensors" in text_kwargs
+            else kwargs.get("return_tensors")
+        )
+        if effective_return_tensors == "pt":
+            _restack_list_shaped_token_outputs(result)
+        return result
 
 
 AutoProcessor.register(MobilintQwen3VLConfig, MobilintQwen3VLProcessor)

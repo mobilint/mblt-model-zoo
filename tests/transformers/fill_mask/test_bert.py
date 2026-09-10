@@ -1,7 +1,10 @@
+import gc
 from pprint import pprint
 
 import pytest
 from transformers import pipeline
+
+from tests.pipe_teardown import release_pipe
 
 MODEL_PATHS_AND_PROMPTS = (
     ("mobilint/bert-base-uncased", "Hello I'm a [MASK] model."),
@@ -30,7 +33,9 @@ def pipe_and_prompt(request, revision, base_npu_params):
             revision=revision,
         )
     yield pipe, prompt
+    release_pipe(pipe)
     del pipe
+    gc.collect()
 
 
 def test_bert(pipe_and_prompt):

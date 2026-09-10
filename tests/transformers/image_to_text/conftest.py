@@ -8,6 +8,7 @@ import pytest
 from transformers import AutoProcessor, pipeline
 
 from tests.npu_backend_options import VisionTextNpuParams
+from tests.pipe_teardown import pipe_fixture
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -22,7 +23,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     metafunc.parametrize("pipe", model_paths, indirect=True, ids=list(model_paths), scope="module")
 
 
-@pytest.fixture(scope="module")
+@pipe_fixture()
 def pipe(
     request: pytest.FixtureRequest,
     revision: Optional[str],
@@ -37,7 +38,7 @@ def pipe(
         revision=revision,
     )
 
-    pipe = pipeline(
+    return pipeline(
         "image-text-to-text",
         model=model_path,
         processor=processor,
@@ -45,6 +46,3 @@ def pipe(
         revision=revision,
         model_kwargs=model_kwargs or None,
     )
-
-    yield pipe
-    del pipe
