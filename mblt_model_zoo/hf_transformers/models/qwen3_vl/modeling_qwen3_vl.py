@@ -127,8 +127,14 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
 
     def __init__(self, config: MobilintQwen3VLVisionConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
-        num_mxq_inputs = len(self.get_mxq_model().get_input_buffer_info())
-        self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(num_mxq_inputs)
+        mxq = self.get_mxq_model()
+        # ``get_model_variant_handle(0).get_model_input_shape()`` reports one
+        # entry per tensor input on every layout (batch builds fuse buffers so
+        # ``get_input_buffer_info()`` would collapse the count to 1). Vision
+        # isn't currently batched, but the variant handle stays correct across
+        # future refactors so we standardise on it here too.
+        input_shapes = mxq.get_model_variant_handle(0).get_model_input_shape()
+        self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(len(input_shapes))
         # Only the dynamic path consumes `pos_embed` and `rotary_pos_emb`
         # (via `_prepare_dynamic_npu_inputs`), and static Qwen3-VL Hub
         # checkpoints don't ship `visual.pos_embed.weight`. Skipping the
@@ -139,6 +145,15 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             self.num_grid_per_side = int(config.num_position_embeddings**0.5)
             head_dim = config.hidden_size // config.num_heads
             self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
+            # Different compile pipelines emit the three dynamic inputs in
+            # different orders (mobilint's shipped 8B: ``[rope, pos, folded]``;
+            # a tutorial recompile through ``VisionModelForQwen3VL``'s forward
+            # signature: ``[folded, pos, rope]``). The three role widths are
+            # distinct for every Qwen3-VL size shipped so far, so the compiled
+            # order can be recovered from the shapes reported by the variant
+            # handle. Doing this at load time keeps a single wheel compatible
+            # with either build without a per-artifact shim.
+            self._dynamic_input_slots = self._resolve_dynamic_input_slots(input_shapes, config)
 
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLVisionConfig, **kwargs: Any) -> "MobilintQwen3VLVisionModel":
@@ -151,7 +166,9 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         """Detect the vision dispatch path from the compiled MXQ input count.
 
         1-input builds take a single folded pixel tensor (static path);
-        3-input builds take ``[rope, pos, folded]`` (dynamic path). Any other
+        3-input builds take rope + pos + folded (dynamic path). The order the
+        three dynamic inputs appear in is recovered separately from the
+        shapes — see :meth:`_resolve_dynamic_input_slots`. Any other
         signature is a compile-side mismatch we cannot recover from — raise
         rather than guess so a wrong-shape input never reaches the NPU. The
         top-level ``config.dynamic_vision`` hint is reconciled against this
@@ -164,9 +181,63 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         if num_mxq_inputs == 3:
             return True
         raise ValueError(
-            f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic "
-            f"[rope, pos, folded]) inputs; got {num_mxq_inputs}."
+            f"Qwen3-VL vision MXQ must expose 1 (static) or 3 (dynamic rope + "
+            f"pos + folded) inputs; got {num_mxq_inputs}."
         )
+
+    @staticmethod
+    def _resolve_dynamic_input_slots(
+        input_shapes: list[tuple[int, ...]],
+        config: "MobilintQwen3VLVisionConfig",
+    ) -> dict[str, int]:
+        """Locate ``rope`` / ``pos`` / ``folded`` slots by matching last-axis widths.
+
+        Each role has a distinct width derived from the vision config:
+
+        * ``rope``  = ``2 * alignUp(head_dim, 64)`` — the runtime pe_size
+          layout emitted by :meth:`_build_vision_rotate_tensor` (the calib
+          side uses the unpadded ``2 * head_dim`` layout; the quantizer pads
+          each half to a 64-channel PE granularity).
+        * ``pos``   = ``config.hidden_size``.
+        * ``folded`` = ``in_channels * temporal_patch_size * patch_size**2``.
+
+        For every Qwen3-VL size shipped so far the three widths are pairwise
+        distinct, so the compiled input order can be recovered unambiguously
+        from ``handle.get_model_input_shape()``. If a future model or a
+        misconfigured MXQ collides, we raise a loud error at load time rather
+        than silently miswire an inference call.
+        """
+        if len(input_shapes) != 3:
+            raise ValueError(
+                f"Dynamic vision MXQ must expose exactly 3 inputs; got {len(input_shapes)}."
+            )
+        widths = [int(shape[-1]) for shape in input_shapes]
+
+        head_dim = int(config.hidden_size) // int(config.num_heads)
+        rope_width = 2 * (((head_dim + 63) // 64) * 64)
+        pos_width = int(config.hidden_size)
+        fold_in = int(config.in_channels) * int(config.temporal_patch_size) * (int(config.patch_size) ** 2)
+        expected = {"rope": rope_width, "pos": pos_width, "folded": fold_in}
+
+        if len(set(expected.values())) != len(expected):
+            raise ValueError(
+                f"Vision role widths collide for this config (rope={rope_width}, "
+                f"pos={pos_width}, folded={fold_in}); cannot recover input slot "
+                "assignment from shapes alone."
+            )
+
+        slots: dict[str, int] = {}
+        for role, width in expected.items():
+            matches = [idx for idx, w in enumerate(widths) if w == width]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Dynamic vision MXQ input widths {widths} do not match the "
+                    f"expected {role} width {width} derived from the vision config. "
+                    "The compiled MXQ was likely built against a different config; "
+                    "recompile it or load the matching config."
+                )
+            slots[role] = matches[0]
+        return slots
 
     @property
     def dtype(self) -> torch.dtype:
@@ -377,7 +448,14 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
         pos_np = pos_embeds.reshape(1, n, -1).to(torch.float32).cpu().numpy()
         rope_np = self._build_vision_rotate_tensor(grid_thw)
 
-        return [rope_np, pos_np, folded_np]
+        # Slot order was resolved at __init__ from the compiled MXQ's input
+        # shapes so mobilint's shipped [rope, pos, folded] and self-compiled
+        # builds with other orderings both dispatch correctly here.
+        payloads: list[np.ndarray | None] = [None, None, None]
+        payloads[self._dynamic_input_slots["rope"]] = rope_np
+        payloads[self._dynamic_input_slots["pos"]] = pos_np
+        payloads[self._dynamic_input_slots["folded"]] = folded_np
+        return cast(list[np.ndarray], payloads)
 
     def _build_vision_rotate_tensor(self, grid_thw: torch.Tensor) -> np.ndarray:
         """Build rotateTensor-format rotary for the vision encoder (matches MXQ peSize layout)."""

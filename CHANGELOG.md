@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 2.5.2
+
+### Fixed
+
+- Qwen3-VL dynamic vision MXQs compiled through
+  `qbcompiler.model_dict.parser.patcher.models.hf_models.qwen3vl.VisionModelForQwen3VL.forward`
+  now load correctly. The compiler places graph placeholders in dataflow order, so a
+  self-compiled dynamic MXQ exposes inputs as `[folded, pos, rope]`, while mobilint's shipped
+  8B build exposes them as `[rope, pos, folded]`. `MobilintQwen3VLVisionModel` previously
+  hard-coded the shipped order and rejected the self-compiled layout at runtime with
+  `qbruntime` "Input shape is invalid.". `_resolve_dynamic_input_slots` now recovers the
+  per-role slot index from the last-axis widths reported by the compiled variant handle at
+  load time, so both orderings dispatch to the correct MXQ slot with no per-artifact shim.
+  Load-time validation raises a clear error if the compiled input widths do not match the
+  vision config, catching compile/runtime config drift instead of silently miswiring an
+  inference call.
+
 ## 2.5.1
 
 ### Added
