@@ -277,9 +277,8 @@ env var) wins over the config field. Resolution order:
 3. The hardcoded default `(0, 2, 3, 1)` — backward compatibility for repos whose
    `config.json` predates the field.
 
-A malformed env var or a malformed `config.vision_output_order` (wrong length, not a
-permutation, non-integer entries) raises `ValueError` at the first vision inference so a typo
-or a packaging bug cannot silently degrade output quality.
+Malformed values raise `ValueError` at the first vision inference from either source rather
+than silently degrading output.
 
 ## Listing Available Models
 

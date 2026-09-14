@@ -72,25 +72,15 @@ Before editing, run `git status --short` and preserve unrelated work.
   `mblt_model_zoo/cli/tps_table.py`; update its schema and focused tests together.
 - Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Run batch
   text-generation and image-text-to-text suites through `scripts/test_transformers_matrix.py`.
-- Qwen3-VL dynamic releases accept video and per-prompt multi-image inputs; static releases must
-  reject them with the documented `NotImplementedError`. Call
-  `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model()` only for an MXQ override that differs
-  from the shipped `config.dynamic_vision` setting.
-- Qwen3-VL vision output order is a per-artifact property carried in
-  `MobilintQwen3VLVisionConfig.vision_output_order` (list of four indices for
-  `(merger, deepstack0, deepstack1, deepstack2)`). The four same-shape vision outputs cannot be
-  distinguished at runtime, so a recompile that permutes them must publish the new order in
-  `config.json`. Default `(0, 2, 3, 1)` matches shipped encoders and is applied when the field
-  is absent (backward compat). `MBLT_VISION_OUTPUT_ORDER=3,0,1,2` overrides the config field for
-  local recompile iteration. Malformed env or config value raises `ValueError`. See
-  `mblt_model_zoo/hf_transformers/README.md` "Vision output order".
-- Qwen3-VL 8B (regular and Batch16) is currently **unsupported**: the shipped MXQ hits
-  `NPU-only model output order mismatch` in `qbruntime` 1.4.0 / `mblt_npu` 0.1.0 and
-  access-violation-crashes at `qbruntime.Model.__init__::get_model_input_shape`. Do not
-  re-add `mobilint/Qwen3-VL-8B-Instruct(-Batch16)` to `MODEL_PATHS` or the batch/multi-image/
-  video test modules until the model repo ships an MXQ compatible with the current runtime.
-  Track the withdrawal in the release notes and lift it in the same change that restores the
-  test coverage.
+- Qwen3-VL: dynamic vs. static release contract, `sync_dynamic_vision_from_model()`, and the
+  per-artifact `vision_output_order` config live in `mblt_model_zoo/hf_transformers/README.md`
+  and the code docstrings under `mblt_model_zoo/hf_transformers/models/qwen3_vl/`. A recompile
+  that permutes the four same-shape vision outputs must publish the new order in `config.json`.
+- Qwen3-VL 8B (regular and Batch16) is currently **unsupported**. Do not re-add
+  `mobilint/Qwen3-VL-8B-Instruct(-Batch16)` to `MODEL_PATHS` or the batch/multi-image/video
+  test modules until the model repo ships an MXQ compatible with the current runtime. See
+  `CHANGELOG.md` 2.5.0 for the failure mode; lift the withdrawal in the same change that
+  restores the test coverage.
 - Follow `.agents/skills/mblt-transformers/SKILL.md` for EAGLE-3 speculative-decoding contracts:
   preserve Hugging Face sampling semantics, keep TPS metrics centralized in `tps_table.py`, and
   use same-process repeats when measuring MXQ backends.

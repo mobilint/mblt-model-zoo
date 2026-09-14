@@ -72,25 +72,14 @@ description: >-
 - Keep VLM non-batch tests under `tests/transformers/image_text_to_text/non_batch`. Keep batch
   text-generation and image-text-to-text suites in their `batch` directories and route both
   through serial Phase B in `scripts/test_transformers_matrix.py`.
-- Qwen3-VL release contract: `MobilintQwen3VLConfig.dynamic_vision` (top-level bool) pairs the
-  vision MXQ, text MXQ, and processor as one release. A dynamic-vision release accepts video and
-  per-prompt multi-image inputs. A static-vision release supports one image per prompt only and
-  raises `NotImplementedError` from `MobilintQwen3VLProcessor.__call__` for video or per-prompt
-  multi-image, with a message pointing the caller at a dynamic-vision release. Batched
-  single-image prompts are always allowed. `MobilintQwen3VLProcessor.from_pretrained` derives
-  the flag from `config.dynamic_vision` and syncs the video processor's mirror. Call
-  `MobilintQwen3VLProcessor.sync_dynamic_vision_from_model(model)` only when a runtime
-  `vision_mxq_path=` override diverges from the shipped config so the processor adopts the
-  detected `visual._uses_dynamic_vision` value.
-- Qwen3-VL video decoding requires the `torchcodec` dependency shipped with the `transformers`
-  extra; validate video paths only against a dynamic-vision release.
-- Qwen3-VL vision output order lives on `MobilintQwen3VLVisionConfig.vision_output_order`
-  (loaded from `config.json`, list of four indices for
-  `(merger, deepstack0, deepstack1, deepstack2)`). The vision MXQ's four outputs share one shape
-  so a recompile that permutes them must publish the new order in the config; a wrong mapping
-  raises nothing, it just degrades output. Default `(0, 2, 3, 1)` when the field is absent
-  (backward compat). `MBLT_VISION_OUTPUT_ORDER=3,0,1,2` (env) overrides the config field for
-  local iteration. Malformed env or config value raises `ValueError`.
+- Qwen3-VL release contract: `MobilintQwen3VLConfig.dynamic_vision` pairs the vision MXQ, text
+  MXQ, and processor. Dynamic releases accept video and per-prompt multi-image; static releases
+  reject both with `NotImplementedError`. Batched single-image prompts are always allowed.
+  `sync_dynamic_vision_from_model()` is only needed when a runtime `vision_mxq_path=` override
+  diverges from the shipped config. Full contract, override flow, and `vision_output_order`
+  handling (including `MBLT_VISION_OUTPUT_ORDER` env override) live in
+  `mblt_model_zoo/hf_transformers/README.md`; per-artifact resolution and validation logic
+  live in `mblt_model_zoo/hf_transformers/models/qwen3_vl/modeling_qwen3_vl.py::_resolve_vision_output_order`.
 - Preserve local style in `mblt_model_zoo/hf_transformers`; it is excluded from repository-wide
   Ruff checks.
 
