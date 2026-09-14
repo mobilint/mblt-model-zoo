@@ -915,6 +915,10 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         # ``get_input_buffer_info()`` entry (would misreport as 1). The variant
         # handle's ``get_model_input_shape()`` returns one shape per tensor
         # input regardless of buffer fusion.
+        # The 4/5-input split detection below assumes the Qwen3-VL family's
+        # three deepstack layers; ``_validate_split_deepstack_layout`` runs
+        # once ``num_deepstack_layers`` is populated by the composite model
+        # and fails loudly if the compiled MXQ and vision config disagree.
         num_mxq_inputs = self._get_num_mxq_inputs()
         self._uses_split_deepstack_input = num_mxq_inputs in (4, 5)
         if num_mxq_inputs in (3, 5):
@@ -942,6 +946,32 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         """
         handle = self.get_mxq_model().get_model_variant_handle(0)
         return len(handle.get_model_input_shape())
+
+    def _validate_split_deepstack_layout(self) -> None:
+        """Fail fast when a split MXQ signature disagrees with ``num_deepstack_layers``.
+
+        The 4/5-input split detection in ``__init__`` assumes exactly three
+        deepstack layers (the Qwen3-VL family shipped to date). ``__init__``
+        runs before the composite model populates ``num_deepstack_layers``
+        from ``config.vision_config.deepstack_visual_indexes``, so a mismatch
+        can only be checked once both values are known. Without this guard a
+        malformed pair would surface as a less legible qbruntime shape error
+        at first inference. The bundled path (2/3-input) is unambiguous and
+        skipped here.
+        """
+        if not self._uses_split_deepstack_input:
+            return
+        expected = 1 + self.num_deepstack_layers + int(self._uses_rope_input)
+        actual = self._get_num_mxq_inputs()
+        if actual != expected:
+            raise ValueError(
+                f"Qwen3-VL split-deepstack text MXQ input count mismatch: "
+                f"expected {expected} = 1 (inputs_embeds) + "
+                f"{self.num_deepstack_layers} (deepstack layers) + "
+                f"{int(self._uses_rope_input)} (rope), got {actual}. "
+                "The compiled MXQ and config.vision_config.deepstack_visual_indexes "
+                "must agree on the deepstack layer count."
+            )
 
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
@@ -1508,6 +1538,7 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self.visual = MobilintQwen3VLVisionModel._from_config(config.vision_config, _internal_call=True)
         self.language_model = MobilintQwen3VLTextModel._from_config(config.text_config, _internal_call=True)
         self.language_model.num_deepstack_layers = len(config.vision_config.deepstack_visual_indexes)
+        self.language_model._validate_split_deepstack_layout()
         self.rope_deltas = None
         self._reconcile_dynamic_vision(config, visual=self.visual, language_model=self.language_model)
 

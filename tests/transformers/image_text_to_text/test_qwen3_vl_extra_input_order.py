@@ -338,6 +338,94 @@ def test_single_batch_split_preserves_deepstack_layer_order() -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# ``_validate_split_deepstack_layout`` cross-checks the split-input count
+# against ``num_deepstack_layers`` once the composite model has populated it.
+# Guards against a compiled MXQ / vision-config layer-count disagreement
+# failing later as a less legible qbruntime shape error.
+# ---------------------------------------------------------------------------
+
+
+class _ValidationHarness(MobilintQwen3VLTextModel):
+    """Skip NPU init; drive ``_validate_split_deepstack_layout`` directly."""
+
+    def __init__(
+        self,
+        *,
+        num_mxq_inputs: int,
+        num_deepstack_layers: int,
+        uses_split_deepstack_input: bool,
+        uses_rope_input: bool,
+    ) -> None:
+        torch.nn.Module.__init__(self)
+        self._fake_mxq = _FakeMxq([(1, -1, 4)] * num_mxq_inputs)
+        self.num_deepstack_layers = num_deepstack_layers
+        self._uses_split_deepstack_input = uses_split_deepstack_input
+        self._uses_rope_input = uses_rope_input
+
+    def get_mxq_model(self) -> _FakeMxq:  # type: ignore[override]
+        return self._fake_mxq
+
+
+def test_validate_split_layout_accepts_matching_static() -> None:
+    """4-input MXQ + 3 deepstack layers + no rope: no error."""
+    harness = _ValidationHarness(
+        num_mxq_inputs=4,
+        num_deepstack_layers=3,
+        uses_split_deepstack_input=True,
+        uses_rope_input=False,
+    )
+    harness._validate_split_deepstack_layout()
+
+
+def test_validate_split_layout_accepts_matching_dynamic() -> None:
+    """5-input MXQ + 3 deepstack layers + rope: no error."""
+    harness = _ValidationHarness(
+        num_mxq_inputs=5,
+        num_deepstack_layers=3,
+        uses_split_deepstack_input=True,
+        uses_rope_input=True,
+    )
+    harness._validate_split_deepstack_layout()
+
+
+@pytest.mark.parametrize(
+    ("num_mxq_inputs", "num_deepstack_layers", "uses_rope_input"),
+    [
+        # Static split: expected 1 + N + 0; MXQ says 4 but config says 2 or 4 layers.
+        (4, 2, False),
+        (4, 4, False),
+        # Dynamic split: expected 1 + N + 1; MXQ says 5 but config says 2 or 4 layers.
+        (5, 2, True),
+        (5, 4, True),
+    ],
+)
+def test_validate_split_layout_rejects_mismatch(
+    num_mxq_inputs: int, num_deepstack_layers: int, uses_rope_input: bool
+) -> None:
+    """Split MXQ input count must equal 1 + num_deepstack_layers + int(uses_rope_input)."""
+    harness = _ValidationHarness(
+        num_mxq_inputs=num_mxq_inputs,
+        num_deepstack_layers=num_deepstack_layers,
+        uses_split_deepstack_input=True,
+        uses_rope_input=uses_rope_input,
+    )
+    with pytest.raises(ValueError, match="split-deepstack text MXQ input count mismatch"):
+        harness._validate_split_deepstack_layout()
+
+
+def test_validate_split_layout_skips_bundled_path() -> None:
+    """Bundled 2/3-input MXQs are unambiguous; validator returns without checking."""
+    # Deliberately inconsistent inputs would raise if the bundled path were checked.
+    harness = _ValidationHarness(
+        num_mxq_inputs=2,
+        num_deepstack_layers=999,
+        uses_split_deepstack_input=False,
+        uses_rope_input=False,
+    )
+    harness._validate_split_deepstack_layout()
+
+
 class _RecordingBatchMxq:
     """MXQ stub that captures every batched ``infer`` call for assertions."""
 
