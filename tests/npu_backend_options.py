@@ -504,8 +504,17 @@ def validate_batch_core_mode(
     suite_name: str,
     prefixes: tuple[str, ...] = (),
 ) -> None:
-    """Reject fixed multi-core CLI overrides unsupported by batched MXQ execution."""
-    options = ("", *prefixes)
+    """Reject unsupported modes after resolving the batched LLM backend's effective mode.
+
+    VLM suites may use a fixed shared mode for the vision backend while overriding the
+    batched text backend with ``--text-core-mode auto``. In that case only the effective
+    text mode participates in batch validation.
+    """
+    text_prefix_explicit = "text" in prefixes and option_value_was_provided(config, "text", "core_mode")
+    if text_prefix_explicit:
+        options = ("text", *(prefix for prefix in prefixes if prefix != "text"))
+    else:
+        options = ("", *prefixes)
     for prefix in options:
         opt_prefix = f"--{prefix}-" if prefix else "--"
         raw_core_mode = config.getoption(f"{opt_prefix}core-mode")

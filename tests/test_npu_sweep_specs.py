@@ -492,6 +492,35 @@ def test_single_only_core_mode_validation_rejects_global4():
         npu_backend_options.validate_batch_core_mode(config, suite_name="Batch text-generation tests")
 
 
+def test_vlm_batch_validation_uses_effective_text_mode():
+    config = _make_config(
+        shared_core_mode="global4",
+        text_core_mode="auto",
+        explicit_args=("--core-mode=global4", "--text-core-mode=auto"),
+    )
+
+    npu_backend_options.validate_batch_core_mode(
+        config,
+        suite_name="Batch image-text-to-text tests",
+        prefixes=("text",),
+    )
+
+
+def test_vlm_batch_validation_rejects_fixed_text_mode():
+    config = _make_config(
+        shared_core_mode="single",
+        text_core_mode="global4",
+        explicit_args=("--core-mode=single", "--text-core-mode=global4"),
+    )
+
+    with pytest.raises(pytest.UsageError, match="only supports --text-core-mode single or auto"):
+        npu_backend_options.validate_batch_core_mode(
+            config,
+            suite_name="Batch image-text-to-text tests",
+            prefixes=("text",),
+        )
+
+
 def test_transformers_collection_deselects_nondefault_models_by_default():
     config = _make_config()
     module = SimpleNamespace(
