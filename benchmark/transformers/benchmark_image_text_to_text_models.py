@@ -273,7 +273,11 @@ def _build_pipeline(
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
-    implicit_batch = batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False)
+    implicit_batch = (
+        batch_mode == "batch"
+        and _vlm_npu_options_enabled(args)
+        and not getattr(args, "_core_mode_explicit", False)
+    )
     if implicit_batch and text_core_mode is None:
         text_core_mode = config_text_core_mode or "auto"
     shared_core_mode = core_mode
@@ -340,6 +344,11 @@ def _resolve_vlm_subconfig_core_modes(args: argparse.Namespace) -> tuple[str | N
     )
 
 
+def _vlm_npu_options_enabled(args: argparse.Namespace) -> bool:
+    """Return whether this target accepts Mobilint-specific VLM overrides."""
+    return not getattr(args, "original_models", False) or bool(getattr(args, "mxq_dir", None))
+
+
 def _vlm_subconfig_core_mode_payload_fields(
     args: argparse.Namespace,
     core_mode: str | None,
@@ -349,7 +358,7 @@ def _vlm_subconfig_core_mode_payload_fields(
 ) -> dict[str, Any]:
     """Return the core_mode / vision_core_mode / text_core_mode fields for a VLM payload."""
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
-    if batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False):
+    if batch_mode == "batch" and _vlm_npu_options_enabled(args) and not getattr(args, "_core_mode_explicit", False):
         text_core_mode = text_core_mode or config_text_core_mode or core_mode or "auto"
         core_mode = None
     return {
@@ -1696,7 +1705,11 @@ def _run_sweep(args: argparse.Namespace) -> int:
             disable_npu_specific_args=disable_npu_specific_args,
             **core_mode_kwargs,
         ):
-            implicit_batch = target.batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False)
+            implicit_batch = (
+                target.batch_mode == "batch"
+                and _vlm_npu_options_enabled(args)
+                and not getattr(args, "_core_mode_explicit", False)
+            )
             effective_shared_mode = None if implicit_batch else core_mode
             effective_text_mode = text_core_mode
             if implicit_batch:
@@ -1883,7 +1896,11 @@ def _collect_vlm_run_targets(
             disable_npu_specific_args=disable_npu_specific_args,
             **core_mode_kwargs,
         ):
-            implicit_batch = target.batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False)
+            implicit_batch = (
+                target.batch_mode == "batch"
+                and _vlm_npu_options_enabled(args)
+                and not getattr(args, "_core_mode_explicit", False)
+            )
             effective_shared_mode = None if implicit_batch else core_mode
             effective_text_mode = text_core_mode
             if implicit_batch:

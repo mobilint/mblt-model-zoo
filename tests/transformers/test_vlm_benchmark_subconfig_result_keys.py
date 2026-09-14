@@ -338,6 +338,27 @@ def test_vlm_batch_payload_records_text_fallback_as_role_specific() -> None:
     }
 
 
+def test_vlm_original_batch_payload_drops_npu_fallback() -> None:
+    """Do not add Mobilint-only fallback kwargs back to an upstream VLM target."""
+    args = argparse.Namespace(
+        original_models=True,
+        mxq_dir=None,
+        vision_core_mode=None,
+        text_core_mode=None,
+        _core_mode_explicit=False,
+    )
+
+    assert vlm_bench._vlm_subconfig_core_mode_payload_fields(
+        args,
+        "auto",
+        batch_mode="batch",
+    ) == {
+        "core_mode": "auto",
+        "vision_core_mode": None,
+        "text_core_mode": None,
+    }
+
+
 def test_build_pipeline_explicit_batch_shared_mode_reaches_both_backends(monkeypatch) -> None:
     """An explicit shared mode remains an intentional Vision and text override."""
     args = _make_vlm_pipeline_args(
