@@ -755,7 +755,7 @@ TPS.
 ```bash
 python benchmark/transformers/search_npu_prefill_chunk_size.py \
   --mxq-dir ./local_mxq \
-  --core-modes single,global4,global8 \
+  --core-modes auto,single,global4,global8 \
   --prefill-lengths 1024,2048 \
   --chunk-candidates 128,256,512,1024,2048 \
   --decode-length 16 \

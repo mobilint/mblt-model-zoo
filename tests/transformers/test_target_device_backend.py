@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from mblt_model_zoo.hf_transformers.utils.configuration_utils import (
@@ -9,6 +11,7 @@ from mblt_model_zoo.hf_transformers.utils.configuration_utils import (
     MobilintEagle3ConfigMixin,
     MobilintEncoderDecoderConfigMixin,
 )
+from mblt_model_zoo.hf_transformers.utils.modeling_utils import MobilintModelMixin
 
 
 class _TargetDeviceConfig(MobilintConfigMixin):
@@ -205,6 +208,26 @@ def test_npu_prefill_chunk_size_kwarg_survives_from_dict() -> None:
         npu_prefill_chunk_size={"single": 64, "global4": 96, "global8": 192},
     )
     assert config.npu_prefill_chunk_size == {"single": 64, "global4": 96, "global8": 192}
+
+
+def test_auto_prefill_chunk_size_reuses_legacy_single_tuning() -> None:
+    """Preserve tuned legacy mappings when an auto entry is absent."""
+    model = SimpleNamespace(
+        config=SimpleNamespace(npu_prefill_chunk_size={"single": 64, "global8": 192}),
+        npu_backend=SimpleNamespace(core_mode="auto"),
+    )
+
+    assert MobilintModelMixin._get_config_npu_prefill_chunk_size(model) == 64
+
+
+def test_auto_prefill_chunk_size_prefers_explicit_auto_tuning() -> None:
+    """Use an explicitly published auto tuning result over the legacy fallback."""
+    model = SimpleNamespace(
+        config=SimpleNamespace(npu_prefill_chunk_size={"auto": 96, "single": 64}),
+        npu_backend=SimpleNamespace(core_mode="auto"),
+    )
+
+    assert MobilintModelMixin._get_config_npu_prefill_chunk_size(model) == 96
 
 
 def test_from_dict_buffers_target_device_across_topology_probe_hazard() -> None:

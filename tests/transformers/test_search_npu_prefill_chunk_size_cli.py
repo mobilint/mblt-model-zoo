@@ -39,3 +39,10 @@ def test_include_private_flag_defaults_false_and_forwards_to_list_default_model_
             chunk_search.main(cli_args)
 
     assert observed == [False, True]
+
+
+def test_prefill_chunk_search_accepts_auto_core_mode(tmp_path: Path) -> None:
+    """Allow tuning and publishing a chunk size for auto-scheduled MXQs."""
+    args = chunk_search.build_arg_parser().parse_args(["--core-modes", "auto", "--output-dir", str(tmp_path)])
+
+    assert args.core_modes == ["auto"]

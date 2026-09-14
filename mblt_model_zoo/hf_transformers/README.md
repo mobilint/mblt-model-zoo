@@ -451,7 +451,9 @@ To make it easier to test custom compiled models, we support overriding the inpu
 
   Overrides the prefill chunk size used by Mobilint text-generation backends.
   If omitted or set to `None`, the runtime reads `npu_prefill_chunk_size` from the model's `config.json`
-  using the current `core_mode` as the lookup key. If the config is missing or invalid, it falls back to `128`.
+  using the current `core_mode` as the lookup key. For `core_mode="auto"`, older mappings without an
+  `auto` entry reuse the tuned `single` value; an explicit `auto` entry takes precedence. If the config
+  is missing or invalid, it falls back to `128`.
 
 ### EAGLE-3 generate compatibility policy
 
