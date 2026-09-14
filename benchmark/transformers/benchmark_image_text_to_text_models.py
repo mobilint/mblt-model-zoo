@@ -273,12 +273,10 @@ def _build_pipeline(
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
-    if batch_mode == _BATCH_MODE_BATCH and text_core_mode is None:
+    if batch_mode == "batch" and text_core_mode is None:
         text_core_mode = config_text_core_mode
     shared_core_mode = core_mode
-    if batch_mode == _BATCH_MODE_BATCH and config_text_core_mode is not None and not getattr(
-        args, "_core_mode_explicit", False
-    ):
+    if batch_mode == "batch" and config_text_core_mode is not None and not getattr(args, "_core_mode_explicit", False):
         shared_core_mode = None
     model_kwargs = _apply_vlm_core_mode_model_kwargs(
         model_kwargs,
@@ -1684,11 +1682,12 @@ def _run_sweep(args: argparse.Namespace) -> int:
             getattr(args, "_raw_argv", []),
             target.batch_mode,
         )
+        core_mode_kwargs = {"config_core_mode": target.core_mode} if target.batch_mode == "batch" else {}
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
             disable_npu_specific_args=disable_npu_specific_args,
-            config_core_mode=target.core_mode,
+            **core_mode_kwargs,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
@@ -1858,11 +1857,12 @@ def _collect_vlm_run_targets(
     run_targets: list[tuple[str, str | None, str, str, str | None, str | None, str | None, int, str]] = []
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
+        core_mode_kwargs = {"config_core_mode": target.core_mode} if target.batch_mode == "batch" else {}
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
             disable_npu_specific_args=disable_npu_specific_args,
-            config_core_mode=target.core_mode,
+            **core_mode_kwargs,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(

@@ -678,10 +678,10 @@ def _candidate_core_modes(config: Any, *, task: str) -> Iterable[Any]:
     Yields:
         Candidate ``core_mode`` string values in priority order.
     """
-    yield getattr(config, "core_mode", None)
     text_config = getattr(config, "text_config", None)
-    if text_config is not None:
+    if _is_vlm_task(task) and text_config is not None:
         yield getattr(text_config, "core_mode", None)
+    yield getattr(config, "core_mode", None)
     if _is_vlm_task(task):
         vision_config = getattr(config, "vision_config", None)
         if vision_config is not None:
@@ -923,11 +923,11 @@ def _probe_config_core_mode(
         is_eagle3 = "eagle3" in model_type or any("eagle3" in str(item).lower() for item in architectures or [])
         if is_eagle3 or raw_payload.get("base_core_mode") is not None:
             candidates.append(raw_payload.get("base_core_mode"))
-        candidates.append(raw_payload.get("core_mode"))
         if _is_vlm_task(task):
             text_config = raw_payload.get("text_config")
             if isinstance(text_config, dict):
                 candidates.append(text_config.get("core_mode"))
+        candidates.append(raw_payload.get("core_mode"))
         for candidate in candidates:
             if isinstance(candidate, str) and candidate:
                 return candidate
@@ -1178,6 +1178,21 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     if override_path:
         probed_k = _probe_mxq_artifact_k(override_path)
     if probed_k is None:
+        if effective_core_mode == "auto" and flag_label == "default batch core_mode":
+            is_mobilint = _is_mobilint_model_target(
+                str(model),
+                trust_remote_code=trust_remote_code,
+                revision=revision,
+            )
+            effective_batch = _resolve_effective_batch_size_pre_launch(
+                args,
+                model=str(model),
+                task=getattr(args, "task", None),
+                trust_remote_code=trust_remote_code,
+                revision=revision,
+            )
+            if is_mobilint and effective_batch > 1:
+                setattr(args, args_attr, "auto")
         # No local artifact probe available: defer to post-launch, where
         # ``k_per_model`` is authoritative. ``config.max_batch_size`` is the
         # aggregate ``N * K`` under sw-batch and cannot classify K alone.
