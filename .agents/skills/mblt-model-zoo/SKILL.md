@@ -26,13 +26,9 @@ description: >-
    through `_rebuild_backend_for_target_device` so cross-board overrides switch the destination
    backend class atomically.
 5. Keep TPS output driven by `mblt_model_zoo/cli/tps_table.py`. Preserve local conventions in
-   `hf_transformers` and `MeloTTS`. Qwen3-VL 8B (regular and Batch16) is unsupported until the
-   shipped MXQ matches the current runtime's expected output ordering. Qwen3-VL vision output
-   order is a per-artifact property carried in `MobilintQwen3VLVisionConfig.vision_output_order`
-   (`config.json`); default `(merger, deepstack0, deepstack1, deepstack2) = (0, 2, 3, 1)` covers
-   shipped encoders. Recompiles that permute the four same-shape vision outputs must publish
-   the new order in `config.json`; `MBLT_VISION_OUTPUT_ORDER=3,0,1,2` (env) overrides it for
-   local iteration. See `mblt_model_zoo/hf_transformers/README.md` "Vision output order".
+   `hf_transformers` and `MeloTTS`. Qwen3-VL has its own release/vision-output contracts — see
+   the `mblt-transformers` skill and `mblt_model_zoo/hf_transformers/README.md` before touching
+   the `qwen3_vl` module.
 6. Start with focused tests. Report unavailable hardware, downloads, and optional extras instead of
    weakening validation. For docs, run `git diff --check`.
 7. When package ownership, public API, CLI bridges, or runtime dependencies change significantly,
