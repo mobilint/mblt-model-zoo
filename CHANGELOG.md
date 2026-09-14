@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 2.5.3
+
+### Fixed
+
+- Qwen3-VL text MXQs compiled with per-layer split DeepStack inputs now load. Non-batch text
+  builds may additionally expose **4-input** `[inputs_embeds, deepstack_0, deepstack_1,
+  deepstack_2]` (static) or **5-input** `[inputs_embeds, deepstack_0, deepstack_1, deepstack_2,
+  rope]` (dynamic) layouts alongside the existing 2/3-input bundled layouts.
+  `MobilintQwen3VLTextModel` detects the split signature from the compiled variant handle and
+  dispatches per-layer `(1, chunk_len, hidden)` chunks in `_do_infer`.
+  `MobilintQwen3VLModel.__init__` cross-checks the MXQ input count against
+  `config.vision_config.deepstack_visual_indexes` via `_validate_split_deepstack_layout`, so a
+  MXQ/config layer-count mismatch raises a legible `ValueError` at load rather than a downstream
+  `qbruntime` shape error at first inference. Batched deepstack MXQs continue to use the 3-input
+  bundled layout only. The split-input classifier assumes the Qwen3-VL family's three DeepStack
+  layers; a future variant with a different `deepstack_visual_indexes` length must extend
+  `MobilintQwen3VLTextModel._BUNDLED_MXQ_INPUT_COUNTS`, `_SPLIT_MXQ_INPUT_COUNTS`, and
+  `_ROPE_MXQ_INPUT_COUNTS`.
+
 ## 2.5.2
 
 ### Fixed
