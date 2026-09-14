@@ -410,9 +410,10 @@ def resolve_batch_core_mode(model_id: str, revision: str | None, *, text_config:
     if not isinstance(payload, dict):
         return "auto"
 
-    candidates: list[Any] = [payload.get("core_mode")]
+    candidates: list[Any] = []
     if text_config and isinstance(payload.get("text_config"), dict):
         candidates.append(payload["text_config"].get("core_mode"))
+    candidates.append(payload.get("core_mode"))
     valid_modes = {"auto", "single", "multi", "global4", "global8"}
     for candidate in candidates:
         if isinstance(candidate, str) and candidate.strip().casefold() in valid_modes:

@@ -3233,6 +3233,11 @@ def test_text_iter_batch_core_mode_cli_overrides_config() -> None:
     [
         ({"core_mode": "global4"}, "text-generation", "global4"),
         ({"text_config": {"core_mode": "auto"}}, "image-text-to-text", "auto"),
+        (
+            {"core_mode": "single", "text_config": {"core_mode": "auto"}},
+            "image-text-to-text",
+            "auto",
+        ),
         ({"max_batch_size": 16}, "text-generation", None),
     ],
 )

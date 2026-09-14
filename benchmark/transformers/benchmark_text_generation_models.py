@@ -724,11 +724,12 @@ def _normalize_config_core_mode(value: Any) -> str | None:
 
 def _extract_config_core_mode(payload: dict[str, Any], *, task: str) -> str | None:
     """Extract the LLM core mode from model config metadata."""
-    candidates: list[Any] = [payload.get("core_mode")]
+    candidates: list[Any] = []
     if task == "image-text-to-text":
         text_config = payload.get("text_config")
         if isinstance(text_config, dict):
             candidates.append(text_config.get("core_mode"))
+    candidates.append(payload.get("core_mode"))
     for candidate in candidates:
         core_mode = _normalize_config_core_mode(candidate)
         if core_mode is not None:

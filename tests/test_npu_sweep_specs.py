@@ -469,6 +469,15 @@ def test_single_only_core_mode_validation_allows_default_all():
     npu_backend_options.validate_batch_core_mode(config, suite_name="Batch text-generation tests")
 
 
+def test_resolve_batch_core_mode_prefers_vlm_text_config(tmp_path):
+    (tmp_path / "config.json").write_text(
+        '{"core_mode": "single", "text_config": {"core_mode": "auto"}}',
+        encoding="utf-8",
+    )
+
+    assert npu_backend_options.resolve_batch_core_mode(str(tmp_path), None, text_config=True) == "auto"
+
+
 def test_single_only_core_mode_validation_rejects_global4():
     config = _make_config(shared_core_mode="global4", explicit_args=("--core-mode=global4",))
 

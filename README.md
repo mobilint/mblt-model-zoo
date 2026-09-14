@@ -199,10 +199,8 @@ mblt-model-zoo predict \
   --dev-no 0
 ```
 
-Use `--core-mode auto`, `single`, `multi`, `global4`, or `global8` to select the NPU execution mode. `auto`
-is intended for MXQs compiled with qb Compiler 1.3 or newer; qb Runtime 1.4 or newer selects the
-appropriate core mode per layer. For
-manual placement, pass semicolon-separated values with `--target-cores`, such as `0:0;0:1`, or
+Use the supported core modes for the delegated Vision CLI. For manual placement, pass
+semicolon-separated values with `--target-cores`, such as `0:0;0:1`, or
 `--target-clusters`, such as `0;1`. Full vision CLI details and supported model names are available
 in [mblt_model_zoo/vision/README.md](mblt_model_zoo/vision/README.md).
 

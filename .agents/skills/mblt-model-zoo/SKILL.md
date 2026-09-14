@@ -25,6 +25,9 @@ description: >-
    (top-level, `encoder_`, `decoder_`, `base_`, `draft_`, `fc_`, and the Qwen3-ASR facade)
    through `_rebuild_backend_for_target_device` so cross-board overrides switch the destination
    backend class atomically.
+   `core_mode="auto"` is the default fallback when model config omits a mode. It requires MXQs
+   compiled with `qbcompiler>=1.3.0` and `mobilint-qb-runtime>=1.4.0`, and lets Batch LLM
+   artifacts choose `single`, `global4`, or `global8` per layer.
 5. Keep TPS output driven by `mblt_model_zoo/cli/tps_table.py`. Preserve local conventions in
    `hf_transformers` and `MeloTTS`. Qwen3-VL has its own release/vision-output contracts — see
    the `mblt-transformers` skill and `mblt_model_zoo/hf_transformers/README.md` before touching
