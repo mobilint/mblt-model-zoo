@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.5.4
+
+### Fixed
+
+- Qwen3-VL dynamic releases now preserve the external RoPE runtime helper through
+  `transformers.from_pretrained()` meta/state-dict loading. Dynamic vision packages can now
+  load and generate without losing the helper required by the 5-input split DeepStack decoder.
+
 ## 2.5.3
 
 ### Fixed

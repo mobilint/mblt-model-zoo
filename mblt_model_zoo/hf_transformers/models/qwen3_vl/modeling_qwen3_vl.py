@@ -853,7 +853,10 @@ class MobilintQwen3VLRotaryEmbedding(nn.Module):
         max_pos = int(pos_np.max()) + 1
         if self.position_table is None or max_pos > self.max_seq_len:
             self.max_seq_len = max(max_pos, self.max_seq_len)
-            self._build_position_table(device=self.inv_freq.device)
+            table_device = self.inv_freq.device
+            if table_device.type == "meta":
+                table_device = torch.device("cpu")
+            self._build_position_table(device=table_device)
 
         result = np.empty((batch_size, seq_len, self.peSize), dtype=np.float32)
         for b in range(batch_size):
@@ -880,9 +883,10 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     _uses_split_deepstack_input: bool = False
     _uses_rope_input: bool = False
     _num_mxq_inputs: int = 0
-    # Class-level default so type checkers keep the ``Optional`` narrowing on
-    # the ``else`` branch of the runtime ``if self._uses_rope_input`` split.
-    rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = None
+    # The upstream Qwen3-VL base class owns ``rotary_emb`` as a checkpoint
+    # module. Mobilint's external-RoPE helper has no checkpoint state, so it
+    # must not be registered as an ``nn.Module`` child.
+    _mobilint_rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = None
 
     # Recognized text-MXQ tensor-input counts. Split-input signatures assume the
     # Qwen3-VL family's three DeepStack layers (all currently shipped variants).
@@ -949,11 +953,26 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         self._uses_split_deepstack_input, self._uses_rope_input = self._classify_mxq_signature(
             num_mxq_inputs, max_batch_size=configured_batch_size
         )
-        if self._uses_rope_input:
-            self.rotary_emb = MobilintQwen3VLRotaryEmbedding(config)
-        else:
-            self.rotary_emb = None
+        # This helper contains only runtime-generated data (its buffer is
+        # non-persistent and the position table is a NumPy cache). Registering
+        # it as a child makes Transformers' pretrained loading lifecycle
+        # treat it like checkpoint state; after meta materialization the child
+        # slot can be left as ``None`` because the packaged safetensors file
+        # has no corresponding key. Keep it as a plain attribute instead.
+        self._set_runtime_rotary_embedding(config)
         self.num_deepstack_layers = 0
+
+    def _set_runtime_rotary_embedding(self, config: MobilintQwen3VLTextConfig) -> None:
+        """Store the external-RoPE helper outside the Transformers module tree.
+
+        The helper has no checkpoint state. Registering it as an ``nn.Module``
+        child makes Hugging Face's meta/state-dict loading lifecycle replace
+        its empty child slot with ``None`` when loading the packaged weights.
+        A plain attribute keeps the runtime helper alive without changing the
+        checkpoint contract.
+        """
+        rotary_emb = MobilintQwen3VLRotaryEmbedding(config) if self._uses_rope_input else None
+        object.__setattr__(self, "_mobilint_rotary_emb", rotary_emb)
 
     @classmethod
     def _classify_mxq_signature(
@@ -1152,8 +1171,8 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             if position_ids.ndim == 3 and position_ids.shape[0] == 4:
                 position_ids = position_ids[1:]
 
-            assert self.rotary_emb is not None
-            position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
+            assert self._mobilint_rotary_emb is not None
+            position_embeddings = self._mobilint_rotary_emb(inputs_embeds, position_ids)
         else:
             position_embeddings = None
 
