@@ -40,7 +40,11 @@ def vision_text_npu_params(
     Text backend settings come from the CLI or the model config. Vision-side settings remain
     whatever the CLI supplied.
     """
-    validate_batch_core_mode(request.config, suite_name="Batch image-text-to-text tests")
+    validate_batch_core_mode(
+        request.config,
+        suite_name="Batch image-text-to-text tests",
+        prefixes=("text",),
+    )
 
     vision_kwargs, _ = collect_npu_kwargs(request.config, "vision")
     shared_kwargs, _ = collect_npu_kwargs(request.config, "")
