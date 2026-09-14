@@ -47,6 +47,16 @@ def _stub_autoconfig(monkeypatch, config) -> None:
     """Patch ``AutoConfig.from_pretrained`` so resolvers see ``config`` without any load."""
     auto_config = importlib.import_module("transformers").AutoConfig
     monkeypatch.setattr(auto_config, "from_pretrained", lambda *a, **kw: config)
+    payload = {}
+    for name in ("core_mode", "base_core_mode"):
+        value = getattr(config, name, None)
+        if value is not None:
+            payload[name] = value
+    for name in ("text_config", "vision_config"):
+        subconfig = getattr(config, name, None)
+        if subconfig is not None:
+            payload[name] = {"core_mode": getattr(subconfig, "core_mode", None)}
+    monkeypatch.setattr(tps_cli, "_read_raw_config_payload", lambda *a, **kw: payload)
 
 
 def _parse_tps_measure(*extra: str) -> argparse.Namespace:

@@ -904,7 +904,7 @@ def _probe_config_core_mode(
     revision: str | None,
     task: str,
 ) -> str | None:
-    """Return the config-declared ``core_mode``, or ``None`` when unavailable.
+    """Return the config-declared LLM core mode, or ``None`` when unavailable.
 
     Pre-launch analogue of the ``backend.core_mode`` fallback used by
     :func:`_verify_batched_mxq_core_mode_post_launch`. Loads
@@ -915,6 +915,24 @@ def _probe_config_core_mode(
     falls through — matching :func:`_probe_config_max_batch_size`'s
     fault-tolerance discipline.
     """
+    raw_payload = _read_raw_config_payload(model, revision=revision)
+    if raw_payload is not None:
+        candidates: list[Any] = []
+        model_type = str(raw_payload.get("model_type", "") or "").lower()
+        architectures = raw_payload.get("architectures")
+        is_eagle3 = "eagle3" in model_type or any("eagle3" in str(item).lower() for item in architectures or [])
+        if is_eagle3 or raw_payload.get("base_core_mode") is not None:
+            candidates.append(raw_payload.get("base_core_mode"))
+        candidates.append(raw_payload.get("core_mode"))
+        if _is_vlm_task(task):
+            text_config = raw_payload.get("text_config")
+            if isinstance(text_config, dict):
+                candidates.append(text_config.get("core_mode"))
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        return None
+
     try:
         from transformers import AutoConfig
     except Exception:
@@ -930,6 +948,23 @@ def _probe_config_core_mode(
         if isinstance(candidate, str) and candidate:
             return candidate
     return None
+
+
+def _read_raw_config_payload(model: str, *, revision: str | None) -> dict[str, Any] | None:
+    """Read raw config metadata without hydrating library defaults."""
+    local_path = Path(model).expanduser()
+    config_path = local_path / "config.json" if local_path.is_dir() else None
+    try:
+        if config_path is not None and config_path.is_file():
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        else:
+            from huggingface_hub import hf_hub_download
+
+            downloaded = hf_hub_download(repo_id=model, filename="config.json", revision=revision)
+            payload = json.loads(Path(downloaded).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _probe_mxq_artifact_k(mxq_path: str) -> int | None:

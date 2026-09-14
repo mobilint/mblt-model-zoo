@@ -433,7 +433,7 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1, "non_batch")]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, None, 1, "non_batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -498,7 +498,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, None, 4, "batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -583,7 +583,7 @@ def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, None, 4, "batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
