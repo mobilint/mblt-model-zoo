@@ -473,7 +473,7 @@ def test_single_only_core_mode_validation_allows_default_all():
 def test_single_only_core_mode_validation_rejects_global4():
     config = _make_config(shared_core_mode="global4", explicit_args=("--core-mode=global4",))
 
-    with pytest.raises(pytest.UsageError, match="only supports --core-mode single"):
+    with pytest.raises(pytest.UsageError, match="only supports --core-mode single or auto"):
         npu_backend_options.validate_single_only_core_mode(config, suite_name="Batch text-generation tests")
 
 
@@ -531,8 +531,7 @@ def test_transformers_collection_keeps_nondefault_models_with_keyword_filter():
 
 def test_transformers_collection_keeps_explicit_nondefault_nodeid_selection():
     selected_nodeid = (
-        "tests/transformers/image_text_to_text/test_qwen3_vl.py::"
-        "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]"
+        "tests/transformers/image_text_to_text/test_qwen3_vl.py::test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]"
     )
     config = _make_config(
         explicit_args=(

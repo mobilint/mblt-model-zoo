@@ -354,12 +354,13 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
 
   Selects how the NPU runtime schedules work across cores/clusters.
   Supported values:
+  - `auto`: let qb Runtime select the core mode for each layer (for MXQs compiled with qb Compiler 1.3 or newer)
   - `single`: run on specific cores (use `target_cores`)
   - `multi`: run on one or more clusters (use `target_clusters`)
   - `global4`: global scheduling across 4 cores (use `target_clusters`)
   - `global8`: global scheduling across all cores (requires all clusters)
 
-  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while others may only support the default stored in the model config.
+  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while newer MXQs can use `auto` to select among those modes per layer. `auto` requires qb Compiler 1.3 or newer and qb Runtime 1.4 or newer.
   For general inference and benchmarks in this repository, the default runtime mode is `global8` unless you explicitly override it. Regulus variants (`regulus-ra`, `regulus-rb`, `regulus-ra-usb`, `regulus-rb-usb`) expose only one cluster and one core, so only `single` and `auto` are valid on those boards; `multi`, `global4`, and `global8` apply to `aries-rb` only.
 
 - `target_cores` (`list[str]`)
@@ -522,7 +523,7 @@ mblt-model-zoo chat mobilint/Llama-3.2-1B-Instruct --trust-remote-code
 ## TPS Benchmark CLI
 
 If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run TPS benchmarks from the CLI.
-The TPS CLI supports `--core-mode single`, `--core-mode global4`, and `--core-mode global8`. The
+The TPS CLI supports `--core-mode auto`, `--core-mode single`, `--core-mode global4`, and `--core-mode global8`. The
 `--core-mode all` sweep alias is available in the benchmark scripts, not in the TPS CLI.
 
 ### Text-generation TPS

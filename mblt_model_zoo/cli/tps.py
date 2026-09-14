@@ -1073,10 +1073,14 @@ class _BatchedMxqGuardContext:
 
 
 def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
-    """Reject ``--core-mode global4/global8/multi`` on a batched MXQ.
+    """Reject fixed multi-core modes on a batched MXQ.
 
-    Batched LLM execution (compiled MXQ batch axis ``K > 1``) only supports
-    ``--core-mode single`` at runtime; see ``mblt_model_zoo/hf_transformers/README.md``
+    ``auto`` is intentionally allowed for newer batch MXQs whose compiled
+    graph selects single/global4/global8 per layer.
+
+    Batched LLM execution (compiled MXQ batch axis ``K > 1``) supports
+    ``--core-mode single`` and ``--core-mode auto`` at runtime; see
+    ``mblt_model_zoo/hf_transformers/README.md`` for the MXQ/compiler contract.
     and the matching enforcement in ``benchmark/transformers/benchmark_text_generation_models.py``
     and ``benchmark_image_text_to_text_models.py``. This runs before pipeline
     construction so users see the same friendly ``SystemExit`` the benchmark
@@ -1145,7 +1149,7 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
         return
     if effective_core_mode is not None and effective_core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
         raise SystemExit(
-            f"tps: batched MXQ only supports --core-mode single "
+            f"tps: batched MXQ only supports --core-mode single or auto "
             f"(model={args.model!r}, artifact K={probed_k}, "
             f"{flag_label}={effective_core_mode!r})"
         )
@@ -1258,7 +1262,7 @@ def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Name
     if not isinstance(k, int) or k <= 1:
         return
     raise SystemExit(
-        f"tps: batched MXQ only supports --core-mode single "
+        f"tps: batched MXQ only supports --core-mode single or auto "
         f"(model={ctx.model!r}, artifact K={k}, "
         f"{flag_label}={effective_core_mode!r})"
     )
@@ -4842,7 +4846,7 @@ def add_tps_parser(
             "--core-mode",
             choices=list(_CORE_MODE_CHOICES),
             default=None,
-            help="NPU core mode (single, global4, global8). EAGLE-3 prefix options take precedence.",
+            help="NPU core mode (auto, single, global4, global8). EAGLE-3 prefix options take precedence.",
         )
         p.add_argument(
             "--target-cores",
@@ -4882,7 +4886,7 @@ def add_tps_parser(
                 f"--{prefix}-core-mode",
                 choices=list(_CORE_MODE_CHOICES),
                 default=None,
-                help=f"{prefix} NPU core mode (single, global4, global8)",
+                help=f"{prefix} NPU core mode (auto, single, global4, global8)",
             )
             p.add_argument(
                 f"--{prefix}-target-cores",

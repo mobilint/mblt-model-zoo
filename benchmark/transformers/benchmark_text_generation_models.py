@@ -1786,9 +1786,9 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     args._device_backend_requested = args.device_backend
     args._core_mode_explicit = core_mode_explicit
     if _is_batch_mode(args.batch_mode):
-        if core_mode_explicit and args.core_mode != "single":
-            raise SystemExit("batch benchmark only supports --core-mode single")
-        args.core_mode = "single"
+        if core_mode_explicit and args.core_mode not in {"single", "auto"}:
+            raise SystemExit("batch benchmark only supports --core-mode single or auto")
+        args.core_mode = args.core_mode if core_mode_explicit else "single"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,

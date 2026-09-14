@@ -466,6 +466,8 @@ def build_eagle3_npu_params(
 def validate_single_only_core_mode(config: pytest.Config, *, suite_name: str) -> None:
     """Reject unsupported core-mode overrides for suites that only support single-core mode."""
     raw_core_mode = config.getoption("--core-mode")
-    if raw_core_mode in {None, "", "all", "single"}:
+    if raw_core_mode in {None, "", "all", "single", "auto"}:
         return
-    raise pytest.UsageError(f"{suite_name} only supports --core-mode single. Received --core-mode={raw_core_mode!r}.")
+    raise pytest.UsageError(
+        f"{suite_name} only supports --core-mode single or auto. Received --core-mode={raw_core_mode!r}."
+    )

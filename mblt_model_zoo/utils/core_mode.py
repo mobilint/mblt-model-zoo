@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
-CoreMode = Literal["single", "multi", "global4", "global8"]
+CoreMode = Literal["auto", "single", "multi", "global4", "global8"]
 
 
 def normalize_core_mode(core_mode: str) -> CoreMode:
@@ -19,7 +19,7 @@ def normalize_core_mode(core_mode: str) -> CoreMode:
     Raises:
         ValueError: If ``core_mode`` is not one of the supported values.
     """
-    valid_modes = {"single", "multi", "global4", "global8"}
+    valid_modes = {"auto", "single", "multi", "global4", "global8"}
     if core_mode not in valid_modes:
         raise ValueError(f"Invalid core mode '{core_mode}'. Expected one of {sorted(valid_modes)}.")
     return cast(CoreMode, core_mode)

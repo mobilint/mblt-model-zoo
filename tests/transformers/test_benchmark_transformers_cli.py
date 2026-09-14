@@ -300,8 +300,19 @@ def test_benchmark_batch_rejects_non_single_core_mode(module, command) -> None:
     """Verify explicit non-single core modes are rejected for batch LLM benchmarks."""
     args = module._build_arg_parser().parse_args([command, "--batch", "--core-mode", "global8"])
 
-    with pytest.raises(SystemExit, match="only supports --core-mode single"):
+    with pytest.raises(SystemExit, match="only supports --core-mode single or auto"):
         module._resolve_runtime_defaults(args, [command, "--batch", "--core-mode", "global8"])
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_batch_accepts_auto_core_mode(module, command) -> None:
+    """Verify batch LLM benchmarks preserve the explicit auto mode."""
+    args = module._build_arg_parser().parse_args([command, "--batch", "--core-mode", "auto"])
+
+    module._resolve_runtime_defaults(args, [command, "--batch", "--core-mode", "auto"])
+
+    assert args.core_mode == "auto"
 
 
 def test_text_target_filtering_by_batch_mode(monkeypatch) -> None:

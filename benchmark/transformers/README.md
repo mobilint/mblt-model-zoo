@@ -58,9 +58,10 @@ inference and model downloads.
     `1/4`; explicit user-provided values are preserved. `--decode-window` is not scaled.
   - Batch TPS is total throughput across the batch: prefill tokens and decoded tokens are summed
     across all batch rows before dividing by elapsed time.
-  - `--batch` forces `--core-mode single`. Passing `--core-mode global4` or `--core-mode global8`
-    together with `--batch` raises `SystemExit: batch benchmark only supports --core-mode single`.
-    Batched LLM execution does not support other core modes; see
+  - `--batch` defaults to `--core-mode single`; `--core-mode auto` is also supported for MXQs
+    compiled with qb Compiler 1.3 or newer. Passing fixed `global4` or `global8` together with
+    `--batch` raises `SystemExit: batch benchmark only supports --core-mode single or auto`.
+    Batched LLM execution supports `single` and `auto`; see
     `mblt_model_zoo/hf_transformers/README.md` for the runtime rationale.
   - `--batch` also disables the default `single`-mode `target_cores` injection. Batch runs rely on
     the model config's `target_cores` unless you pass `--target-cores` (or `--target-clusters`)
@@ -853,7 +854,7 @@ python benchmark/transformers/update_npu_prefill_chunk_size_configs.py \
 
 ### NPU/GPU Execution and Device Metrics
 
-- `--core-mode`: One of `single`, `global4`, `global8`, or `all`. `all` is a benchmark-script sweep alias, not a model runtime core mode. `--batch` forces `single` and rejects other values with `SystemExit: batch benchmark only supports --core-mode single`; batch runs also skip the default `single`-mode `target_cores` injection, so either rely on the model config's `target_cores` or pass `--target-cores`/`--target-clusters` explicitly.
+- `--core-mode`: One of `auto`, `single`, `global4`, `global8`, or `all`. `all` is a benchmark-script sweep alias, not a model runtime core mode. `--batch` defaults to `single`, also accepts `auto` for per-layer scheduled MXQs, and rejects fixed multi-core values with `SystemExit: batch benchmark only supports --core-mode single or auto`; batch runs also skip the default `single`-mode `target_cores` injection, so either rely on the model config's `target_cores` or pass `--target-cores`/`--target-clusters` explicitly.
 - `--target-cores`: Explicit target cores for the CLI. Canonical fully-qualified form is
   `"d:c:k"` per entry (e.g., `"0:0:0;0:0:1;1:0:0"`); the legacy 2-part `"c:k"` form (e.g.,
   `"0:0;0:1;0:2;0:3"`) is still accepted and the missing device prefix is filled from `--dev-no`

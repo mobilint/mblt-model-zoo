@@ -199,7 +199,9 @@ mblt-model-zoo predict \
   --dev-no 0
 ```
 
-Use `--core-mode single`, `multi`, `global4`, or `global8` to select the NPU execution mode. For
+Use `--core-mode auto`, `single`, `multi`, `global4`, or `global8` to select the NPU execution mode. `auto`
+is intended for MXQs compiled with qb Compiler 1.3 or newer; qb Runtime 1.4 or newer selects the
+appropriate core mode per layer. For
 manual placement, pass semicolon-separated values with `--target-cores`, such as `0:0;0:1`, or
 `--target-clusters`, such as `0;1`. Full vision CLI details and supported model names are available
 in [mblt_model_zoo/vision/README.md](mblt_model_zoo/vision/README.md).
@@ -243,9 +245,10 @@ Model slots that dispatch in parallel across the target device set (see `--dev-n
 `target_cores` / bare-int `target_clusters` are silently upgraded to the canonical form on load,
 so no explicit migration step is required.
 
-Batched MXQ execution (`K > 1`) is only supported under `--core-mode single`; other core modes
+Batched MXQ execution (`K > 1`) supports `--core-mode single` and, for per-layer scheduled MXQs,
+`--core-mode auto`; other fixed core modes
 are rejected at runtime. The text-generation and VLM benchmark scripts enforce this by exiting
-with `SystemExit("batch benchmark only supports --core-mode single")` when a batch run is paired
+with `SystemExit("batch benchmark only supports --core-mode single or auto")` when a batch run is paired
 with any other explicit `--core-mode`, and the batch text-generation test suite is likewise
 pinned to `single` (see [`mblt_model_zoo/hf_transformers/README.md`](mblt_model_zoo/hf_transformers/README.md)).
 (In batch mode the benchmark scripts also skip their non-batch default `--target-cores 0:0`
