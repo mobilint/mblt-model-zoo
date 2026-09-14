@@ -277,6 +277,35 @@ env var) wins over the config field. Resolution order:
 3. The hardcoded default `(0, 2, 3, 1)` — backward compatibility for repos whose
    `config.json` predates the field.
 
+#### Text MXQ DeepStack input layouts
+
+The Qwen3-VL text MXQ is compiled with rank-3 inputs; the DeepStack feed can be **bundled** into
+one `(num_layers, -1, hidden)` tensor or **split** into one `(1, -1, hidden)` tensor per DeepStack
+layer. `MobilintQwen3VLTextModel` detects the layout from the compiled variant handle's
+`get_model_input_shape()` at load time (batch builds fuse tensors into a single
+`get_input_buffer_info()` entry, so the buffer-info count would misreport as 1 — the variant
+handle is authoritative).
+
+Supported layouts (`max_batch_size == 1` unless noted):
+
+| Signature | Inputs | Rope | Notes |
+| --- | --- | --- | --- |
+| Bundled static | `[inputs_embeds, deepstack]` | baked | 2B/4B W8 non-batch. MRoPE baked into the compiled decoder. |
+| Bundled dynamic | `[inputs_embeds, deepstack, rope]` | external | Non-batch dynamic; rope threaded via `MobilintQwen3VLRotaryEmbedding`. |
+| Split static | `[inputs_embeds, deepstack_0, deepstack_1, deepstack_2]` | baked | Non-batch static, one input per DeepStack layer. |
+| Split dynamic | `[inputs_embeds, deepstack_0, deepstack_1, deepstack_2, rope]` | external | Non-batch dynamic, split-per-layer + rope. |
+| Batched | `[inputs_embeds, rope, deepstack]` | external | `max_batch_size > 1` (e.g. Batch16 W8). Split-per-layer is not supported. |
+
+The non-batch and batched 3-input orders differ (`[inputs, deepstack, rope]` vs `[inputs, rope,
+deepstack]`); each dispatch honors its compiled signature. The split-input classifier assumes the
+Qwen3-VL family's three DeepStack layers. On composite construction,
+`MobilintQwen3VLModel.__init__` calls `_validate_split_deepstack_layout` to cross-check the split
+input count against `config.vision_config.deepstack_visual_indexes`; a MXQ/config layer-count
+disagreement raises a legible `ValueError` at load rather than surfacing later as a downstream
+`qbruntime` shape error. When a variant with a different DeepStack layer count ships, extend
+`MobilintQwen3VLTextModel._BUNDLED_MXQ_INPUT_COUNTS`, `_SPLIT_MXQ_INPUT_COUNTS`, and
+`_ROPE_MXQ_INPUT_COUNTS` in the same change.
+
 Malformed values raise `ValueError` at the first vision inference from either source rather
 than silently degrading output.
 

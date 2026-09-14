@@ -879,6 +879,17 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     _batched_input_expand_dims = False
     _uses_split_deepstack_input = False
 
+    # Recognized text-MXQ tensor-input counts. Split-input signatures assume the
+    # Qwen3-VL family's three DeepStack layers (all currently shipped variants).
+    # A future variant with a different ``deepstack_visual_indexes`` length must
+    # extend these tuples; ``_validate_split_deepstack_layout`` additionally
+    # cross-checks the config-vs-MXQ layer count at composite init so a stale
+    # bound raises a legible error rather than a downstream qbruntime shape
+    # error at first inference.
+    _BUNDLED_MXQ_INPUT_COUNTS = (2, 3)  # 2: static, 3: dynamic non-batch or batched
+    _SPLIT_MXQ_INPUT_COUNTS = (4, 5)    # 4: split/static, 5: split/dynamic (non-batch)
+    _ROPE_MXQ_INPUT_COUNTS = (3, 5)     # signatures that carry an external rope tensor
+
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLTextConfig, **kwargs: Any) -> "MobilintQwen3VLTextModel":
         """Allow Transformers AutoModel submodule construction for composite Qwen3-VL models."""
@@ -920,19 +931,25 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         # once ``num_deepstack_layers`` is populated by the composite model
         # and fails loudly if the compiled MXQ and vision config disagree.
         num_mxq_inputs = self._get_num_mxq_inputs()
-        self._uses_split_deepstack_input = num_mxq_inputs in (4, 5)
-        if num_mxq_inputs in (3, 5):
-            self._uses_rope_input = True
-            self.rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = MobilintQwen3VLRotaryEmbedding(config)
-        elif num_mxq_inputs in (2, 4):
-            self._uses_rope_input = False
-            self.rotary_emb = None
-        else:
+        self._num_mxq_inputs = num_mxq_inputs
+        known_input_counts = self._BUNDLED_MXQ_INPUT_COUNTS + self._SPLIT_MXQ_INPUT_COUNTS
+        if num_mxq_inputs not in known_input_counts:
             raise ValueError(
-                "Qwen3-VL text MXQ must expose 2/3 bundled inputs, 4/5 "
-                "split inputs, or 3 batch inputs; "
-                f"got {num_mxq_inputs}."
+                "Qwen3-VL text MXQ input count is not recognized: "
+                f"got {num_mxq_inputs}. Supported layouts (assume the Qwen3-VL "
+                "family's three DeepStack layers): "
+                "2 (bundled static non-batch), 3 (bundled dynamic non-batch OR "
+                "3-input batched), 4 (split static non-batch), 5 (split dynamic "
+                "non-batch). Extend ``_BUNDLED_MXQ_INPUT_COUNTS``, "
+                "``_SPLIT_MXQ_INPUT_COUNTS``, and ``_ROPE_MXQ_INPUT_COUNTS`` when "
+                "a variant with a different DeepStack layer count ships."
             )
+        self._uses_split_deepstack_input = num_mxq_inputs in self._SPLIT_MXQ_INPUT_COUNTS
+        self._uses_rope_input = num_mxq_inputs in self._ROPE_MXQ_INPUT_COUNTS
+        if self._uses_rope_input:
+            self.rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = MobilintQwen3VLRotaryEmbedding(config)
+        else:
+            self.rotary_emb = None
         self.num_deepstack_layers = 0
 
     def _get_num_mxq_inputs(self) -> int:
@@ -962,7 +979,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if not self._uses_split_deepstack_input:
             return
         expected = 1 + self.num_deepstack_layers + int(self._uses_rope_input)
-        actual = self._get_num_mxq_inputs()
+        actual = self._num_mxq_inputs
         if actual != expected:
             raise ValueError(
                 f"Qwen3-VL split-deepstack text MXQ input count mismatch: "

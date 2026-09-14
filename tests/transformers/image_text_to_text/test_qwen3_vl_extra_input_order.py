@@ -359,6 +359,7 @@ class _ValidationHarness(MobilintQwen3VLTextModel):
     ) -> None:
         torch.nn.Module.__init__(self)
         self._fake_mxq = _FakeMxq([(1, -1, 4)] * num_mxq_inputs)
+        self._num_mxq_inputs = num_mxq_inputs
         self.num_deepstack_layers = num_deepstack_layers
         self._uses_split_deepstack_input = uses_split_deepstack_input
         self._uses_rope_input = uses_rope_input
