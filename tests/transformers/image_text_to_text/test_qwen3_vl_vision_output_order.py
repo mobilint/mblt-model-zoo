@@ -12,7 +12,9 @@ picks it up across the supported Transformers versions.
 import logging as _logging
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
+import torch
 
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
     skip_if_transformers_lacks_qwen3_vl_support,
@@ -51,6 +53,23 @@ class TestResolution:
         monkeypatch.delenv(VISION_OUTPUT_ORDER_ENV, raising=False)
         m = _model(vision_output_order=None)
         assert m._resolve_vision_output_order() == DEFAULT_VISION_OUTPUT_ORDER
+
+    def test_reorder_preserves_merger_and_deepstack_layer_order(self, monkeypatch):
+        """Artifact order ``[ds0, ds1, ds2, merger]`` maps to semantic order."""
+        monkeypatch.delenv(VISION_OUTPUT_ORDER_ENV, raising=False)
+        m = _model(vision_output_order=[3, 0, 1, 2])
+        encoder_outputs = [
+            np.full((1, 2, 4), fill_value, dtype=np.float32)
+            for fill_value in (10.0, 20.0, 30.0, 40.0)
+        ]
+
+        image_embeds, deepstack_embeds = m._reorder_encoder_outputs(
+            encoder_outputs,
+            device=torch.device("cpu"),
+        )
+
+        assert torch.all(image_embeds == 40.0)
+        assert [float(layer[0, 0]) for layer in deepstack_embeds] == [10.0, 20.0, 30.0]
 
 
 class TestConfigLoudFailure:

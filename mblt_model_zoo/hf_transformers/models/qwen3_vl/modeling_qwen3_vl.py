@@ -872,11 +872,12 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     config: MobilintQwen3VLTextConfig
     input_modalities = ("text",)
 
-    # Qwen3-VL text MXQ is compiled with rank-3 inputs:
-    # ``(1, -1, hidden)`` for inputs_embeds and ``(num_layers, -1, hidden)``
-    # for deepstack. The shared batched helper must not add the extra
+    # Qwen3-VL text MXQ is compiled with rank-3 inputs. Deepstack is either one
+    # bundled ``(num_layers, -1, hidden)`` input or one ``(1, -1, hidden)``
+    # input per layer. The shared batched helper must not add the extra
     # ``expand_dims(axis=1)`` it uses for LLM-style ``(1, 1, seq, hidden)``.
     _batched_input_expand_dims = False
+    _uses_split_deepstack_input = False
 
     @classmethod
     def _from_config(cls, config: MobilintQwen3VLTextConfig, **kwargs: Any) -> "MobilintQwen3VLTextModel":
@@ -890,7 +891,8 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         # Supported compiled layouts (detected from the MXQ variant handle,
         # not ``max_batch_size``):
-        #   * Non-batch (``max_batch_size == 1``): 2 or 3 inputs.
+        #   * Non-batch (``max_batch_size == 1``): bundled 2/3-input layouts or
+        #     split 4/5-input layouts.
         #     - 2-input ``[inputs_embeds (1,-1,H), deepstack (num_layers,-1,H)]``
         #       — legacy/static: MRoPE is baked into the compiled model, no
         #       external rope tensor is fed. Used by the 2B/4B W8 builds.
@@ -898,6 +900,10 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         #       rope (1,-1,peSize)]`` — dynamic: rope table produced by
         #       :class:`MobilintQwen3VLRotaryEmbedding` and threaded through
         #       ``_do_infer``. Used by the 8B W8 build shipped on HF Hub.
+        #     - 4-input ``[inputs_embeds, deepstack_0, deepstack_1,
+        #       deepstack_2]`` — split/static.
+        #     - 5-input ``[inputs_embeds, deepstack_0, deepstack_1,
+        #       deepstack_2, rope]`` — split/dynamic.
         #   * Batch (``max_batch_size > 1``, e.g. the Batch16 W8 build):
         #     3-input ``[inputs_embeds (1,-1,H), rope (1,-1,peSize),
         #     deepstack (num_layers,-1,H)]`` only — the legacy 2-input batch
@@ -910,17 +916,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         # handle's ``get_model_input_shape()`` returns one shape per tensor
         # input regardless of buffer fusion.
         num_mxq_inputs = self._get_num_mxq_inputs()
-        if num_mxq_inputs == 3:
+        self._uses_split_deepstack_input = num_mxq_inputs in (4, 5)
+        if num_mxq_inputs in (3, 5):
             self._uses_rope_input = True
             self.rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = MobilintQwen3VLRotaryEmbedding(config)
-        elif num_mxq_inputs == 2:
+        elif num_mxq_inputs in (2, 4):
             self._uses_rope_input = False
             self.rotary_emb = None
         else:
             raise ValueError(
-                f"Qwen3-VL text MXQ must expose 2 (non-batch: [inputs, deepstack]) or "
-                f"3 (non-batch: [inputs, deepstack, rope] / batch: [inputs, rope, "
-                f"deepstack]) inputs; got {num_mxq_inputs}."
+                "Qwen3-VL text MXQ must expose 2/3 bundled inputs, 4/5 "
+                "split inputs, or 3 batch inputs; "
+                f"got {num_mxq_inputs}."
             )
         self.num_deepstack_layers = 0
 
@@ -1188,19 +1195,30 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                     dtype=torch.float32,
                 ).cpu().numpy()
 
-            # Non-batch (``max_batch_size == 1``) builds ship two MXQ layouts:
+            # Non-batch (``max_batch_size == 1``) builds support bundled and
+            # split deepstack MXQ layouts:
             #   * 2-input ``[inputs, deepstack]`` — legacy/static: MRoPE baked
             #     into the compiled model, no rope tensor is fed.
             #   * 3-input ``[inputs, deepstack, rope]`` — dynamic: rope threaded
-            #     externally as ``(1, seq, peSize)`` after deepstack. Note this
-            #     order differs from the batched build's ``[inputs, rope,
-            #     deepstack]`` (see ``_llm_forward_batch_deepstack``); the
-            #     compiled signatures are independent so we honor each path's
-            #     actual input layout rather than unifying them.
-            infer_inputs = [inputs_chunk, deepstack_chunk]
+            #     externally as ``(1, seq, peSize)`` after deepstack.
+            #   * 4-input ``[inputs, deepstack_0, deepstack_1, deepstack_2]`` —
+            #     split/static.
+            #   * 5-input ``[inputs, deepstack_0, deepstack_1, deepstack_2,
+            #     rope]`` — split/dynamic.
+            # The non-batch order differs from the batched build's ``[inputs,
+            # rope, deepstack]`` (see ``_llm_forward_batch_deepstack``); each
+            # dispatch honors its compiled signature.
+            infer_inputs = [inputs_chunk]
+            if self._uses_split_deepstack_input:
+                infer_inputs.extend(
+                    deepstack_chunk[layer_idx : layer_idx + 1]
+                    for layer_idx in range(self.num_deepstack_layers)
+                )
+            else:
+                infer_inputs.append(deepstack_chunk)
             if self._uses_rope_input:
                 assert position_embeddings is not None, (
-                    "position_embeddings must be provided for the 3-input Qwen3-VL text MXQ."
+                    "position_embeddings must be provided for a Qwen3-VL text MXQ with a rope input."
                 )
                 infer_inputs.append(position_embeddings[:, start_index:end_index, :])
 

@@ -3,12 +3,16 @@
 Supported compiled layouts (each dispatch honors its own layout — the
 3-input orders below are intentionally different):
 
-* Non-batch (``max_batch_size == 1``): 2 or 3 inputs.
+* Non-batch (``max_batch_size == 1``): 2/3-input bundled layouts or
+  4/5-input split layouts.
   * 2-input ``[inputs (1,-1,H), deepstack (num_layers,-1,H)]`` — legacy/static
     (2B/4B W8): MRoPE baked into the compiled model, no rope tensor is fed.
   * 3-input ``[inputs (1,-1,H), deepstack (num_layers,-1,H), rope (1,-1,peSize)]``
     — dynamic (8B W8 shipped on HF Hub): rope threaded through ``_do_infer``
     after deepstack.
+  * 4-input ``[inputs, deepstack_0, deepstack_1, deepstack_2]`` — split/static.
+  * 5-input ``[inputs, deepstack_0, deepstack_1, deepstack_2, rope]`` —
+    split/dynamic.
 * Batch (``max_batch_size > 1``, current Batch16 W8): 3 inputs
   ``[inputs (1,-1,H), rope (1,-1,peSize), deepstack (num_layers,-1,H)]``.
   Legacy 2-input batch MXQ is no longer supported (hard-failed).
@@ -79,6 +83,10 @@ class _BareTextModel(MobilintQwen3VLTextModel):
         ([(1, -1, 4096), (3, -1, 4096), (1, -1, 256)], 3),
         # Batch16 W8: [inputs, rope, deepstack] — different rope position
         ([(1, -1, 4096), (1, -1, 256), (3, -1, 4096)], 3),
+        # Non-batch split/static: [inputs, deepstack_0, deepstack_1, deepstack_2]
+        ([(1, -1, 4096)] * 4, 4),
+        # Non-batch split/dynamic: split/static inputs followed by rope
+        ([(1, -1, 4096)] * 4 + [(1, -1, 256)], 5),
     ],
 )
 def test_get_num_mxq_inputs_reads_variant_handle(shapes: list[tuple[int, ...]], expected_count: int) -> None:
@@ -111,6 +119,7 @@ class _RecordingSingleBatchMxq:
         self.calls.append(
             {
                 "shapes": [tuple(np.asarray(x).shape) for x in inputs],
+                "inputs": [np.asarray(x).copy() for x in inputs],
                 "cache_size": int(cache_size),
             }
         )
@@ -121,6 +130,7 @@ class _RecordingSingleBatchMxq:
 def _make_single_batch_model(
     *,
     uses_rope_input: bool,
+    uses_split_deepstack_input: bool = False,
     hidden_size: int = 4,
     num_deepstack_layers: int = 3,
 ) -> MobilintQwen3VLTextModel:
@@ -140,6 +150,7 @@ def _make_single_batch_model(
     model.num_deepstack_layers = num_deepstack_layers
     model.npu_time = None
     model._uses_rope_input = uses_rope_input
+    model._uses_split_deepstack_input = uses_split_deepstack_input
     model.rotary_emb = None
     model._recording_mxq = mxq
     return model
@@ -222,6 +233,109 @@ def test_single_batch_pack_3input_emits_deepstack_then_rope() -> None:
     assert shapes[1] == (num_layers, seq_len, hidden_size)
     # position 2: rope — (1, seq_len, peSize)
     assert shapes[2] == (1, seq_len, peSize)
+
+
+def test_single_batch_pack_4input_splits_deepstack_layers() -> None:
+    """Non-batch split/static MXQ emits one input per deepstack layer."""
+    hidden_size = 4
+    num_layers = 3
+    seq_len = 2
+
+    model = _make_single_batch_model(
+        uses_rope_input=False,
+        uses_split_deepstack_input=True,
+        hidden_size=hidden_size,
+        num_deepstack_layers=num_layers,
+    )
+    inputs_embeds = torch.zeros((1, seq_len, hidden_size), dtype=torch.float32)
+
+    model.llm_forward(
+        inputs_embeds=inputs_embeds,
+        deepstack_visual_embeds=None,
+        visual_pos_masks=None,
+        past_key_values=None,
+        cache_position=torch.arange(seq_len),
+        npu_prefill_chunk_size=seq_len,
+        count_npu_time=False,
+        logits_to_keep=1,
+        position_embeddings=None,
+    )
+
+    mxq: _RecordingSingleBatchMxq = model._recording_mxq  # type: ignore[assignment]
+    shapes = mxq.calls[0]["shapes"]
+    assert shapes == [(1, seq_len, hidden_size)] * 4
+
+
+def test_single_batch_pack_5input_splits_deepstack_then_appends_rope() -> None:
+    """Non-batch split/dynamic MXQ appends rope after three deepstack inputs."""
+    hidden_size = 4
+    peSize = 8
+    num_layers = 3
+    seq_len = 2
+
+    model = _make_single_batch_model(
+        uses_rope_input=True,
+        uses_split_deepstack_input=True,
+        hidden_size=hidden_size,
+        num_deepstack_layers=num_layers,
+    )
+    inputs_embeds = torch.zeros((1, seq_len, hidden_size), dtype=torch.float32)
+    position_embeddings = np.zeros((1, seq_len, peSize), dtype=np.float32)
+
+    model.llm_forward(
+        inputs_embeds=inputs_embeds,
+        deepstack_visual_embeds=None,
+        visual_pos_masks=None,
+        past_key_values=None,
+        cache_position=torch.arange(seq_len),
+        npu_prefill_chunk_size=seq_len,
+        count_npu_time=False,
+        logits_to_keep=1,
+        position_embeddings=position_embeddings,
+    )
+
+    mxq: _RecordingSingleBatchMxq = model._recording_mxq  # type: ignore[assignment]
+    shapes = mxq.calls[0]["shapes"]
+    assert shapes == [(1, seq_len, hidden_size)] * 4 + [(1, seq_len, peSize)]
+
+
+def test_single_batch_split_preserves_deepstack_layer_order() -> None:
+    """Encoder deepstack layers must reach decoder slots 0, 1, 2 unchanged."""
+    hidden_size = 2
+    seq_len = 3
+    model = _make_single_batch_model(
+        uses_rope_input=False,
+        uses_split_deepstack_input=True,
+        hidden_size=hidden_size,
+        num_deepstack_layers=3,
+    )
+    inputs_embeds = torch.zeros((1, seq_len, hidden_size), dtype=torch.float32)
+    visual_pos_masks = torch.tensor([[True, False, True]])
+    deepstack_visual_embeds = [
+        torch.full((2, hidden_size), fill_value, dtype=torch.float32)
+        for fill_value in (10.0, 20.0, 30.0)
+    ]
+
+    model.llm_forward(
+        inputs_embeds=inputs_embeds,
+        deepstack_visual_embeds=deepstack_visual_embeds,
+        visual_pos_masks=visual_pos_masks,
+        past_key_values=None,
+        cache_position=torch.arange(seq_len),
+        npu_prefill_chunk_size=seq_len,
+        count_npu_time=False,
+        logits_to_keep=1,
+        position_embeddings=None,
+    )
+
+    mxq: _RecordingSingleBatchMxq = model._recording_mxq  # type: ignore[assignment]
+    infer_inputs = mxq.calls[0]["inputs"]
+    assert len(infer_inputs) == 4
+    for layer_idx, fill_value in enumerate((10.0, 20.0, 30.0), start=1):
+        np.testing.assert_array_equal(
+            infer_inputs[layer_idx][0, :, 0],
+            np.array([fill_value, 0.0, fill_value], dtype=np.float32),
+        )
 
 
 class _RecordingBatchMxq:
