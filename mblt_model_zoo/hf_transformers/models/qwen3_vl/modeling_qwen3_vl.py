@@ -877,7 +877,12 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     # input per layer. The shared batched helper must not add the extra
     # ``expand_dims(axis=1)`` it uses for LLM-style ``(1, 1, seq, hidden)``.
     _batched_input_expand_dims = False
-    _uses_split_deepstack_input = False
+    _uses_split_deepstack_input: bool = False
+    _uses_rope_input: bool = False
+    _num_mxq_inputs: int = 0
+    # Class-level default so type checkers keep the ``Optional`` narrowing on
+    # the ``else`` branch of the runtime ``if self._uses_rope_input`` split.
+    rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = None
 
     # Recognized text-MXQ tensor-input counts. Split-input signatures assume the
     # Qwen3-VL family's three DeepStack layers (all currently shipped variants).
@@ -886,6 +891,14 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     # cross-checks the config-vs-MXQ layer count at composite init so a stale
     # bound raises a legible error rather than a downstream qbruntime shape
     # error at first inference.
+    #
+    # TODO(qwen3-vl-explicit-layout): input count alone cannot disambiguate
+    # split-vs-bundled once a variant with a different ``deepstack_visual_indexes``
+    # length ships. For example, 5 inputs could mean ``split/dynamic + 3 layers``
+    # (today) *or* ``split/static + 4 layers`` in a hypothetical future release.
+    # When that lands, replace the count-based classifier with an explicit layout
+    # key sourced from ``config.text_config`` (e.g. ``mxq_input_layout``) or MXQ
+    # variant-handle metadata, rather than extending these tuples further.
     _BUNDLED_MXQ_INPUT_COUNTS = (2, 3)  # 2: static, 3: dynamic non-batch or batched
     _SPLIT_MXQ_INPUT_COUNTS = (4, 5)    # 4: split/static, 5: split/dynamic (non-batch)
     _ROPE_MXQ_INPUT_COUNTS = (3, 5)     # signatures that carry an external rope tensor
@@ -932,25 +945,52 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         # and fails loudly if the compiled MXQ and vision config disagree.
         num_mxq_inputs = self._get_num_mxq_inputs()
         self._num_mxq_inputs = num_mxq_inputs
-        known_input_counts = self._BUNDLED_MXQ_INPUT_COUNTS + self._SPLIT_MXQ_INPUT_COUNTS
+        configured_batch_size = int(getattr(config, "max_batch_size", 1) or 1)
+        self._uses_split_deepstack_input, self._uses_rope_input = self._classify_mxq_signature(
+            num_mxq_inputs, max_batch_size=configured_batch_size
+        )
+        if self._uses_rope_input:
+            self.rotary_emb = MobilintQwen3VLRotaryEmbedding(config)
+        else:
+            self.rotary_emb = None
+        self.num_deepstack_layers = 0
+
+    @classmethod
+    def _classify_mxq_signature(
+        cls, num_mxq_inputs: int, *, max_batch_size: int
+    ) -> tuple[bool, bool]:
+        """Map a compiled MXQ input count to ``(uses_split, uses_rope)`` or raise.
+
+        The classifier also enforces the batched-path invariant: the batched
+        deepstack dispatch (``_llm_forward_batch_deepstack``) hard-codes the
+        3-input bundled ``[inputs, rope, deepstack]`` layout, so a split MXQ
+        (4/5 inputs) with ``max_batch_size > 1`` is unsupported. Rejecting at
+        load time yields a legible ValueError instead of a downstream
+        qbruntime shape mismatch at first infer.
+        """
+        known_input_counts = cls._BUNDLED_MXQ_INPUT_COUNTS + cls._SPLIT_MXQ_INPUT_COUNTS
         if num_mxq_inputs not in known_input_counts:
             raise ValueError(
                 "Qwen3-VL text MXQ input count is not recognized: "
-                f"got {num_mxq_inputs}. Supported layouts (assume the Qwen3-VL "
-                "family's three DeepStack layers): "
+                f"got {num_mxq_inputs}. Supported layouts (assumes three "
+                "DeepStack layers, current Qwen3-VL family): "
                 "2 (bundled static non-batch), 3 (bundled dynamic non-batch OR "
                 "3-input batched), 4 (split static non-batch), 5 (split dynamic "
                 "non-batch). Extend ``_BUNDLED_MXQ_INPUT_COUNTS``, "
                 "``_SPLIT_MXQ_INPUT_COUNTS``, and ``_ROPE_MXQ_INPUT_COUNTS`` when "
                 "a variant with a different DeepStack layer count ships."
             )
-        self._uses_split_deepstack_input = num_mxq_inputs in self._SPLIT_MXQ_INPUT_COUNTS
-        self._uses_rope_input = num_mxq_inputs in self._ROPE_MXQ_INPUT_COUNTS
-        if self._uses_rope_input:
-            self.rotary_emb: Optional[MobilintQwen3VLRotaryEmbedding] = MobilintQwen3VLRotaryEmbedding(config)
-        else:
-            self.rotary_emb = None
-        self.num_deepstack_layers = 0
+        uses_split = num_mxq_inputs in cls._SPLIT_MXQ_INPUT_COUNTS
+        uses_rope = num_mxq_inputs in cls._ROPE_MXQ_INPUT_COUNTS
+        if uses_split and max_batch_size > 1:
+            raise ValueError(
+                "Qwen3-VL split-deepstack text MXQ (per-layer inputs) is only "
+                f"supported for max_batch_size == 1; got max_batch_size="
+                f"{max_batch_size} with a {num_mxq_inputs}-input MXQ. Batched "
+                "builds must use the 3-input bundled layout "
+                "[inputs_embeds, rope, deepstack]."
+            )
+        return uses_split, uses_rope
 
     def _get_num_mxq_inputs(self) -> int:
         """Return the compiled MXQ's true input tensor count.
@@ -973,8 +1013,10 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         from ``config.vision_config.deepstack_visual_indexes``, so a mismatch
         can only be checked once both values are known. Without this guard a
         malformed pair would surface as a less legible qbruntime shape error
-        at first inference. The bundled path (2/3-input) is unambiguous and
-        skipped here.
+        at first inference. The bundled path (2/3-input) is unambiguous
+        *from a layer-count standpoint* — the batched 3-input signature
+        differs from the non-batch 3-input in tensor order, not layer count —
+        so this validator skips it.
         """
         if not self._uses_split_deepstack_input:
             return
