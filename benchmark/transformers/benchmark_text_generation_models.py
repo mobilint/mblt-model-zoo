@@ -1761,15 +1761,20 @@ def _iter_core_modes_for_target(
     *,
     disable_npu_specific_args: bool,
     config_core_mode: str | None = None,
+    batch_core_mode_override: str | None = None,
 ) -> list[str | None]:
     """Return core modes using CLI, config metadata, and the batch fallback in that order."""
     if disable_npu_specific_args:
         return [None]
     if _is_batch_mode(batch_mode):
-        if getattr(args, "_core_mode_explicit", False):
-            return [args.core_mode]
+        if batch_core_mode_override is not None:
+            effective_core_mode = batch_core_mode_override
+        elif getattr(args, "_core_mode_explicit", False):
+            effective_core_mode = args.core_mode
+        else:
+            effective_core_mode = config_core_mode or "auto"
         try:
-            return [_validate_batch_core_mode_common(config_core_mode or "auto")]
+            return [_validate_batch_core_mode_common(effective_core_mode)]
         except ValueError as exc:
             raise SystemExit("batch benchmark only supports --core-mode single or auto") from exc
     return list(_iter_core_modes_common(args.core_mode))

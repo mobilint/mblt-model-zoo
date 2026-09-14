@@ -1699,6 +1699,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
             target.batch_mode,
         )
         core_mode_kwargs = {"config_core_mode": target.core_mode} if target.batch_mode == "batch" else {}
+        if target.batch_mode == "batch" and text_core_mode is not None:
+            core_mode_kwargs["batch_core_mode_override"] = text_core_mode
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
@@ -1890,6 +1892,8 @@ def _collect_vlm_run_targets(
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
         core_mode_kwargs = {"config_core_mode": target.core_mode} if target.batch_mode == "batch" else {}
+        if target.batch_mode == "batch" and text_core_mode is not None:
+            core_mode_kwargs["batch_core_mode_override"] = text_core_mode
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,

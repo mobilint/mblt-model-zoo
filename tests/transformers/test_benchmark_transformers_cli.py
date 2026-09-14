@@ -3239,6 +3239,29 @@ def test_text_iter_batch_core_mode_cli_overrides_config() -> None:
     ) == ["single"]
 
 
+def test_text_iter_batch_core_mode_text_override_is_effective() -> None:
+    """Validate the VLM text override instead of the shared/config mode."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--batch"])
+    text_bench._resolve_runtime_defaults(args, ["measure", "--batch"])
+
+    assert text_bench._iter_core_modes_for_target(
+        args,
+        "batch",
+        disable_npu_specific_args=False,
+        config_core_mode="global8",
+        batch_core_mode_override="single",
+    ) == ["single"]
+
+    with pytest.raises(SystemExit, match="batch benchmark only supports --core-mode single or auto"):
+        text_bench._iter_core_modes_for_target(
+            args,
+            "batch",
+            disable_npu_specific_args=False,
+            config_core_mode="single",
+            batch_core_mode_override="global4",
+        )
+
+
 @pytest.mark.parametrize(
     ("payload", "task", "expected"),
     [
