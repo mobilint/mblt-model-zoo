@@ -496,11 +496,20 @@ def build_eagle3_npu_params(
     return Eagle3NpuParams(model=model_kwargs)
 
 
-def validate_batch_core_mode(config: pytest.Config, *, suite_name: str) -> None:
+def validate_batch_core_mode(
+    config: pytest.Config,
+    *,
+    suite_name: str,
+    prefixes: tuple[str, ...] = (),
+) -> None:
     """Reject fixed multi-core CLI overrides unsupported by batched MXQ execution."""
-    raw_core_mode = config.getoption("--core-mode")
-    if raw_core_mode in {None, "", "all", "single", "auto"}:
-        return
-    raise pytest.UsageError(
-        f"{suite_name} only supports --core-mode single or auto. Received --core-mode={raw_core_mode!r}."
-    )
+    options = ("", *prefixes)
+    for prefix in options:
+        opt_prefix = f"--{prefix}-" if prefix else "--"
+        raw_core_mode = config.getoption(f"{opt_prefix}core-mode")
+        if raw_core_mode in {None, "", "all", "single", "auto"}:
+            continue
+        flag = f"{opt_prefix}core-mode"
+        raise pytest.UsageError(
+            f"{suite_name} only supports {flag} single or auto. Received {flag}={raw_core_mode!r}."
+        )

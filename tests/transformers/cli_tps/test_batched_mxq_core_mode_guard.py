@@ -282,8 +282,8 @@ def test_measure_defers_when_core_mode_unspecified_on_batched_mxq(monkeypatch):
 
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    # Missing config mode falls back to auto before post-launch verification.
-    assert args.core_mode == "auto"
+    # Unknown K is deferred; fallback is applied only after a batched artifact is confirmed.
+    assert args.core_mode is None
 
 
 def test_measure_defers_on_non_batch_config(monkeypatch):

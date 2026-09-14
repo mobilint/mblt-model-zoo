@@ -1171,8 +1171,6 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     if not _is_vlm_task(getattr(args, "task", None)):
         is_eagle3 = _detect_eagle3_model(model, trust_remote_code=trust_remote_code, revision=revision)
     effective_core_mode, flag_label, args_attr = _resolve_effective_llm_core_mode(args, is_eagle3=is_eagle3)
-    if effective_core_mode == "auto" and getattr(args, args_attr, None) is None:
-        setattr(args, args_attr, "auto")
     if effective_core_mode == "single":
         return
     override_path = _select_llm_mxq_override(args)
@@ -1192,6 +1190,8 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
         return
     if probed_k <= 1:
         return
+    if effective_core_mode == "auto" and getattr(args, args_attr, None) is None:
+        setattr(args, args_attr, "auto")
     if effective_core_mode is not None and effective_core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
         raise SystemExit(
             f"tps: batched MXQ only supports --core-mode single or auto "

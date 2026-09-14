@@ -256,6 +256,7 @@ def _build_pipeline(
     core_mode: str | None,
     default_single_target_cores: Sequence[str] | None = ("0:0",),
     config_text_core_mode: str | None = None,
+    batch_mode: str | None = None,
 ):
     kwargs: dict[str, Any] = {
         "task": "image-text-to-text",
@@ -272,10 +273,12 @@ def _build_pipeline(
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
-    if text_core_mode is None:
+    if batch_mode == _BATCH_MODE_BATCH and text_core_mode is None:
         text_core_mode = config_text_core_mode
     shared_core_mode = core_mode
-    if config_text_core_mode is not None and not getattr(args, "_core_mode_explicit", False):
+    if batch_mode == _BATCH_MODE_BATCH and config_text_core_mode is not None and not getattr(
+        args, "_core_mode_explicit", False
+    ):
         shared_core_mode = None
     model_kwargs = _apply_vlm_core_mode_model_kwargs(
         model_kwargs,
@@ -1765,6 +1768,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 core_mode,
                 default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
                 config_text_core_mode=config_core_mode,
+                batch_mode=batch_mode,
             )
             target_args.batch_size = batch_size
             target_args.batch_mode = batch_mode
@@ -2142,6 +2146,7 @@ def _run_measure(args: argparse.Namespace) -> int:
                 core_mode,
                 default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
                 config_text_core_mode=config_core_mode,
+                batch_mode=batch_mode,
             )
             measurer = VLMTPSMeasurer(pipeline)
             tracker = _build_device_tracker(target_args, pipeline)
