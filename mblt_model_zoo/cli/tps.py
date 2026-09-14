@@ -99,6 +99,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
+from mblt_model_zoo.utils.core_mode import config_core_mode_candidates as _config_core_mode_candidates_common
+from mblt_model_zoo.utils.core_mode import normalize_config_core_mode as _normalize_config_core_mode_common
 
 
 def _is_speculative_decoding_model(model: Any) -> bool:
@@ -921,16 +923,12 @@ def _probe_config_core_mode(
         model_type = str(raw_payload.get("model_type", "") or "").lower()
         architectures = raw_payload.get("architectures")
         is_eagle3 = "eagle3" in model_type or any("eagle3" in str(item).lower() for item in architectures or [])
-        if is_eagle3 or raw_payload.get("base_core_mode") is not None:
-            candidates.append(raw_payload.get("base_core_mode"))
-        if _is_vlm_task(task):
-            text_config = raw_payload.get("text_config")
-            if isinstance(text_config, dict):
-                candidates.append(text_config.get("core_mode"))
-        candidates.append(raw_payload.get("core_mode"))
+        role = "base" if is_eagle3 or raw_payload.get("base_core_mode") is not None else "text" if _is_vlm_task(task) else "shared"
+        candidates.extend(_config_core_mode_candidates_common(raw_payload, role=role))
         for candidate in candidates:
-            if isinstance(candidate, str) and candidate:
-                return candidate
+            mode = _normalize_config_core_mode_common(candidate)
+            if mode is not None:
+                return mode
         return None
 
     try:

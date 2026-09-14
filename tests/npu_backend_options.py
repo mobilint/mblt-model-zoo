@@ -10,7 +10,7 @@ from typing import Any, TypedDict, cast
 
 import pytest
 
-from mblt_model_zoo.utils.core_mode import CoreMode, normalize_core_mode
+from mblt_model_zoo.utils.core_mode import CoreMode, normalize_core_mode, resolve_config_core_mode
 
 WARNED_UNUSED_PREFIXES: set[str] = set()
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
@@ -410,15 +410,7 @@ def resolve_batch_core_mode(model_id: str, revision: str | None, *, text_config:
     if not isinstance(payload, dict):
         return "auto"
 
-    candidates: list[Any] = []
-    if text_config and isinstance(payload.get("text_config"), dict):
-        candidates.append(payload["text_config"].get("core_mode"))
-    candidates.append(payload.get("core_mode"))
-    valid_modes = {"auto", "single", "multi", "global4", "global8"}
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip().casefold() in valid_modes:
-            return candidate.strip().casefold()
-    return "auto"
+    return resolve_config_core_mode(payload, role="text" if text_config else "shared")
 
 
 def build_vision_engine_kwargs(

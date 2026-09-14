@@ -323,6 +323,21 @@ def test_build_pipeline_implicit_batch_fallback_targets_text_only(monkeypatch) -
     assert model_kwargs == {"text_core_mode": "auto"}
 
 
+def test_vlm_batch_payload_records_text_fallback_as_role_specific() -> None:
+    """Keep implicit batch fallback metadata separate from the Vision mode."""
+    args = argparse.Namespace(vision_core_mode=None, text_core_mode=None, _core_mode_explicit=False)
+
+    assert vlm_bench._vlm_subconfig_core_mode_payload_fields(
+        args,
+        "auto",
+        batch_mode="batch",
+    ) == {
+        "core_mode": None,
+        "vision_core_mode": None,
+        "text_core_mode": "auto",
+    }
+
+
 def test_build_pipeline_explicit_batch_shared_mode_reaches_both_backends(monkeypatch) -> None:
     """An explicit shared mode remains an intentional Vision and text override."""
     args = _make_vlm_pipeline_args(

@@ -247,8 +247,9 @@ Batched MXQ execution (`K > 1`) supports `--core-mode single` and, for per-layer
 `--core-mode auto`; other fixed core modes
 are rejected at runtime. The text-generation and VLM benchmark scripts enforce this by exiting
 with `SystemExit("batch benchmark only supports --core-mode single or auto")` when a batch run is paired
-with any other explicit `--core-mode`, and the batch text-generation test suite is likewise
-pinned to `single` (see [`mblt_model_zoo/hf_transformers/README.md`](mblt_model_zoo/hf_transformers/README.md)).
+with any other explicit or config-derived fixed multi-core mode. When the batch model config omits
+the mode, the test suite and benchmark fall back to `auto` (see
+[`mblt_model_zoo/hf_transformers/README.md`](mblt_model_zoo/hf_transformers/README.md)).
 (In batch mode the benchmark scripts also skip their non-batch default `--target-cores 0:0`
 injection, so batched runs rely on the config's default `target_cores` or an explicit
 `--target-cores`.)

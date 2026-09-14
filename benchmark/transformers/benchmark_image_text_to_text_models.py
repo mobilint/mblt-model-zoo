@@ -343,9 +343,15 @@ def _resolve_vlm_subconfig_core_modes(args: argparse.Namespace) -> tuple[str | N
 def _vlm_subconfig_core_mode_payload_fields(
     args: argparse.Namespace,
     core_mode: str | None,
+    *,
+    config_text_core_mode: str | None = None,
+    batch_mode: str | None = None,
 ) -> dict[str, Any]:
     """Return the core_mode / vision_core_mode / text_core_mode fields for a VLM payload."""
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
+    if batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False):
+        text_core_mode = text_core_mode or config_text_core_mode or core_mode or "auto"
+        core_mode = None
     return {
         "core_mode": core_mode,
         "vision_core_mode": vision_core_mode,
@@ -1690,13 +1696,18 @@ def _run_sweep(args: argparse.Namespace) -> int:
             disable_npu_specific_args=disable_npu_specific_args,
             **core_mode_kwargs,
         ):
-            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            implicit_batch = target.batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False)
+            effective_shared_mode = None if implicit_batch else core_mode
+            effective_text_mode = text_core_mode
+            if implicit_batch:
+                effective_text_mode = effective_text_mode or target.core_mode or core_mode or "auto"
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, effective_shared_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
                 mode_label,
                 mode_base,
-                core_mode,
+                effective_shared_mode,
                 vision_core_mode=vision_core_mode,
-                text_core_mode=text_core_mode,
+                text_core_mode=effective_text_mode,
             )
             run_targets.append(
                 (
@@ -1775,7 +1786,14 @@ def _run_sweep(args: argparse.Namespace) -> int:
             target_args.prefill_range = prefill_range
             target_args.cache_lengths = cache_lengths
             payload, rows = _run_model(target_args, label, base, pipeline)
-            payload.update(_vlm_subconfig_core_mode_payload_fields(target_args, core_mode))
+            payload.update(
+                _vlm_subconfig_core_mode_payload_fields(
+                    target_args,
+                    core_mode,
+                    config_text_core_mode=config_core_mode,
+                    batch_mode=batch_mode,
+                )
+            )
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)
             _plot_model(payload, png_path)
@@ -1865,13 +1883,18 @@ def _collect_vlm_run_targets(
             disable_npu_specific_args=disable_npu_specific_args,
             **core_mode_kwargs,
         ):
-            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            implicit_batch = target.batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False)
+            effective_shared_mode = None if implicit_batch else core_mode
+            effective_text_mode = text_core_mode
+            if implicit_batch:
+                effective_text_mode = effective_text_mode or target.core_mode or core_mode or "auto"
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, effective_shared_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
                 mode_label,
                 mode_base,
-                core_mode,
+                effective_shared_mode,
                 vision_core_mode=vision_core_mode,
-                text_core_mode=text_core_mode,
+                text_core_mode=effective_text_mode,
             )
             run_targets.append(
                 (
@@ -2349,7 +2372,12 @@ def _run_measure(args: argparse.Namespace) -> int:
                 "task": "image-text-to-text",
                 "batch_mode": batch_mode,
                 "batch_size": batch_size,
-                **_vlm_subconfig_core_mode_payload_fields(args, core_mode),
+                **_vlm_subconfig_core_mode_payload_fields(
+                    args,
+                    core_mode,
+                    config_text_core_mode=config_core_mode,
+                    batch_mode=batch_mode,
+                ),
                 "prompt": args.prompt,
                 "image_resolution": args.image_resolution,
                 "prefill": args.prefill,

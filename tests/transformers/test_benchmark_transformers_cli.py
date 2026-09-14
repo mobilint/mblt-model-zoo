@@ -3197,10 +3197,7 @@ def test_text_iter_core_modes_for_target_reads_target_disable(monkeypatch) -> No
     assert enabled and None not in enabled
 
 
-@pytest.mark.parametrize(
-    ("config_core_mode", "expected"),
-    [("single", "single"), ("global8", "global8"), (None, "auto")],
-)
+@pytest.mark.parametrize("config_core_mode, expected", [("single", "single"), (None, "auto")])
 def test_text_iter_batch_core_mode_uses_config_then_auto_fallback(config_core_mode, expected) -> None:
     """Verify batch targets honor config core_mode and default to auto when absent."""
     args = text_bench._build_arg_parser().parse_args(["measure", "--batch"])
@@ -3212,6 +3209,20 @@ def test_text_iter_batch_core_mode_uses_config_then_auto_fallback(config_core_mo
         disable_npu_specific_args=False,
         config_core_mode=config_core_mode,
     ) == [expected]
+
+
+def test_text_iter_batch_core_mode_rejects_fixed_multi_config_mode() -> None:
+    """Reject an unsupported fixed multi-core mode declared by a batch config."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--batch"])
+    text_bench._resolve_runtime_defaults(args, ["measure", "--batch"])
+
+    with pytest.raises(SystemExit, match="batch benchmark only supports --core-mode single or auto"):
+        text_bench._iter_core_modes_for_target(
+            args,
+            "batch",
+            disable_npu_specific_args=False,
+            config_core_mode="global8",
+        )
 
 
 def test_text_iter_batch_core_mode_cli_overrides_config() -> None:
