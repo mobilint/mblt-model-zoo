@@ -1052,7 +1052,15 @@ def _resolve_effective_llm_core_mode(
         revision=getattr(args, "revision", None),
     )
     if effective is None:
+        if _is_vlm_task(getattr(args, "task", None)):
+            return "auto", "default batch core_mode", "text_core_mode"
+        if is_eagle3:
+            return "auto", "default batch core_mode", "base_core_mode"
         return "auto", "default batch core_mode", "core_mode"
+    if _is_vlm_task(getattr(args, "task", None)):
+        return effective, "release config core_mode", "text_core_mode"
+    if is_eagle3:
+        return effective, "release config core_mode", "base_core_mode"
     return effective, "release config core_mode", "core_mode"
 
 

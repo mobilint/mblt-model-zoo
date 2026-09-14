@@ -43,7 +43,10 @@ def vision_text_npu_params(
     validate_batch_core_mode(request.config, suite_name="Batch image-text-to-text tests")
 
     vision_kwargs, _ = collect_npu_kwargs(request.config, "vision")
+    shared_kwargs, _ = collect_npu_kwargs(request.config, "")
     text_kwargs, _ = collect_npu_kwargs(request.config, "text")
+    if "text_core_mode" not in text_kwargs and shared_kwargs.get("core_mode") not in {None, "", "all"}:
+        text_kwargs["text_core_mode"] = shared_kwargs["core_mode"]
     if text_kwargs.get("text_core_mode") == "all":
         text_kwargs.pop("text_core_mode")
     # Batch core mode is resolved per model below; avoid a stale target-core default.
