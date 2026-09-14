@@ -671,7 +671,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                     npu_inputs.append(self._prepare_npu_inputs(chunk, grid))
 
         npu_backend = getattr(self, "npu_backend", None)
-        core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
+        core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "auto"))
         mxq_model = self.get_mxq_model()
         for i, inp in enumerate(npu_inputs):
             if isinstance(inp, list):

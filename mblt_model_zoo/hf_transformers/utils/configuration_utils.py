@@ -65,6 +65,10 @@ def _normalize_npu_target_kwargs(kwargs: dict[str, Any], prefix: str = "") -> No
             device-set mismatch, or incomplete global8 coverage.
         TypeError: When a target entry has an unsupported type.
     """
+    # The runtime's historical backend constructor defaults missing values to
+    # ``single``. Keep the package policy in this shared config entry point so
+    # every model and composite sub-config gets the same fallback.
+    kwargs.setdefault(f"{prefix}core_mode", "auto")
     NPUTargetSpec.from_kwargs(kwargs, prefix=prefix)
 
 
@@ -344,7 +348,7 @@ class MobilintConfigMixin(PretrainedConfig):
         ("mxq_path", "", str),
         ("dev_no", _DEFAULT_DEV_NO, Union[int, list[int]]),
         ("max_batch_size", 1, int),
-        ("core_mode", "single", str),
+        ("core_mode", "auto", str),
         ("target_device", "aries-rb", str),
         ("target_cores", None, Any),
         ("target_clusters", None, Any),

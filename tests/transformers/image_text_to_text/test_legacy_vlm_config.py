@@ -51,6 +51,11 @@ def test_qwen2_vl_flat_text_backend_fields_are_routed_into_text_config() -> None
     assert config.vision_mxq_path == "vision.mxq"
 
 
+def test_vlm_text_config_defaults_missing_core_mode_to_auto() -> None:
+    """Use the package-wide auto fallback when the serialized mode is absent."""
+    assert MobilintQwen2VLTextConfig().core_mode == "auto"
+
+
 def test_qwen2_vl_nested_text_backend_fields_take_precedence() -> None:
     """Keep explicit nested text backend settings when legacy top-level fields also exist."""
     config_dict = MobilintQwen2VLConfig().to_dict()
@@ -85,16 +90,7 @@ def test_qwen2_vl_text_dev_no_override_rebuilds_text_target_cores() -> None:
 
     text_dumped = config.text_config.to_dict()
     assert text_dumped["dev_no"] == 1
-    assert text_dumped["target_cores"] == [
-        "1:0:0",
-        "1:0:1",
-        "1:0:2",
-        "1:0:3",
-        "1:1:0",
-        "1:1:1",
-        "1:1:2",
-        "1:1:3",
-    ]
+    assert text_dumped["target_clusters"] == ["1:0", "1:1"]
 
 
 def test_qwen2_vl_subconfig_target_device_overrides_reach_npu_backends() -> None:

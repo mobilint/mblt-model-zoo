@@ -273,10 +273,11 @@ def _build_pipeline(
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
-    if batch_mode == "batch" and text_core_mode is None:
-        text_core_mode = config_text_core_mode
+    implicit_batch = batch_mode == "batch" and not getattr(args, "_core_mode_explicit", False)
+    if implicit_batch and text_core_mode is None:
+        text_core_mode = config_text_core_mode or "auto"
     shared_core_mode = core_mode
-    if batch_mode == "batch" and config_text_core_mode is not None and not getattr(args, "_core_mode_explicit", False):
+    if implicit_batch:
         shared_core_mode = None
     model_kwargs = _apply_vlm_core_mode_model_kwargs(
         model_kwargs,
