@@ -74,8 +74,8 @@ Before editing, run `git status --short` and preserve unrelated work.
   text-generation and image-text-to-text suites through `scripts/test_transformers_matrix.py`.
 - Qwen3-VL: dynamic vs. static release contract, `sync_dynamic_vision_from_model()`, and the
   per-artifact `vision_output_order` config live in `mblt_model_zoo/hf_transformers/README.md`
-  and the code docstrings under `models/qwen3_vl/`. A recompile that permutes the four
-  same-shape vision outputs must publish the new order in `config.json`.
+  and the code docstrings under `mblt_model_zoo/hf_transformers/models/qwen3_vl/`. A recompile
+  that permutes the four same-shape vision outputs must publish the new order in `config.json`.
 - Qwen3-VL 8B (regular and Batch16) is currently **unsupported**. Do not re-add
   `mobilint/Qwen3-VL-8B-Instruct(-Batch16)` to `MODEL_PATHS` or the batch/multi-image/video
   test modules until the model repo ships an MXQ compatible with the current runtime. See

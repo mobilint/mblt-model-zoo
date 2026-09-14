@@ -79,7 +79,7 @@ description: >-
   diverges from the shipped config. Full contract, override flow, and `vision_output_order`
   handling (including `MBLT_VISION_OUTPUT_ORDER` env override) live in
   `mblt_model_zoo/hf_transformers/README.md`; per-artifact resolution and validation logic
-  live in `models/qwen3_vl/modeling_qwen3_vl.py::_resolve_vision_output_order`.
+  live in `mblt_model_zoo/hf_transformers/models/qwen3_vl/modeling_qwen3_vl.py::_resolve_vision_output_order`.
 - Preserve local style in `mblt_model_zoo/hf_transformers`; it is excluded from repository-wide
   Ruff checks.
 
