@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.6.0
+
+### Added
+
+- Batch LLM execution now honors the model config's `core_mode`, with `auto` as the fallback
+  when the field is absent. This supports MXQs that select `single`, `global4`, or `global8`
+  per layer.
+
 ## 2.5.4
 
 ### Fixed
