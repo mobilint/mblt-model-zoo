@@ -315,6 +315,21 @@ def test_benchmark_batch_accepts_auto_core_mode(module, command) -> None:
     assert args.core_mode == "auto"
 
 
+def test_vlm_batch_validates_effective_text_core_mode() -> None:
+    """Allow a vision-only fixed mode when the batch text backend uses auto."""
+    argv = ["measure", "--batch", "--core-mode", "global4", "--text-core-mode", "auto"]
+    args = vlm_bench._build_arg_parser().parse_args(argv)
+
+    vlm_bench._resolve_runtime_defaults(args, argv)
+
+    assert args.core_mode == "global4"
+
+    invalid_argv = ["measure", "--batch", "--core-mode", "single", "--text-core-mode", "global4"]
+    invalid_args = vlm_bench._build_arg_parser().parse_args(invalid_argv)
+    with pytest.raises(SystemExit, match="only supports --core-mode single or auto"):
+        vlm_bench._resolve_runtime_defaults(invalid_args, invalid_argv)
+
+
 def test_text_target_filtering_by_batch_mode(monkeypatch) -> None:
     """Verify text targets are filtered by resolved max_batch_size and GGUF artifacts."""
     raw_targets: list[tuple[str, list[str | None], str, str, str | None]] = [
