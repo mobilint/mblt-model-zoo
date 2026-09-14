@@ -1668,7 +1668,12 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             core_mode = getattr(getattr(self, "npu_backend", None), "core_mode", None)
             if core_mode is None:
                 return None
-            return config_value.get(core_mode)
+            resolved_value = config_value.get(core_mode)
+            if resolved_value is None and core_mode == "auto":
+                # Older tuning outputs predate ``auto`` and contain a tuned single-mode
+                # value. Preserve that tuning while new releases add an explicit auto entry.
+                resolved_value = config_value.get("single")
+            return resolved_value
         return config_value
 
     @staticmethod

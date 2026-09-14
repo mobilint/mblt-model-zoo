@@ -45,6 +45,9 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import TPSMeasurer
 
 
+_PREFILL_CORE_MODE_VALUES = ("auto", *_CORE_MODE_SWEEP_VALUES_COMMON)
+
+
 def _discover_targets_from_mxq_dir(
     *,
     mxq_dir: Path,
@@ -146,7 +149,7 @@ def _parse_core_modes(raw: str) -> list[str]:
     modes = [x.strip() for x in raw.split(",") if x.strip()]
     if not modes:
         raise argparse.ArgumentTypeError("at least one core mode is required")
-    allowed = set(_CORE_MODE_SWEEP_VALUES_COMMON)
+    allowed = set(_PREFILL_CORE_MODE_VALUES)
     invalid = [m for m in modes if m not in allowed]
     if invalid:
         raise argparse.ArgumentTypeError(f"unsupported core mode(s): {invalid}. allowed={sorted(allowed)}")
@@ -682,7 +685,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--core-modes",
         type=_parse_core_modes,
-        default=_parse_core_modes("single,global4,global8"),
+        default=_parse_core_modes("auto,single,global4,global8"),
         help="comma-separated core modes",
     )
     parser.add_argument(

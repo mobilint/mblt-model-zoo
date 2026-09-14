@@ -275,13 +275,13 @@ def test_asr_benchmark_parser_defaults_npu_rail_metrics() -> None:
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
 @pytest.mark.parametrize("command", ["measure", "sweep"])
-def test_benchmark_batch_defaults_to_single_core_mode(module, command) -> None:
-    """Verify batch LLM benchmarks default to the only supported single core mode."""
+def test_benchmark_batch_defaults_to_auto_core_mode(module, command) -> None:
+    """Verify batch LLM benchmarks use auto when config does not provide a mode."""
     args = module._build_arg_parser().parse_args([command, "--batch"])
 
     module._resolve_runtime_defaults(args, [command, "--batch"])
 
-    assert args.core_mode == "single"
+    assert args.core_mode == "auto"
 
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
@@ -300,8 +300,34 @@ def test_benchmark_batch_rejects_non_single_core_mode(module, command) -> None:
     """Verify explicit non-single core modes are rejected for batch LLM benchmarks."""
     args = module._build_arg_parser().parse_args([command, "--batch", "--core-mode", "global8"])
 
-    with pytest.raises(SystemExit, match="only supports --core-mode single"):
+    with pytest.raises(SystemExit, match="only supports --core-mode single or auto"):
         module._resolve_runtime_defaults(args, [command, "--batch", "--core-mode", "global8"])
+
+
+@pytest.mark.parametrize("module", [text_bench, vlm_bench])
+@pytest.mark.parametrize("command", ["measure", "sweep"])
+def test_benchmark_batch_accepts_auto_core_mode(module, command) -> None:
+    """Verify batch LLM benchmarks preserve the explicit auto mode."""
+    args = module._build_arg_parser().parse_args([command, "--batch", "--core-mode", "auto"])
+
+    module._resolve_runtime_defaults(args, [command, "--batch", "--core-mode", "auto"])
+
+    assert args.core_mode == "auto"
+
+
+def test_vlm_batch_validates_effective_text_core_mode() -> None:
+    """Allow a vision-only fixed mode when the batch text backend uses auto."""
+    argv = ["measure", "--batch", "--core-mode", "global4", "--text-core-mode", "auto"]
+    args = vlm_bench._build_arg_parser().parse_args(argv)
+
+    vlm_bench._resolve_runtime_defaults(args, argv)
+
+    assert args.core_mode == "global4"
+
+    invalid_argv = ["measure", "--batch", "--core-mode", "single", "--text-core-mode", "global4"]
+    invalid_args = vlm_bench._build_arg_parser().parse_args(invalid_argv)
+    with pytest.raises(SystemExit, match="only supports --core-mode single or auto"):
+        vlm_bench._resolve_runtime_defaults(invalid_args, invalid_argv)
 
 
 def test_text_target_filtering_by_batch_mode(monkeypatch) -> None:
@@ -422,7 +448,7 @@ def test_vlm_measure_stops_tracker_when_vision_measure_fails(monkeypatch, tmp_pa
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 1, "non_batch")]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, None, 1, "non_batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -487,7 +513,7 @@ def test_vlm_measure_batch_energy_uses_batch_vision_latency(monkeypatch, tmp_pat
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, None, 4, "batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -572,7 +598,7 @@ def test_vlm_measure_tps_per_w_scales_by_measured_repeat_count(monkeypatch, tmp_
     monkeypatch.setattr(
         vlm_bench,
         "_collect_vlm_run_targets",
-        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, 4, "batch")]),
+        lambda args: (tmp_path, False, [("model-a", None, "model-a", "model-a", None, None, None, 4, "batch")]),
     )
     monkeypatch.setattr(vlm_bench, "_collect_host_pc_info", lambda results_dir: None)
     monkeypatch.setattr(
@@ -3184,6 +3210,89 @@ def test_text_iter_core_modes_for_target_reads_target_disable(monkeypatch) -> No
 
     assert disabled == [None]
     assert enabled and None not in enabled
+
+
+@pytest.mark.parametrize("config_core_mode, expected", [("single", "single"), (None, "auto")])
+def test_text_iter_batch_core_mode_uses_config_then_auto_fallback(config_core_mode, expected) -> None:
+    """Verify batch targets honor config core_mode and default to auto when absent."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--batch"])
+    text_bench._resolve_runtime_defaults(args, ["measure", "--batch"])
+
+    assert text_bench._iter_core_modes_for_target(
+        args,
+        "batch",
+        disable_npu_specific_args=False,
+        config_core_mode=config_core_mode,
+    ) == [expected]
+
+
+def test_text_iter_batch_core_mode_rejects_fixed_multi_config_mode() -> None:
+    """Reject an unsupported fixed multi-core mode declared by a batch config."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--batch"])
+    text_bench._resolve_runtime_defaults(args, ["measure", "--batch"])
+
+    with pytest.raises(SystemExit, match="batch benchmark only supports --core-mode single or auto"):
+        text_bench._iter_core_modes_for_target(
+            args,
+            "batch",
+            disable_npu_specific_args=False,
+            config_core_mode="global8",
+        )
+
+
+def test_text_iter_batch_core_mode_cli_overrides_config() -> None:
+    """Verify an explicit CLI mode takes precedence over model config metadata."""
+    argv = ["measure", "--batch", "--core-mode", "single"]
+    args = text_bench._build_arg_parser().parse_args(argv)
+    text_bench._resolve_runtime_defaults(args, argv)
+
+    assert text_bench._iter_core_modes_for_target(
+        args,
+        "batch",
+        disable_npu_specific_args=False,
+        config_core_mode="auto",
+    ) == ["single"]
+
+
+def test_text_iter_batch_core_mode_text_override_is_effective() -> None:
+    """Validate the VLM text override instead of the shared/config mode."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--batch"])
+    text_bench._resolve_runtime_defaults(args, ["measure", "--batch"])
+
+    assert text_bench._iter_core_modes_for_target(
+        args,
+        "batch",
+        disable_npu_specific_args=False,
+        config_core_mode="global8",
+        batch_core_mode_override="single",
+    ) == ["single"]
+
+    with pytest.raises(SystemExit, match="batch benchmark only supports --core-mode single or auto"):
+        text_bench._iter_core_modes_for_target(
+            args,
+            "batch",
+            disable_npu_specific_args=False,
+            config_core_mode="single",
+            batch_core_mode_override="global4",
+        )
+
+
+@pytest.mark.parametrize(
+    ("payload", "task", "expected"),
+    [
+        ({"core_mode": "global4"}, "text-generation", "global4"),
+        ({"text_config": {"core_mode": "auto"}}, "image-text-to-text", "auto"),
+        (
+            {"core_mode": "single", "text_config": {"core_mode": "auto"}},
+            "image-text-to-text",
+            "auto",
+        ),
+        ({"max_batch_size": 16}, "text-generation", None),
+    ],
+)
+def test_extract_config_core_mode(payload, task, expected) -> None:
+    """Verify LLM core mode extraction supports plain and VLM text configs."""
+    assert text_bench._extract_config_core_mode(payload, task=task) == expected
 
 
 def test_text_args_for_target_device_backend_dev_no_retained_for_mobilint(monkeypatch) -> None:

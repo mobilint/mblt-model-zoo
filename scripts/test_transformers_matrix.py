@@ -287,18 +287,17 @@ def run_phase_parallel(
 
 def run_phase_batch(version: str, log_dir: Path, extra_args: list[str]) -> int:
     """Run batch tests (text-generation + image-text-to-text) serially; batch conftests
-    use all 8 cores by default."""
+    resolve core mode from each model config by default."""
     log_path = log_dir / f"pytest-{version}-batch.log"
     junit_path = log_dir / f"junit-{version}-batch.xml"
-    # Runner-owned flags come after `extra_args` so a forwarded core-mode override
-    # cannot bypass the single-only invariant the batch conftests expect.
+    # Runner-owned flags come after `extra_args` so explicit target-device options remain
+    # authoritative while core mode is resolved by the batch fixtures.
     cmd = [
         str(venv_python()),
         "-m",
         "pytest",
         *(str(d.relative_to(REPO_ROOT)) for d in BATCH_DIRS),
         *extra_args,
-        "--core-mode=single",
         f"--junit-xml={junit_path}",
     ]
     return run(cmd, log_file=log_path)

@@ -220,6 +220,8 @@ def _make_vlm_pipeline_args(
     mxq_dir: str | None,
     vision_core_mode: str | None,
     text_core_mode: str | None,
+    batch_mode: str | None = None,
+    core_mode_explicit: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         trust_remote_code=True,
@@ -231,6 +233,8 @@ def _make_vlm_pipeline_args(
         mxq_dir=mxq_dir,
         vision_core_mode=vision_core_mode,
         text_core_mode=text_core_mode,
+        batch_mode=batch_mode,
+        _core_mode_explicit=core_mode_explicit,
     )
 
 
@@ -253,6 +257,7 @@ def _capture_build_pipeline_kwargs(
         None,
         None,
         core_mode,
+        batch_mode=args.batch_mode,
     )
     return captured
 
@@ -301,6 +306,76 @@ def test_build_pipeline_non_original_keeps_subconfig_core_modes(monkeypatch) -> 
     model_kwargs = captured.get("model_kwargs", {})
     assert model_kwargs["vision_core_mode"] == "global8"
     assert model_kwargs["text_core_mode"] == "global4"
+
+
+def test_build_pipeline_implicit_batch_fallback_targets_text_only(monkeypatch) -> None:
+    """Apply missing-config auto fallback to the Batch LLM without touching Vision."""
+    args = _make_vlm_pipeline_args(
+        original_models=False,
+        mxq_dir=None,
+        vision_core_mode=None,
+        text_core_mode=None,
+        batch_mode="batch",
+    )
+    captured = _capture_build_pipeline_kwargs(monkeypatch, args, core_mode="auto")
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert model_kwargs == {"text_core_mode": "auto"}
+
+
+def test_vlm_batch_payload_records_text_fallback_as_role_specific() -> None:
+    """Keep implicit batch fallback metadata separate from the Vision mode."""
+    args = argparse.Namespace(vision_core_mode=None, text_core_mode=None, _core_mode_explicit=False)
+
+    assert vlm_bench._vlm_subconfig_core_mode_payload_fields(
+        args,
+        "auto",
+        batch_mode="batch",
+    ) == {
+        "core_mode": None,
+        "vision_core_mode": None,
+        "text_core_mode": "auto",
+    }
+
+
+def test_vlm_original_batch_payload_drops_npu_fallback() -> None:
+    """Do not add Mobilint-only fallback kwargs back to an upstream VLM target."""
+    args = argparse.Namespace(
+        original_models=True,
+        mxq_dir=None,
+        vision_core_mode=None,
+        text_core_mode=None,
+        _core_mode_explicit=False,
+    )
+
+    assert vlm_bench._vlm_subconfig_core_mode_payload_fields(
+        args,
+        "auto",
+        batch_mode="batch",
+    ) == {
+        "core_mode": "auto",
+        "vision_core_mode": None,
+        "text_core_mode": None,
+    }
+
+
+def test_build_pipeline_explicit_batch_shared_mode_reaches_both_backends(monkeypatch) -> None:
+    """An explicit shared mode remains an intentional Vision and text override."""
+    args = _make_vlm_pipeline_args(
+        original_models=False,
+        mxq_dir=None,
+        vision_core_mode=None,
+        text_core_mode=None,
+        batch_mode="batch",
+        core_mode_explicit=True,
+    )
+    captured = _capture_build_pipeline_kwargs(monkeypatch, args, core_mode="single")
+
+    model_kwargs = captured["model_kwargs"]
+    assert model_kwargs["vision_core_mode"] == "single"
+    assert model_kwargs["text_core_mode"] == "single"
+    assert model_kwargs["vision_target_cores"] == ["0:0"]
+    assert model_kwargs["text_target_cores"] == ["0:0"]
 
 
 def test_collect_vlm_run_targets_drops_subconfig_suffix_for_original_native(monkeypatch) -> None:

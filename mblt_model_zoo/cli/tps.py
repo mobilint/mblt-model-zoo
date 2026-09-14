@@ -99,6 +99,8 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
 from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
+from mblt_model_zoo.utils.core_mode import config_core_mode_candidates as _config_core_mode_candidates_common
+from mblt_model_zoo.utils.core_mode import normalize_config_core_mode as _normalize_config_core_mode_common
 
 
 def _is_speculative_decoding_model(model: Any) -> bool:
@@ -678,10 +680,10 @@ def _candidate_core_modes(config: Any, *, task: str) -> Iterable[Any]:
     Yields:
         Candidate ``core_mode`` string values in priority order.
     """
-    yield getattr(config, "core_mode", None)
     text_config = getattr(config, "text_config", None)
-    if text_config is not None:
+    if _is_vlm_task(task) and text_config is not None:
         yield getattr(text_config, "core_mode", None)
+    yield getattr(config, "core_mode", None)
     if _is_vlm_task(task):
         vision_config = getattr(config, "vision_config", None)
         if vision_config is not None:
@@ -904,7 +906,7 @@ def _probe_config_core_mode(
     revision: str | None,
     task: str,
 ) -> str | None:
-    """Return the config-declared ``core_mode``, or ``None`` when unavailable.
+    """Return the config-declared LLM core mode, or ``None`` when unavailable.
 
     Pre-launch analogue of the ``backend.core_mode`` fallback used by
     :func:`_verify_batched_mxq_core_mode_post_launch`. Loads
@@ -915,6 +917,20 @@ def _probe_config_core_mode(
     falls through — matching :func:`_probe_config_max_batch_size`'s
     fault-tolerance discipline.
     """
+    raw_payload = _read_raw_config_payload(model, revision=revision)
+    if raw_payload is not None:
+        candidates: list[Any] = []
+        model_type = str(raw_payload.get("model_type", "") or "").lower()
+        architectures = raw_payload.get("architectures")
+        is_eagle3 = "eagle3" in model_type or any("eagle3" in str(item).lower() for item in architectures or [])
+        role = "base" if is_eagle3 or raw_payload.get("base_core_mode") is not None else "text" if _is_vlm_task(task) else "shared"
+        candidates.extend(_config_core_mode_candidates_common(raw_payload, role=role))
+        for candidate in candidates:
+            mode = _normalize_config_core_mode_common(candidate)
+            if mode is not None:
+                return mode
+        return None
+
     try:
         from transformers import AutoConfig
     except Exception:
@@ -930,6 +946,23 @@ def _probe_config_core_mode(
         if isinstance(candidate, str) and candidate:
             return candidate
     return None
+
+
+def _read_raw_config_payload(model: str, *, revision: str | None) -> dict[str, Any] | None:
+    """Read raw config metadata without hydrating library defaults."""
+    local_path = Path(model).expanduser()
+    config_path = local_path / "config.json" if local_path.is_dir() else None
+    try:
+        if config_path is not None and config_path.is_file():
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        else:
+            from huggingface_hub import hf_hub_download
+
+            downloaded = hf_hub_download(repo_id=model, filename="config.json", revision=revision)
+            payload = json.loads(Path(downloaded).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _probe_mxq_artifact_k(mxq_path: str) -> int | None:
@@ -1024,13 +1057,12 @@ def _resolve_effective_llm_core_mode(
 
     Returns a tuple of ``(effective_core_mode, flag_label, args_attr)`` so
     the caller can raise a rejection message that names the flag the user
-    actually passed and pin the same attribute when auto-defaulting to
-    ``single``.
+    actually passed and pin the same attribute when applying the batch fallback.
 
     When neither a role-specific flag nor ``--core-mode`` is set on the CLI,
     the base-flag fallback routes through
     :func:`_resolve_effective_core_mode_pre_launch` so a release that ships
-    a non-``single`` ``core_mode`` in its config (e.g. Qwen3-VL Batch16 with
+    a non-default ``core_mode`` in its config (e.g. Qwen3-VL Batch16 with
     ``text_config.core_mode = 'global4'``) is still surfaced at pre-launch.
     The ``flag_label`` becomes ``"release config core_mode"`` in that case
     to keep the SystemExit message honest about where the value came from.
@@ -1052,8 +1084,17 @@ def _resolve_effective_llm_core_mode(
         trust_remote_code=getattr(args, "trust_remote_code", True),
         revision=getattr(args, "revision", None),
     )
-    label = "--core-mode" if effective is None else "release config core_mode"
-    return effective, label, "core_mode"
+    if effective is None:
+        if _is_vlm_task(getattr(args, "task", None)):
+            return "auto", "default batch core_mode", "text_core_mode"
+        if is_eagle3:
+            return "auto", "default batch core_mode", "base_core_mode"
+        return "auto", "default batch core_mode", "core_mode"
+    if _is_vlm_task(getattr(args, "task", None)):
+        return effective, "release config core_mode", "text_core_mode"
+    if is_eagle3:
+        return effective, "release config core_mode", "base_core_mode"
+    return effective, "release config core_mode", "core_mode"
 
 
 @dataclass(frozen=True)
@@ -1073,10 +1114,14 @@ class _BatchedMxqGuardContext:
 
 
 def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
-    """Reject ``--core-mode global4/global8/multi`` on a batched MXQ.
+    """Reject fixed multi-core modes on a batched MXQ.
 
-    Batched LLM execution (compiled MXQ batch axis ``K > 1``) only supports
-    ``--core-mode single`` at runtime; see ``mblt_model_zoo/hf_transformers/README.md``
+    ``auto`` is intentionally allowed for newer batch MXQs whose compiled
+    graph selects single/global4/global8 per layer.
+
+    Batched LLM execution (compiled MXQ batch axis ``K > 1``) supports
+    ``--core-mode single`` and ``--core-mode auto`` at runtime; see
+    ``mblt_model_zoo/hf_transformers/README.md`` for the MXQ/compiler contract.
     and the matching enforcement in ``benchmark/transformers/benchmark_text_generation_models.py``
     and ``benchmark_image_text_to_text_models.py``. This runs before pipeline
     construction so users see the same friendly ``SystemExit`` the benchmark
@@ -1113,7 +1158,7 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
 
     Non-batch MXQ (effective batch axis ``== 1``) with ``--batch-size B > 1``
     is a separate sw-batch feature and stays unrestricted — sw-batch across
-    ``N`` slots is orthogonal to the batched-MXQ single-only rule.
+    ``N`` slots is orthogonal to the compiled MXQ core-mode constraint.
     """
     model = getattr(args, "model", None)
     if not model:
@@ -1131,6 +1176,21 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     if override_path:
         probed_k = _probe_mxq_artifact_k(override_path)
     if probed_k is None:
+        if effective_core_mode == "auto" and flag_label == "default batch core_mode":
+            is_mobilint = _is_mobilint_model_target(
+                str(model),
+                trust_remote_code=trust_remote_code,
+                revision=revision,
+            )
+            effective_batch = _resolve_effective_batch_size_pre_launch(
+                args,
+                model=str(model),
+                task=getattr(args, "task", None),
+                trust_remote_code=trust_remote_code,
+                revision=revision,
+            )
+            if is_mobilint and effective_batch > 1:
+                setattr(args, args_attr, "auto")
         # No local artifact probe available: defer to post-launch, where
         # ``k_per_model`` is authoritative. ``config.max_batch_size`` is the
         # aggregate ``N * K`` under sw-batch and cannot classify K alone.
@@ -1143,18 +1203,19 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
         return
     if probed_k <= 1:
         return
+    if effective_core_mode == "auto" and getattr(args, args_attr, None) is None:
+        setattr(args, args_attr, "auto")
     if effective_core_mode is not None and effective_core_mode in _BATCHED_MXQ_CORE_MODE_CONSTRAINT_MODES:
         raise SystemExit(
-            f"tps: batched MXQ only supports --core-mode single "
+            f"tps: batched MXQ only supports --core-mode single or auto "
             f"(model={args.model!r}, artifact K={probed_k}, "
             f"{flag_label}={effective_core_mode!r})"
         )
-    # Match the benchmark-script convention: pin the resolved role-specific
-    # flag to ``single`` for batched MXQ when the user did not pass it
+    # Pin the resolved role-specific flag to ``auto`` when the user did not pass it
     # explicitly. Pinning the role-specific attribute (not just ``core_mode``)
     # keeps :func:`_apply_vlm_core_mode_model_kwargs` and the EAGLE-3 prefix
-    # apply-path from later escalating the LLM MXQ back to a non-single mode.
-    setattr(args, args_attr, "single")
+    # apply-path from later escalating the LLM MXQ back to a fixed multi-core mode.
+    setattr(args, args_attr, "auto")
 
 
 def _resolve_llm_npu_backend(model: Any) -> Any | None:
@@ -1231,7 +1292,7 @@ def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Name
     config, e.g. a Qwen3-VL Batch16 release shipping with
     ``text_config.core_mode = 'global4'``). Without this fallback a
     batched MXQ under a release-configured ``global4`` runs to completion
-    without ever being validated against the batched-MXQ single-only
+    without ever being validated against the batched-MXQ core-mode
     rule.
     """
     ctx = getattr(args, "_batched_mxq_guard_ctx", None)
@@ -1258,7 +1319,7 @@ def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Name
     if not isinstance(k, int) or k <= 1:
         return
     raise SystemExit(
-        f"tps: batched MXQ only supports --core-mode single "
+        f"tps: batched MXQ only supports --core-mode single or auto "
         f"(model={ctx.model!r}, artifact K={k}, "
         f"{flag_label}={effective_core_mode!r})"
     )
@@ -4842,7 +4903,7 @@ def add_tps_parser(
             "--core-mode",
             choices=list(_CORE_MODE_CHOICES),
             default=None,
-            help="NPU core mode (single, global4, global8). EAGLE-3 prefix options take precedence.",
+            help="NPU core mode (auto, single, global4, global8). EAGLE-3 prefix options take precedence.",
         )
         p.add_argument(
             "--target-cores",
@@ -4882,7 +4943,7 @@ def add_tps_parser(
                 f"--{prefix}-core-mode",
                 choices=list(_CORE_MODE_CHOICES),
                 default=None,
-                help=f"{prefix} NPU core mode (single, global4, global8)",
+                help=f"{prefix} NPU core mode (auto, single, global4, global8)",
             )
             p.add_argument(
                 f"--{prefix}-target-cores",

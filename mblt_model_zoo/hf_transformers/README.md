@@ -354,13 +354,14 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
 
   Selects how the NPU runtime schedules work across cores/clusters.
   Supported values:
+  - `auto`: let qb Runtime select the core mode for each layer (for MXQs compiled with qb Compiler 1.3 or newer)
   - `single`: run on specific cores (use `target_cores`)
   - `multi`: run on one or more clusters (use `target_clusters`)
   - `global4`: global scheduling across 4 cores (use `target_clusters`)
   - `global8`: global scheduling across all cores (requires all clusters)
 
-  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while others may only support the default stored in the model config.
-  For general inference and benchmarks in this repository, the default runtime mode is `global8` unless you explicitly override it. Regulus variants (`regulus-ra`, `regulus-rb`, `regulus-ra-usb`, `regulus-rb-usb`) expose only one cluster and one core, so only `single` and `auto` are valid on those boards; `multi`, `global4`, and `global8` apply to `aries-rb` only.
+  Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while newer MXQs can use `auto` to select among those modes per layer. `auto` requires qb Compiler 1.3 or newer and qb Runtime 1.4 or newer.
+  For direct inference, a missing config value falls back to `auto`; benchmark entry points may use their documented suite-specific defaults. Regulus variants (`regulus-ra`, `regulus-rb`, `regulus-ra-usb`, `regulus-rb-usb`) expose only one cluster and one core, so only `single` and `auto` are valid on those boards; `multi`, `global4`, and `global8` apply to `aries-rb` only.
 
 - `target_cores` (`list[str]`)
 
@@ -450,7 +451,9 @@ To make it easier to test custom compiled models, we support overriding the inpu
 
   Overrides the prefill chunk size used by Mobilint text-generation backends.
   If omitted or set to `None`, the runtime reads `npu_prefill_chunk_size` from the model's `config.json`
-  using the current `core_mode` as the lookup key. If the config is missing or invalid, it falls back to `128`.
+  using the current `core_mode` as the lookup key. For `core_mode="auto"`, older mappings without an
+  `auto` entry reuse the tuned `single` value; an explicit `auto` entry takes precedence. If the config
+  is missing or invalid, it falls back to `128`.
 
 ### EAGLE-3 generate compatibility policy
 
@@ -522,7 +525,7 @@ mblt-model-zoo chat mobilint/Llama-3.2-1B-Instruct --trust-remote-code
 ## TPS Benchmark CLI
 
 If you installed the optional extra (`pip install mblt-model-zoo[transformers]`), you can run TPS benchmarks from the CLI.
-The TPS CLI supports `--core-mode single`, `--core-mode global4`, and `--core-mode global8`. The
+The TPS CLI supports `--core-mode auto`, `--core-mode single`, `--core-mode global4`, and `--core-mode global8`. The
 `--core-mode all` sweep alias is available in the benchmark scripts, not in the TPS CLI.
 
 ### Text-generation TPS
@@ -568,7 +571,7 @@ CLI `tps sweep` and transformer benchmark `sweep` subcommands default to `--pref
 
 - Pytest-based functional tests: [tests/transformers/TEST.md](../../tests/transformers/TEST.md)
   - The shared base `--core-mode` now defaults to `all`, so `pytest tests/transformers` sweeps `single`, `global4`, and `global8` for tests that use the base NPU backend.
-  - Batch text-generation tests are fixed to `--core-mode single` because batched LLM execution does not support other core modes. The shared default `--core-mode all` is accepted there and folded into `single`.
+  - Batch text-generation tests use the model config's `core_mode`, falling back to `auto` when it is absent. The shared default `--core-mode all` remains accepted there; fixed multi-core overrides are rejected.
   - Prefix-specific backends such as `vision_...`, `text_...`, `encoder_...`, and `decoder_...` are only swept when you explicitly pass options like `--vision-core-mode all`.
 - Benchmark scripts: [benchmark/transformers/README.md](../../benchmark/transformers/README.md)
   - Text-generation and VLM benchmarks default to `--core-mode global8`.

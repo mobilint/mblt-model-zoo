@@ -55,6 +55,9 @@ Before editing, run `git status --short` and preserve unrelated work.
   `fc_` on the multi-backend mixins, plus the Qwen3-ASR facade) — must route through
   `_rebuild_backend_for_target_device` so a cross-board `from_pretrained` kwarg actually
   switches the destination class rather than leaving a stale board with an updated string.
+- `core_mode="auto"` is the default fallback when a model config does not specify a mode. It is
+  supported for MXQs compiled with `qbcompiler>=1.3.0` and requires `mobilint-qb-runtime>=1.4.0`;
+  Batch LLM artifacts may select `single`, `global4`, or `global8` per layer at runtime.
 - Keep the Vision facade a thin, documented compatibility layer. Add no new Vision models,
   processing, datasets, evaluation, benchmarks, or compilation here. The only Vision tests kept
   here are generic, opt-in facade smoke tests under `tests/vision`; implementation-specific tests

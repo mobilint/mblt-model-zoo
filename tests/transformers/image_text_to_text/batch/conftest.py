@@ -11,7 +11,8 @@ from tests.npu_backend_options import (
     VisionTextNpuParams,
     collect_npu_kwargs,
     option_value_was_provided,
-    validate_single_only_core_mode,
+    resolve_batch_core_mode,
+    validate_batch_core_mode,
 )
 from tests.pipe_teardown import pipe_fixture
 from tests.transformers.text_generation.utils import BatchTextStreamer
@@ -36,20 +37,23 @@ def vision_text_npu_params(
 ) -> VisionTextNpuParams:
     """Return vision/text backend kwargs for batch VLM suites.
 
-    Batched text MXQ builds are compiled with single-core mode only, so the
-    text backend is forced accordingly. Vision-side settings remain whatever
-    the CLI supplied.
+    Text backend settings come from the CLI or the model config. Vision-side settings remain
+    whatever the CLI supplied.
     """
-    validate_single_only_core_mode(request.config, suite_name="Batch image-text-to-text tests")
+    validate_batch_core_mode(
+        request.config,
+        suite_name="Batch image-text-to-text tests",
+        prefixes=("text",),
+    )
 
     vision_kwargs, _ = collect_npu_kwargs(request.config, "vision")
-    text_kwargs, _ = collect_npu_kwargs(
-        request.config,
-        "text",
-        core_mode_override="single",
-    )
-    # The compiled batched text MXQ only supports a specific single core
-    # (`0:0`), so drop stray `text_target_cores` unless the CLI provided one.
+    shared_kwargs, _ = collect_npu_kwargs(request.config, "")
+    text_kwargs, _ = collect_npu_kwargs(request.config, "text")
+    if "text_core_mode" not in text_kwargs and shared_kwargs.get("core_mode") not in {None, "", "all"}:
+        text_kwargs["text_core_mode"] = shared_kwargs["core_mode"]
+    if text_kwargs.get("text_core_mode") == "all":
+        text_kwargs.pop("text_core_mode")
+    # Batch core mode is resolved per model below; avoid a stale target-core default.
     if not option_value_was_provided(request.config, "text", "target_cores"):
         text_kwargs.pop("text_target_cores", None)
 
@@ -65,6 +69,7 @@ def pipe(
     """Create a batch-capable image-text-to-text pipeline for the parametrized model."""
     model_path = request.param
     model_kwargs = {**vision_text_npu_params.vision, **vision_text_npu_params.text}
+    model_kwargs.setdefault("text_core_mode", resolve_batch_core_mode(model_path, revision, text_config=True))
 
     processor = AutoProcessor.from_pretrained(
         model_path,

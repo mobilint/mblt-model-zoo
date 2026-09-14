@@ -358,7 +358,7 @@ def test_batch_text_base_npu_params_omit_implicit_single_target_cores():
 
     params = batch_text_conftest.base_npu_params.__wrapped__(request, embedding_weight=None)
 
-    assert params.base == {"core_mode": "single"}
+    assert params.base == {}
 
 
 def test_batch_text_base_npu_params_preserve_explicit_target_cores():
@@ -373,7 +373,6 @@ def test_batch_text_base_npu_params_preserve_explicit_target_cores():
     params = batch_text_conftest.base_npu_params.__wrapped__(request, embedding_weight=None)
 
     assert params.base == {
-        "core_mode": "single",
         "target_cores": ["0:1", "0:2"],
     }
 
@@ -467,14 +466,59 @@ def test_build_eagle3_specs_preserve_explicit_prefixed_override_path():
 def test_single_only_core_mode_validation_allows_default_all():
     config = _make_config(shared_core_mode="all", explicit_args=("--core-mode=all",))
 
-    npu_backend_options.validate_single_only_core_mode(config, suite_name="Batch text-generation tests")
+    npu_backend_options.validate_batch_core_mode(config, suite_name="Batch text-generation tests")
+
+
+def test_resolve_batch_core_mode_prefers_vlm_text_config(tmp_path):
+    (tmp_path / "config.json").write_text(
+        '{"core_mode": "single", "text_config": {"core_mode": "auto"}}',
+        encoding="utf-8",
+    )
+
+    assert npu_backend_options.resolve_batch_core_mode(str(tmp_path), None, text_config=True) == "auto"
+
+
+def test_resolve_batch_core_mode_rejects_fixed_multi_core_config(tmp_path):
+    (tmp_path / "config.json").write_text('{"core_mode": "global8"}', encoding="utf-8")
+
+    with pytest.raises(pytest.UsageError, match="only supports core mode single or auto"):
+        npu_backend_options.resolve_batch_core_mode(str(tmp_path), None)
 
 
 def test_single_only_core_mode_validation_rejects_global4():
     config = _make_config(shared_core_mode="global4", explicit_args=("--core-mode=global4",))
 
-    with pytest.raises(pytest.UsageError, match="only supports --core-mode single"):
-        npu_backend_options.validate_single_only_core_mode(config, suite_name="Batch text-generation tests")
+    with pytest.raises(pytest.UsageError, match="only supports --core-mode single or auto"):
+        npu_backend_options.validate_batch_core_mode(config, suite_name="Batch text-generation tests")
+
+
+def test_vlm_batch_validation_uses_effective_text_mode():
+    config = _make_config(
+        shared_core_mode="global4",
+        text_core_mode="auto",
+        explicit_args=("--core-mode=global4", "--text-core-mode=auto"),
+    )
+
+    npu_backend_options.validate_batch_core_mode(
+        config,
+        suite_name="Batch image-text-to-text tests",
+        prefixes=("text",),
+    )
+
+
+def test_vlm_batch_validation_rejects_fixed_text_mode():
+    config = _make_config(
+        shared_core_mode="single",
+        text_core_mode="global4",
+        explicit_args=("--core-mode=single", "--text-core-mode=global4"),
+    )
+
+    with pytest.raises(pytest.UsageError, match="only supports --text-core-mode single or auto"):
+        npu_backend_options.validate_batch_core_mode(
+            config,
+            suite_name="Batch image-text-to-text tests",
+            prefixes=("text",),
+        )
 
 
 def test_transformers_collection_deselects_nondefault_models_by_default():
@@ -531,8 +575,7 @@ def test_transformers_collection_keeps_nondefault_models_with_keyword_filter():
 
 def test_transformers_collection_keeps_explicit_nondefault_nodeid_selection():
     selected_nodeid = (
-        "tests/transformers/image_text_to_text/test_qwen3_vl.py::"
-        "test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]"
+        "tests/transformers/image_text_to_text/test_qwen3_vl.py::test_qwen3_vl[mobilint/Qwen3-VL-8B-Instruct]"
     )
     config = _make_config(
         explicit_args=(

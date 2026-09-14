@@ -11,7 +11,10 @@ CPU_DEVICE_TRACKER_INTERVAL_SEC = DEVICE_TRACKER_INTERVAL_SEC
 DEVICE_BACKEND_CHOICES = ("none", "auto", "gpu", "npu")
 DEFAULT_DEVICE_BACKEND = "gpu"
 NPU_RAIL_METRIC_CHOICES = ("npu", "ddr", "pmic", "goldfinger")
-CORE_MODE_CHOICES = ("single", "global4", "global8")
+# ``auto`` lets qb Runtime select the per-layer core mode encoded by a newer MXQ.
+# It is an execution mode, not a fixed-mode sweep value, so keep it out of
+# ``CORE_MODE_SWEEP_VALUES`` below.
+CORE_MODE_CHOICES = ("auto", "single", "global4", "global8")
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
 DEFAULT_SINGLE_TARGET_CORES = ("0:0",)
 DEVICE_METRIC_KEYS = (
@@ -265,11 +268,7 @@ def apply_core_mode_model_kwargs(
     model_kwargs[f"{key_prefix}core_mode"] = core_mode
     if target_cores is not None:
         model_kwargs[f"{key_prefix}target_cores"] = target_cores
-    elif (
-        inject_legacy_defaults
-        and core_mode == "single"
-        and default_single_target_cores is not None
-    ):
+    elif inject_legacy_defaults and core_mode == "single" and default_single_target_cores is not None:
         model_kwargs[f"{key_prefix}target_cores"] = list(default_single_target_cores)
 
     if target_clusters is not None:

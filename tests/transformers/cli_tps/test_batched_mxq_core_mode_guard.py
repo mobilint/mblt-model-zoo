@@ -1,6 +1,6 @@
-"""Guard: batched-MXQ TPS runs must use --core-mode single.
+"""Guard: batched-MXQ TPS runs must use --core-mode single or auto.
 
-Mirrors the ``batch benchmark only supports --core-mode single`` enforcement
+Mirrors the ``batch benchmark only supports --core-mode single or auto`` enforcement
 in ``benchmark/transformers/benchmark_text_generation_models.py`` and
 ``benchmark_image_text_to_text_models.py`` so a user running
 ``mblt-model-zoo tps ... --core-mode global8 --batch-size 16`` on a batched
@@ -101,16 +101,20 @@ def _stub_artifact_probe(monkeypatch, k_by_path: dict[str, int | None] | None = 
 # ---------------------------------------------------------------------------
 
 
-def test_measure_accepts_single_core_mode_on_batched_mxq(monkeypatch):
-    """``--core-mode single`` short-circuits before any probe."""
+@pytest.mark.parametrize("core_mode", ["single", "auto"])
+def test_measure_accepts_single_or_auto_core_mode_on_batched_mxq(monkeypatch, core_mode):
+    """``single`` and ``auto`` short-circuit before any probe."""
     _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=16))
 
-    args = _parse_tps_measure("--core-mode", "single", "--batch-size", "16")
+    args = _parse_tps_measure("--core-mode", core_mode, "--batch-size", "16")
 
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    assert args.core_mode == "single"
-    assert not hasattr(args, "_batched_mxq_guard_ctx")
+    assert args.core_mode == core_mode
+    if core_mode == "single":
+        assert not hasattr(args, "_batched_mxq_guard_ctx")
+    else:
+        assert args._batched_mxq_guard_ctx.effective_core_mode == "auto"
 
 
 def test_measure_overrides_config_batch_when_mxq_path_probes_k1(monkeypatch):
@@ -137,13 +141,13 @@ def test_measure_rejects_when_mxq_path_probes_k_gt_1_on_batch1_config(monkeypatc
         tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
     message = str(excinfo.value)
-    assert "batched MXQ only supports --core-mode single" in message
+    assert "batched MXQ only supports --core-mode single or auto" in message
     assert "artifact K=4" in message
     assert "global4" in message
 
 
-def test_measure_forces_single_when_unspecified_core_mode_on_probed_batched_artifact(monkeypatch):
-    """Even without --core-mode, a probed K>1 override pins core_mode=single."""
+def test_measure_uses_auto_when_unspecified_core_mode_on_probed_batched_artifact(monkeypatch):
+    """Even without --core-mode, a probed K>1 override uses the auto fallback."""
     _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=1))
     _stub_artifact_probe(monkeypatch, {"/tmp/override-k8.mxq": 8})
 
@@ -152,7 +156,7 @@ def test_measure_forces_single_when_unspecified_core_mode_on_probed_batched_arti
 
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    assert args.core_mode == "single"
+    assert args.core_mode == "auto"
     assert not hasattr(args, "_batched_mxq_guard_ctx")
 
 
@@ -278,8 +282,8 @@ def test_measure_defers_when_core_mode_unspecified_on_batched_mxq(monkeypatch):
 
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    # Effective mode is None, so post-launch verifier will short-circuit; no auto-pin.
-    assert args.core_mode is None
+    # A Mobilint batch target is classified from its config when no local artifact is available.
+    assert args.core_mode == "auto"
 
 
 def test_measure_defers_on_non_batch_config(monkeypatch):
@@ -512,7 +516,7 @@ def test_post_launch_rejects_k_gt_1_on_non_single_core_mode(monkeypatch):
         tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
 
     message = str(excinfo.value)
-    assert "batched MXQ only supports --core-mode single" in message
+    assert "batched MXQ only supports --core-mode single or auto" in message
     assert "artifact K=4" in message
     assert "--core-mode='global4'" in message
 
@@ -589,7 +593,7 @@ def test_post_launch_falls_back_to_backend_core_mode_when_ctx_effective_is_none(
         tps_cli._verify_batched_mxq_core_mode_post_launch(pipeline, args)
 
     message = str(excinfo.value)
-    assert "batched MXQ only supports --core-mode single" in message
+    assert "batched MXQ only supports --core-mode single or auto" in message
     assert "artifact K=4" in message
     assert "backend core_mode='global4'" in message
 

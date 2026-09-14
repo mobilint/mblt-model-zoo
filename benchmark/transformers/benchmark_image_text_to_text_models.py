@@ -152,6 +152,7 @@ class VLMBenchmarkTarget:
     mxq_path: str | None
     max_batch_size: int
     batch_mode: str
+    core_mode: str | None = None
 
 
 def _safe_filename(text: str) -> str:
@@ -254,6 +255,8 @@ def _build_pipeline(
     mxq_path: str | None,
     core_mode: str | None,
     default_single_target_cores: Sequence[str] | None = ("0:0",),
+    config_text_core_mode: str | None = None,
+    batch_mode: str | None = None,
 ):
     kwargs: dict[str, Any] = {
         "task": "image-text-to-text",
@@ -270,9 +273,19 @@ def _build_pipeline(
         kwargs["device_map"] = args.device_map
     model_kwargs: dict[str, Any] = {}
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
+    implicit_batch = (
+        batch_mode == "batch"
+        and _vlm_npu_options_enabled(args)
+        and not getattr(args, "_core_mode_explicit", False)
+    )
+    if implicit_batch and text_core_mode is None:
+        text_core_mode = config_text_core_mode or "auto"
+    shared_core_mode = core_mode
+    if implicit_batch:
+        shared_core_mode = None
     model_kwargs = _apply_vlm_core_mode_model_kwargs(
         model_kwargs,
-        core_mode,
+        shared_core_mode,
         default_single_target_cores=default_single_target_cores,
         vision_core_mode=vision_core_mode,
         text_core_mode=text_core_mode,
@@ -331,12 +344,23 @@ def _resolve_vlm_subconfig_core_modes(args: argparse.Namespace) -> tuple[str | N
     )
 
 
+def _vlm_npu_options_enabled(args: argparse.Namespace) -> bool:
+    """Return whether this target accepts Mobilint-specific VLM overrides."""
+    return not getattr(args, "original_models", False) or bool(getattr(args, "mxq_dir", None))
+
+
 def _vlm_subconfig_core_mode_payload_fields(
     args: argparse.Namespace,
     core_mode: str | None,
+    *,
+    config_text_core_mode: str | None = None,
+    batch_mode: str | None = None,
 ) -> dict[str, Any]:
     """Return the core_mode / vision_core_mode / text_core_mode fields for a VLM payload."""
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
+    if batch_mode == "batch" and _vlm_npu_options_enabled(args) and not getattr(args, "_core_mode_explicit", False):
+        text_core_mode = text_core_mode or config_text_core_mode or core_mode or "auto"
+        core_mode = None
     return {
         "core_mode": core_mode,
         "vision_core_mode": vision_core_mode,
@@ -1522,11 +1546,18 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
+    if core_mode_explicit and args.core_mode == "all":
+        core_mode_explicit = False
     args._core_mode_explicit = core_mode_explicit
     if args.batch_mode == "batch":
-        if core_mode_explicit and args.core_mode != "single":
-            raise SystemExit("batch benchmark only supports --core-mode single")
-        args.core_mode = "single"
+        effective_text_core_mode = (
+            args.text_core_mode
+            if _flag_present(raw_argv, "--text-core-mode")
+            else args.core_mode if core_mode_explicit else "auto"
+        )
+        if effective_text_core_mode not in {"single", "auto"}:
+            raise SystemExit("batch benchmark only supports --core-mode single or auto")
+        args.core_mode = args.core_mode if core_mode_explicit else "auto"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -1642,6 +1673,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             mxq_path=target.mxq_path,
             max_batch_size=target.max_batch_size,
             batch_mode=target.batch_mode,
+            core_mode=target.core_mode,
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
@@ -1650,7 +1682,19 @@ def _run_sweep(args: argparse.Namespace) -> int:
         )
     ]
     run_targets: list[
-        tuple[str, str | None, str, str, str | None, str | None, int, str, tuple[int, int, int], list[int]]
+        tuple[
+            str,
+            str | None,
+            str,
+            str,
+            str | None,
+            str | None,
+            str | None,
+            int,
+            str,
+            tuple[int, int, int],
+            list[int],
+        ]
     ] = []
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
@@ -1659,18 +1703,31 @@ def _run_sweep(args: argparse.Namespace) -> int:
             getattr(args, "_raw_argv", []),
             target.batch_mode,
         )
+        core_mode_kwargs = {"config_core_mode": target.core_mode} if target.batch_mode == "batch" else {}
+        if target.batch_mode == "batch" and text_core_mode is not None:
+            core_mode_kwargs["batch_core_mode_override"] = text_core_mode
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
             disable_npu_specific_args=disable_npu_specific_args,
+            **core_mode_kwargs,
         ):
-            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            implicit_batch = (
+                target.batch_mode == "batch"
+                and _vlm_npu_options_enabled(args)
+                and not getattr(args, "_core_mode_explicit", False)
+            )
+            effective_shared_mode = None if implicit_batch else core_mode
+            effective_text_mode = text_core_mode
+            if implicit_batch:
+                effective_text_mode = effective_text_mode or target.core_mode or core_mode or "auto"
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, effective_shared_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
                 mode_label,
                 mode_base,
-                core_mode,
+                effective_shared_mode,
                 vision_core_mode=vision_core_mode,
-                text_core_mode=text_core_mode,
+                text_core_mode=effective_text_mode,
             )
             run_targets.append(
                 (
@@ -1680,6 +1737,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
                     mode_base,
                     target.mxq_path,
                     core_mode,
+                    target.core_mode,
                     target.max_batch_size,
                     target.batch_mode,
                     target_prefill_range,
@@ -1694,6 +1752,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
         base,
         target_mxq_path,
         core_mode,
+        config_core_mode,
         batch_size,
         batch_mode,
         prefill_range,
@@ -1739,13 +1798,22 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 target_mxq_path,
                 core_mode,
                 default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+                config_text_core_mode=config_core_mode,
+                batch_mode=batch_mode,
             )
             target_args.batch_size = batch_size
             target_args.batch_mode = batch_mode
             target_args.prefill_range = prefill_range
             target_args.cache_lengths = cache_lengths
             payload, rows = _run_model(target_args, label, base, pipeline)
-            payload.update(_vlm_subconfig_core_mode_payload_fields(target_args, core_mode))
+            payload.update(
+                _vlm_subconfig_core_mode_payload_fields(
+                    target_args,
+                    core_mode,
+                    config_text_core_mode=config_core_mode,
+                    batch_mode=batch_mode,
+                )
+            )
             _write_json(json_path, payload)
             _write_csv(csv_path, rows)
             _plot_model(payload, png_path)
@@ -1817,6 +1885,7 @@ def _collect_vlm_run_targets(
             mxq_path=target.mxq_path,
             max_batch_size=target.max_batch_size,
             batch_mode=target.batch_mode,
+            core_mode=target.core_mode,
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
@@ -1824,21 +1893,34 @@ def _collect_vlm_run_targets(
             task="image-text-to-text",
         )
     ]
-    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, int, str]] = []
+    run_targets: list[tuple[str, str | None, str, str, str | None, str | None, str | None, int, str]] = []
     vision_core_mode, text_core_mode = _resolve_vlm_subconfig_core_modes(args)
     for target in targets:
+        core_mode_kwargs = {"config_core_mode": target.core_mode} if target.batch_mode == "batch" else {}
+        if target.batch_mode == "batch" and text_core_mode is not None:
+            core_mode_kwargs["batch_core_mode_override"] = text_core_mode
         for core_mode in _iter_core_modes_for_target(
             args,
             target.batch_mode,
             disable_npu_specific_args=disable_npu_specific_args,
+            **core_mode_kwargs,
         ):
-            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
+            implicit_batch = (
+                target.batch_mode == "batch"
+                and _vlm_npu_options_enabled(args)
+                and not getattr(args, "_core_mode_explicit", False)
+            )
+            effective_shared_mode = None if implicit_batch else core_mode
+            effective_text_mode = text_core_mode
+            if implicit_batch:
+                effective_text_mode = effective_text_mode or target.core_mode or core_mode or "auto"
+            mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, effective_shared_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
                 mode_label,
                 mode_base,
-                core_mode,
+                effective_shared_mode,
                 vision_core_mode=vision_core_mode,
-                text_core_mode=text_core_mode,
+                text_core_mode=effective_text_mode,
             )
             run_targets.append(
                 (
@@ -1848,6 +1930,7 @@ def _collect_vlm_run_targets(
                     mode_base,
                     target.mxq_path,
                     core_mode,
+                    target.core_mode,
                     target.max_batch_size,
                     target.batch_mode,
                 )
@@ -2087,7 +2170,7 @@ def _run_measure(args: argparse.Namespace) -> int:
     if not run_targets:
         return 0
     _collect_host_pc_info(output_dir)
-    for model_id, revision, label, base, target_mxq_path, core_mode, batch_size, batch_mode in tqdm(
+    for model_id, revision, label, base, target_mxq_path, core_mode, config_core_mode, batch_size, batch_mode in tqdm(
         run_targets, desc="Measuring VLM models", unit="model-mode"
     ):
         target_args = _args_for_target_device_backend(args, model_id=model_id, mxq_path=target_mxq_path)
@@ -2112,6 +2195,8 @@ def _run_measure(args: argparse.Namespace) -> int:
                 target_mxq_path,
                 core_mode,
                 default_single_target_cores=_default_single_target_cores_for_batch_mode(batch_mode),
+                config_text_core_mode=config_core_mode,
+                batch_mode=batch_mode,
             )
             measurer = VLMTPSMeasurer(pipeline)
             tracker = _build_device_tracker(target_args, pipeline)
@@ -2313,7 +2398,12 @@ def _run_measure(args: argparse.Namespace) -> int:
                 "task": "image-text-to-text",
                 "batch_mode": batch_mode,
                 "batch_size": batch_size,
-                **_vlm_subconfig_core_mode_payload_fields(args, core_mode),
+                **_vlm_subconfig_core_mode_payload_fields(
+                    args,
+                    core_mode,
+                    config_text_core_mode=config_core_mode,
+                    batch_mode=batch_mode,
+                ),
                 "prompt": args.prompt,
                 "image_resolution": args.image_resolution,
                 "prefill": args.prefill,

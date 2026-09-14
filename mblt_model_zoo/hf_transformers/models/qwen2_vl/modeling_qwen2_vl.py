@@ -181,7 +181,7 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
         mxq_inputs = [self._preprocess_image_tokens(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
         npu_backend = getattr(self, "npu_backend", None)
-        core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "single"))
+        core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "auto"))
         if core_mode == "multi" and len(mxq_inputs) > 1:
             batched_inputs = torch.stack(mxq_inputs, dim=0)
             return self._flatten_encoder_output(self.mxq_forward(batched_inputs), batch_size=len(mxq_inputs))

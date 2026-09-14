@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import pytest
 
-from mblt_model_zoo.utils.core_mode import CoreMode, normalize_core_mode
+from mblt_model_zoo.utils.core_mode import (
+    CoreMode,
+    normalize_core_mode,
+    resolve_config_core_mode,
+    validate_batch_core_mode as validate_resolved_batch_core_mode,
+)
 
 WARNED_UNUSED_PREFIXES: set[str] = set()
 CORE_MODE_SWEEP_VALUES = ("single", "global4", "global8")
@@ -387,6 +394,34 @@ def build_base_npu_params(
     return BaseNpuParams(base=base_kwargs)
 
 
+def resolve_batch_core_mode(model_id: str, revision: str | None, *, text_config: bool = False) -> str:
+    """Resolve a batch LLM core mode from config, falling back to ``auto``.
+
+    Raw JSON is used intentionally: ``AutoConfig`` may materialize a library default for a
+    missing field, which would hide the required batch fallback.
+    """
+    local_path = Path(model_id).expanduser()
+    config_path = local_path / "config.json" if local_path.is_dir() else None
+    try:
+        if config_path is not None and config_path.is_file():
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        else:
+            from huggingface_hub import hf_hub_download
+
+            downloaded = hf_hub_download(repo_id=model_id, filename="config.json", revision=revision)
+            payload = json.loads(Path(downloaded).read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return "auto"
+    if not isinstance(payload, dict):
+        return "auto"
+
+    resolved = resolve_config_core_mode(payload, role="text" if text_config else "shared")
+    try:
+        return validate_resolved_batch_core_mode(resolved)
+    except ValueError as exc:
+        raise pytest.UsageError(str(exc)) from exc
+
+
 def build_vision_engine_kwargs(
     base_kwargs: dict[str, Any],
     *,
@@ -463,9 +498,29 @@ def build_eagle3_npu_params(
     return Eagle3NpuParams(model=model_kwargs)
 
 
-def validate_single_only_core_mode(config: pytest.Config, *, suite_name: str) -> None:
-    """Reject unsupported core-mode overrides for suites that only support single-core mode."""
-    raw_core_mode = config.getoption("--core-mode")
-    if raw_core_mode in {None, "", "all", "single"}:
-        return
-    raise pytest.UsageError(f"{suite_name} only supports --core-mode single. Received --core-mode={raw_core_mode!r}.")
+def validate_batch_core_mode(
+    config: pytest.Config,
+    *,
+    suite_name: str,
+    prefixes: tuple[str, ...] = (),
+) -> None:
+    """Reject unsupported modes after resolving the batched LLM backend's effective mode.
+
+    VLM suites may use a fixed shared mode for the vision backend while overriding the
+    batched text backend with ``--text-core-mode auto``. In that case only the effective
+    text mode participates in batch validation.
+    """
+    text_prefix_explicit = "text" in prefixes and option_value_was_provided(config, "text", "core_mode")
+    if text_prefix_explicit:
+        options = ("text", *(prefix for prefix in prefixes if prefix != "text"))
+    else:
+        options = ("", *prefixes)
+    for prefix in options:
+        opt_prefix = f"--{prefix}-" if prefix else "--"
+        raw_core_mode = config.getoption(f"{opt_prefix}core-mode")
+        if raw_core_mode in {None, "", "all", "single", "auto"}:
+            continue
+        flag = f"{opt_prefix}core-mode"
+        raise pytest.UsageError(
+            f"{suite_name} only supports {flag} single or auto. Received {flag}={raw_core_mode!r}."
+        )
