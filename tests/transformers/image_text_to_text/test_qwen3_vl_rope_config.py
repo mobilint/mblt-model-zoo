@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+from torch import nn
 
 from tests.transformers.image_text_to_text.qwen3_vl_compat import (
     skip_if_transformers_lacks_qwen3_vl_support,
@@ -26,6 +27,7 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.configuration_qwen3_vl impor
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLRotaryEmbedding,
+    MobilintQwen3VLTextModel,
 )
 
 
@@ -61,6 +63,23 @@ def test_rotary_embedding_reads_rope_theta_from_text_config() -> None:
 
     assert emb.rope_theta == 5_000_000
     assert emb.mrope_section == [24, 20, 20]
+
+
+def test_runtime_rotary_embedding_is_not_registered_as_checkpoint_child() -> None:
+    """Keep external RoPE alive through ``from_pretrained`` state loading.
+
+    The helper has no persistent checkpoint state. If it is registered as an
+    ``nn.Module`` child, Transformers' meta loading can leave the child slot
+    as ``None`` after loading the packaged safetensors file.
+    """
+    model = MobilintQwen3VLTextModel.__new__(MobilintQwen3VLTextModel)
+    nn.Module.__init__(model)
+    model._uses_rope_input = True
+
+    model._set_runtime_rotary_embedding(_minimal_text_config())
+
+    assert model._mobilint_rotary_emb is not None
+    assert "_mobilint_rotary_emb" not in model._modules
 
 
 def test_rotary_embedding_masks_follow_padded_second_half() -> None:
