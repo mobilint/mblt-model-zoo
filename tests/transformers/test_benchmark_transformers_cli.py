@@ -275,13 +275,13 @@ def test_asr_benchmark_parser_defaults_npu_rail_metrics() -> None:
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
 @pytest.mark.parametrize("command", ["measure", "sweep"])
-def test_benchmark_batch_defaults_to_single_core_mode(module, command) -> None:
-    """Verify batch LLM benchmarks default to the only supported single core mode."""
+def test_benchmark_batch_defaults_to_auto_core_mode(module, command) -> None:
+    """Verify batch LLM benchmarks use auto when config does not provide a mode."""
     args = module._build_arg_parser().parse_args([command, "--batch"])
 
     module._resolve_runtime_defaults(args, [command, "--batch"])
 
-    assert args.core_mode == "single"
+    assert args.core_mode == "auto"
 
 
 @pytest.mark.parametrize("module", [text_bench, vlm_bench])
@@ -3195,6 +3195,50 @@ def test_text_iter_core_modes_for_target_reads_target_disable(monkeypatch) -> No
 
     assert disabled == [None]
     assert enabled and None not in enabled
+
+
+@pytest.mark.parametrize(
+    ("config_core_mode", "expected"),
+    [("single", "single"), ("global8", "global8"), (None, "auto")],
+)
+def test_text_iter_batch_core_mode_uses_config_then_auto_fallback(config_core_mode, expected) -> None:
+    """Verify batch targets honor config core_mode and default to auto when absent."""
+    args = text_bench._build_arg_parser().parse_args(["measure", "--batch"])
+    text_bench._resolve_runtime_defaults(args, ["measure", "--batch"])
+
+    assert text_bench._iter_core_modes_for_target(
+        args,
+        "batch",
+        disable_npu_specific_args=False,
+        config_core_mode=config_core_mode,
+    ) == [expected]
+
+
+def test_text_iter_batch_core_mode_cli_overrides_config() -> None:
+    """Verify an explicit CLI mode takes precedence over model config metadata."""
+    argv = ["measure", "--batch", "--core-mode", "single"]
+    args = text_bench._build_arg_parser().parse_args(argv)
+    text_bench._resolve_runtime_defaults(args, argv)
+
+    assert text_bench._iter_core_modes_for_target(
+        args,
+        "batch",
+        disable_npu_specific_args=False,
+        config_core_mode="auto",
+    ) == ["single"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "task", "expected"),
+    [
+        ({"core_mode": "global4"}, "text-generation", "global4"),
+        ({"text_config": {"core_mode": "auto"}}, "image-text-to-text", "auto"),
+        ({"max_batch_size": 16}, "text-generation", None),
+    ],
+)
+def test_extract_config_core_mode(payload, task, expected) -> None:
+    """Verify LLM core mode extraction supports plain and VLM text configs."""
+    assert text_bench._extract_config_core_mode(payload, task=task) == expected
 
 
 def test_text_args_for_target_device_backend_dev_no_retained_for_mobilint(monkeypatch) -> None:

@@ -11,7 +11,8 @@ from tests.npu_backend_options import (
     BaseNpuParams,
     build_base_npu_params,
     option_value_was_provided,
-    validate_single_only_core_mode,
+    resolve_batch_core_mode,
+    validate_batch_core_mode,
 )
 from tests.pipe_teardown import pipe_fixture
 from tests.transformers.text_generation.utils import BatchTextStreamer
@@ -34,13 +35,11 @@ def base_npu_params(
     request: pytest.FixtureRequest,
     embedding_weight: Optional[str],
 ) -> BaseNpuParams:
-    """Return base backend kwargs for batch suites, forcing single-mode execution."""
-    validate_single_only_core_mode(request.config, suite_name="Batch text-generation tests")
-    params = build_base_npu_params(
-        request.config,
-        embedding_weight,
-        core_mode_override="single",
-    )
+    """Return base backend kwargs for batch suites."""
+    validate_batch_core_mode(request.config, suite_name="Batch text-generation tests")
+    params = build_base_npu_params(request.config, embedding_weight)
+    if params.base.get("core_mode") == "all":
+        params.base.pop("core_mode")
     if not option_value_was_provided(request.config, "", "target_cores"):
         params.base.pop("target_cores", None)
     return params
@@ -54,7 +53,8 @@ def pipe(
 ):
     """Create a batch-capable text-generation pipeline for the parametrized model."""
     model_path = request.param
-    model_kwargs = base_npu_params.base
+    model_kwargs = dict(base_npu_params.base)
+    model_kwargs.setdefault("core_mode", resolve_batch_core_mode(model_path, revision))
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,

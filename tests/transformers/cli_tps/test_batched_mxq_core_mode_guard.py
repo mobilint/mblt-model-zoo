@@ -146,8 +146,8 @@ def test_measure_rejects_when_mxq_path_probes_k_gt_1_on_batch1_config(monkeypatc
     assert "global4" in message
 
 
-def test_measure_forces_single_when_unspecified_core_mode_on_probed_batched_artifact(monkeypatch):
-    """Even without --core-mode, a probed K>1 override pins core_mode=single."""
+def test_measure_uses_auto_when_unspecified_core_mode_on_probed_batched_artifact(monkeypatch):
+    """Even without --core-mode, a probed K>1 override uses the auto fallback."""
     _stub_autoconfig(monkeypatch, _StubConfig(max_batch_size=1))
     _stub_artifact_probe(monkeypatch, {"/tmp/override-k8.mxq": 8})
 
@@ -156,7 +156,7 @@ def test_measure_forces_single_when_unspecified_core_mode_on_probed_batched_arti
 
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    assert args.core_mode == "single"
+    assert args.core_mode == "auto"
     assert not hasattr(args, "_batched_mxq_guard_ctx")
 
 
@@ -282,8 +282,8 @@ def test_measure_defers_when_core_mode_unspecified_on_batched_mxq(monkeypatch):
 
     tps_cli._enforce_batched_mxq_core_mode_constraint(args)
 
-    # Effective mode is None, so post-launch verifier will short-circuit; no auto-pin.
-    assert args.core_mode is None
+    # Missing config mode falls back to auto before post-launch verification.
+    assert args.core_mode == "auto"
 
 
 def test_measure_defers_on_non_batch_config(monkeypatch):

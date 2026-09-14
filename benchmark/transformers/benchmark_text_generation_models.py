@@ -580,6 +580,7 @@ class TextBenchmarkTarget:
     mxq_path: str | None
     max_batch_size: int
     batch_mode: str
+    core_mode: str | None = None
     is_mobilint: bool = False
     role: str = _ROLE_CALLER_UPSTREAM
     disable_npu_specific_args: bool = False
@@ -710,6 +711,31 @@ def _extract_config_max_batch_size(payload: dict[str, Any], *, task: str) -> int
     return None
 
 
+_CONFIG_CORE_MODES = frozenset({"auto", "single", "multi", "global4", "global8"})
+
+
+def _normalize_config_core_mode(value: Any) -> str | None:
+    """Normalize a config-declared core mode when it is supported."""
+    if not isinstance(value, str):
+        return None
+    core_mode = value.strip().casefold()
+    return core_mode if core_mode in _CONFIG_CORE_MODES else None
+
+
+def _extract_config_core_mode(payload: dict[str, Any], *, task: str) -> str | None:
+    """Extract the LLM core mode from model config metadata."""
+    candidates: list[Any] = [payload.get("core_mode")]
+    if task == "image-text-to-text":
+        text_config = payload.get("text_config")
+        if isinstance(text_config, dict):
+            candidates.append(text_config.get("core_mode"))
+    for candidate in candidates:
+        core_mode = _normalize_config_core_mode(candidate)
+        if core_mode is not None:
+            return core_mode
+    return None
+
+
 def _resolve_config_max_batch_size(model_id: str, revision: str | None, *, task: str) -> int | None:
     """Resolve config max_batch_size for batch/non-batch target selection."""
     payload = _read_raw_config(model_id, revision)
@@ -773,6 +799,8 @@ def _filter_text_targets_by_batch_mode(
             print(f"Skip {label}: GGUF/Llama.cpp model is not supported by Transformers benchmark.")
             continue
         cfg_max_batch_size = _resolve_config_max_batch_size(model_id, revision, task=task)
+        config_payload = _read_raw_config(model_id, revision)
+        config_core_mode = _extract_config_core_mode(config_payload, task=task) if config_payload is not None else None
         if cfg_max_batch_size is None:
             cfg_max_batch_size = 1
         if override_batch_size is not None and int(override_batch_size) >= 1:
@@ -803,6 +831,7 @@ def _filter_text_targets_by_batch_mode(
                 mxq_path=mxq_path,
                 max_batch_size=effective_max_batch_size,
                 batch_mode=resolved_batch_mode,
+                core_mode=config_core_mode,
                 is_mobilint=is_mobilint,
                 role=role,
                 disable_npu_specific_args=disable_npu_specific_args,
@@ -1735,12 +1764,15 @@ def _iter_core_modes_for_target(
     batch_mode: str,
     *,
     disable_npu_specific_args: bool,
+    config_core_mode: str | None = None,
 ) -> list[str | None]:
-    """Return core modes to run for one target based on its resolved batch mode."""
+    """Return core modes using CLI, config metadata, and the batch fallback in that order."""
     if disable_npu_specific_args:
         return [None]
     if _is_batch_mode(batch_mode):
-        return ["single"]
+        if getattr(args, "_core_mode_explicit", False):
+            return [args.core_mode]
+        return [config_core_mode or "auto"]
     return list(_iter_core_modes_common(args.core_mode))
 
 
@@ -1784,11 +1816,13 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: Sequence[str])
     args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
+    if core_mode_explicit and args.core_mode == "all":
+        core_mode_explicit = False
     args._core_mode_explicit = core_mode_explicit
     if _is_batch_mode(args.batch_mode):
         if core_mode_explicit and args.core_mode not in {"single", "auto"}:
             raise SystemExit("batch benchmark only supports --core-mode single or auto")
-        args.core_mode = args.core_mode if core_mode_explicit else "single"
+        args.core_mode = args.core_mode if core_mode_explicit else "auto"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -1974,6 +2008,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             args,
             target.batch_mode,
             disable_npu_specific_args=target.disable_npu_specific_args,
+            config_core_mode=target.core_mode,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(
@@ -2742,6 +2777,7 @@ def _collect_text_run_targets(
             args,
             target.batch_mode,
             disable_npu_specific_args=target.disable_npu_specific_args,
+            config_core_mode=target.core_mode,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             run_targets.append(

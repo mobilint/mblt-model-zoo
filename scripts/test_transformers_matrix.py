@@ -291,7 +291,7 @@ def run_phase_batch(version: str, log_dir: Path, extra_args: list[str]) -> int:
     log_path = log_dir / f"pytest-{version}-batch.log"
     junit_path = log_dir / f"junit-{version}-batch.xml"
     # Runner-owned flags come after `extra_args` so a forwarded core-mode override
-    # cannot bypass the single-only invariant the batch conftests expect.
+    # cannot bypass the fixed multi-core restriction enforced by the batch conftests.
     cmd = [
         str(venv_python()),
         "-m",

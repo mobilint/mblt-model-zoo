@@ -358,7 +358,7 @@ def test_batch_text_base_npu_params_omit_implicit_single_target_cores():
 
     params = batch_text_conftest.base_npu_params.__wrapped__(request, embedding_weight=None)
 
-    assert params.base == {"core_mode": "single"}
+    assert params.base == {}
 
 
 def test_batch_text_base_npu_params_preserve_explicit_target_cores():
@@ -373,7 +373,6 @@ def test_batch_text_base_npu_params_preserve_explicit_target_cores():
     params = batch_text_conftest.base_npu_params.__wrapped__(request, embedding_weight=None)
 
     assert params.base == {
-        "core_mode": "single",
         "target_cores": ["0:1", "0:2"],
     }
 
@@ -467,14 +466,14 @@ def test_build_eagle3_specs_preserve_explicit_prefixed_override_path():
 def test_single_only_core_mode_validation_allows_default_all():
     config = _make_config(shared_core_mode="all", explicit_args=("--core-mode=all",))
 
-    npu_backend_options.validate_single_only_core_mode(config, suite_name="Batch text-generation tests")
+    npu_backend_options.validate_batch_core_mode(config, suite_name="Batch text-generation tests")
 
 
 def test_single_only_core_mode_validation_rejects_global4():
     config = _make_config(shared_core_mode="global4", explicit_args=("--core-mode=global4",))
 
     with pytest.raises(pytest.UsageError, match="only supports --core-mode single or auto"):
-        npu_backend_options.validate_single_only_core_mode(config, suite_name="Batch text-generation tests")
+        npu_backend_options.validate_batch_core_mode(config, suite_name="Batch text-generation tests")
 
 
 def test_transformers_collection_deselects_nondefault_models_by_default():

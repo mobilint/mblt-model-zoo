@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import pytest
@@ -387,6 +389,37 @@ def build_base_npu_params(
     return BaseNpuParams(base=base_kwargs)
 
 
+def resolve_batch_core_mode(model_id: str, revision: str | None, *, text_config: bool = False) -> str:
+    """Resolve a batch LLM core mode from config, falling back to ``auto``.
+
+    Raw JSON is used intentionally: ``AutoConfig`` may materialize a library default for a
+    missing field, which would hide the required batch fallback.
+    """
+    local_path = Path(model_id).expanduser()
+    config_path = local_path / "config.json" if local_path.is_dir() else None
+    try:
+        if config_path is not None and config_path.is_file():
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        else:
+            from huggingface_hub import hf_hub_download
+
+            downloaded = hf_hub_download(repo_id=model_id, filename="config.json", revision=revision)
+            payload = json.loads(Path(downloaded).read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return "auto"
+    if not isinstance(payload, dict):
+        return "auto"
+
+    candidates: list[Any] = [payload.get("core_mode")]
+    if text_config and isinstance(payload.get("text_config"), dict):
+        candidates.append(payload["text_config"].get("core_mode"))
+    valid_modes = {"auto", "single", "multi", "global4", "global8"}
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip().casefold() in valid_modes:
+            return candidate.strip().casefold()
+    return "auto"
+
+
 def build_vision_engine_kwargs(
     base_kwargs: dict[str, Any],
     *,
@@ -463,8 +496,8 @@ def build_eagle3_npu_params(
     return Eagle3NpuParams(model=model_kwargs)
 
 
-def validate_single_only_core_mode(config: pytest.Config, *, suite_name: str) -> None:
-    """Reject unsupported core-mode overrides for suites that only support single-core mode."""
+def validate_batch_core_mode(config: pytest.Config, *, suite_name: str) -> None:
+    """Reject fixed multi-core CLI overrides unsupported by batched MXQ execution."""
     raw_core_mode = config.getoption("--core-mode")
     if raw_core_mode in {None, "", "all", "single", "auto"}:
         return

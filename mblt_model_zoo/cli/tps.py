@@ -1024,13 +1024,12 @@ def _resolve_effective_llm_core_mode(
 
     Returns a tuple of ``(effective_core_mode, flag_label, args_attr)`` so
     the caller can raise a rejection message that names the flag the user
-    actually passed and pin the same attribute when auto-defaulting to
-    ``single``.
+    actually passed and pin the same attribute when applying the batch fallback.
 
     When neither a role-specific flag nor ``--core-mode`` is set on the CLI,
     the base-flag fallback routes through
     :func:`_resolve_effective_core_mode_pre_launch` so a release that ships
-    a non-``single`` ``core_mode`` in its config (e.g. Qwen3-VL Batch16 with
+    a non-default ``core_mode`` in its config (e.g. Qwen3-VL Batch16 with
     ``text_config.core_mode = 'global4'``) is still surfaced at pre-launch.
     The ``flag_label`` becomes ``"release config core_mode"`` in that case
     to keep the SystemExit message honest about where the value came from.
@@ -1052,8 +1051,9 @@ def _resolve_effective_llm_core_mode(
         trust_remote_code=getattr(args, "trust_remote_code", True),
         revision=getattr(args, "revision", None),
     )
-    label = "--core-mode" if effective is None else "release config core_mode"
-    return effective, label, "core_mode"
+    if effective is None:
+        return "auto", "default batch core_mode", "core_mode"
+    return effective, "release config core_mode", "core_mode"
 
 
 @dataclass(frozen=True)
@@ -1117,7 +1117,7 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
 
     Non-batch MXQ (effective batch axis ``== 1``) with ``--batch-size B > 1``
     is a separate sw-batch feature and stays unrestricted — sw-batch across
-    ``N`` slots is orthogonal to the batched-MXQ single-only rule.
+    ``N`` slots is orthogonal to the compiled MXQ core-mode constraint.
     """
     model = getattr(args, "model", None)
     if not model:
@@ -1128,6 +1128,8 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
     if not _is_vlm_task(getattr(args, "task", None)):
         is_eagle3 = _detect_eagle3_model(model, trust_remote_code=trust_remote_code, revision=revision)
     effective_core_mode, flag_label, args_attr = _resolve_effective_llm_core_mode(args, is_eagle3=is_eagle3)
+    if effective_core_mode == "auto" and getattr(args, args_attr, None) is None:
+        setattr(args, args_attr, "auto")
     if effective_core_mode == "single":
         return
     override_path = _select_llm_mxq_override(args)
@@ -1153,12 +1155,11 @@ def _enforce_batched_mxq_core_mode_constraint(args: argparse.Namespace) -> None:
             f"(model={args.model!r}, artifact K={probed_k}, "
             f"{flag_label}={effective_core_mode!r})"
         )
-    # Match the benchmark-script convention: pin the resolved role-specific
-    # flag to ``single`` for batched MXQ when the user did not pass it
+    # Pin the resolved role-specific flag to ``auto`` when the user did not pass it
     # explicitly. Pinning the role-specific attribute (not just ``core_mode``)
     # keeps :func:`_apply_vlm_core_mode_model_kwargs` and the EAGLE-3 prefix
-    # apply-path from later escalating the LLM MXQ back to a non-single mode.
-    setattr(args, args_attr, "single")
+    # apply-path from later escalating the LLM MXQ back to a fixed multi-core mode.
+    setattr(args, args_attr, "auto")
 
 
 def _resolve_llm_npu_backend(model: Any) -> Any | None:
@@ -1235,7 +1236,7 @@ def _verify_batched_mxq_core_mode_post_launch(pipeline: Any, args: argparse.Name
     config, e.g. a Qwen3-VL Batch16 release shipping with
     ``text_config.core_mode = 'global4'``). Without this fallback a
     batched MXQ under a release-configured ``global4`` runs to completion
-    without ever being validated against the batched-MXQ single-only
+    without ever being validated against the batched-MXQ core-mode
     rule.
     """
     ctx = getattr(args, "_batched_mxq_guard_ctx", None)

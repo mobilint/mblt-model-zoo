@@ -82,7 +82,7 @@ Quick mode defaults to single-core execution. If a model family can run the same
 pytest tests/transformers/text_generation/non_batch/test_qwen2.py --core-mode all
 ```
 
-Batch text-generation tests do not participate in this sweep. They default to `single`, and explicit `auto` is also supported for per-layer scheduled MXQs. The repository-wide default `--core-mode all` is accepted and folded into `single` for these suites, while explicit `global4` or `global8` values raise a usage error.
+Batch text-generation tests do not participate in this sweep. They use the model config's `core_mode`, falling back to `auto` when it is absent. The repository-wide default `--core-mode all` is accepted, while explicit `global4` or `global8` values raise a usage error.
 
 Prefix-specific sweeps are also supported for multi-backend models:
 
@@ -99,7 +99,7 @@ For any test, you can use keyword parameters explained in README.md [Keyword Par
   --dev-no=DEV_NO       NPU device number.
   --core-mode=CORE_MODE
                         NPU core mode (default: all=single/global4/global8; auto is also supported).
-                        Batch text-generation tests only accept `single`.
+                        Batch text-generation tests use config `core_mode`, falling back to `auto`.
   --target-cores=TARGET_CORES
                         Target cores (e.g., "0:0;0:1;0:2;0:3").
   --target-clusters=TARGET_CLUSTERS

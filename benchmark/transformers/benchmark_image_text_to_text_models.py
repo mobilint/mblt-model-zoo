@@ -152,6 +152,7 @@ class VLMBenchmarkTarget:
     mxq_path: str | None
     max_batch_size: int
     batch_mode: str
+    core_mode: str | None = None
 
 
 def _safe_filename(text: str) -> str:
@@ -1522,11 +1523,13 @@ def _resolve_runtime_defaults(args: argparse.Namespace, raw_argv: list[str]) -> 
     args._device_requested = args.device
     args._device_backend_explicit = device_backend_explicit
     args._device_backend_requested = args.device_backend
+    if core_mode_explicit and args.core_mode == "all":
+        core_mode_explicit = False
     args._core_mode_explicit = core_mode_explicit
     if args.batch_mode == "batch":
         if core_mode_explicit and args.core_mode not in {"single", "auto"}:
             raise SystemExit("batch benchmark only supports --core-mode single or auto")
-        args.core_mode = args.core_mode if core_mode_explicit else "single"
+        args.core_mode = args.core_mode if core_mode_explicit else "auto"
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=device_explicit,
@@ -1642,6 +1645,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             mxq_path=target.mxq_path,
             max_batch_size=target.max_batch_size,
             batch_mode=target.batch_mode,
+            core_mode=target.core_mode,
         )
         for target in _filter_text_targets_by_batch_mode(
             raw_targets,
@@ -1663,6 +1667,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
             args,
             target.batch_mode,
             disable_npu_specific_args=disable_npu_specific_args,
+            config_core_mode=target.core_mode,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(
@@ -1831,6 +1836,7 @@ def _collect_vlm_run_targets(
             args,
             target.batch_mode,
             disable_npu_specific_args=disable_npu_specific_args,
+            config_core_mode=target.core_mode,
         ):
             mode_label, mode_base = _append_core_mode_suffix_common(target.label, target.base, core_mode)
             mode_label, mode_base = _append_vlm_subconfig_core_mode_suffix(

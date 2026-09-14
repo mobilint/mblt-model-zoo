@@ -569,7 +569,7 @@ CLI `tps sweep` and transformer benchmark `sweep` subcommands default to `--pref
 
 - Pytest-based functional tests: [tests/transformers/TEST.md](../../tests/transformers/TEST.md)
   - The shared base `--core-mode` now defaults to `all`, so `pytest tests/transformers` sweeps `single`, `global4`, and `global8` for tests that use the base NPU backend.
-  - Batch text-generation tests are fixed to `--core-mode single` because batched LLM execution does not support other core modes. The shared default `--core-mode all` is accepted there and folded into `single`.
+  - Batch text-generation tests use the model config's `core_mode`, falling back to `auto` when it is absent. The shared default `--core-mode all` remains accepted there; fixed multi-core overrides are rejected.
   - Prefix-specific backends such as `vision_...`, `text_...`, `encoder_...`, and `decoder_...` are only swept when you explicitly pass options like `--vision-core-mode all`.
 - Benchmark scripts: [benchmark/transformers/README.md](../../benchmark/transformers/README.md)
   - Text-generation and VLM benchmarks default to `--core-mode global8`.
