@@ -478,6 +478,13 @@ def test_resolve_batch_core_mode_prefers_vlm_text_config(tmp_path):
     assert npu_backend_options.resolve_batch_core_mode(str(tmp_path), None, text_config=True) == "auto"
 
 
+def test_resolve_batch_core_mode_rejects_fixed_multi_core_config(tmp_path):
+    (tmp_path / "config.json").write_text('{"core_mode": "global8"}', encoding="utf-8")
+
+    with pytest.raises(pytest.UsageError, match="only supports core mode single or auto"):
+        npu_backend_options.resolve_batch_core_mode(str(tmp_path), None)
+
+
 def test_single_only_core_mode_validation_rejects_global4():
     config = _make_config(shared_core_mode="global4", explicit_args=("--core-mode=global4",))
 

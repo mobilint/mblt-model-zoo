@@ -7,6 +7,7 @@ from typing import Any, Literal, cast
 
 CoreMode = Literal["auto", "single", "multi", "global4", "global8"]
 CORE_MODE_VALUES = frozenset({"auto", "single", "multi", "global4", "global8"})
+BATCH_CORE_MODE_VALUES = frozenset({"auto", "single"})
 
 
 def normalize_core_mode(core_mode: str) -> CoreMode:
@@ -24,6 +25,13 @@ def normalize_core_mode(core_mode: str) -> CoreMode:
     if core_mode not in CORE_MODE_VALUES:
         raise ValueError(f"Invalid core mode '{core_mode}'. Expected one of {sorted(CORE_MODE_VALUES)}.")
     return cast(CoreMode, core_mode)
+
+
+def validate_batch_core_mode(core_mode: CoreMode) -> CoreMode:
+    """Validate a mode supported by batched MXQ execution."""
+    if core_mode not in BATCH_CORE_MODE_VALUES:
+        raise ValueError(f"Batch execution only supports core mode single or auto, got '{core_mode}'.")
+    return core_mode
 
 
 def normalize_config_core_mode(value: Any) -> CoreMode | None:

@@ -105,6 +105,7 @@ from mblt_model_zoo.hf_transformers.utils.benchmark_cli_common import (
     weighted_two as _weighted_two_common,
 )
 from mblt_model_zoo.utils.core_mode import config_core_mode_candidates as _config_core_mode_candidates_common
+from mblt_model_zoo.utils.core_mode import validate_batch_core_mode as _validate_batch_core_mode_common
 from mblt_model_zoo.utils.core_mode import normalize_config_core_mode as _normalize_config_core_mode_common
 from mblt_model_zoo.hf_transformers.utils.benchmark_utils import (
     BenchmarkResult,
@@ -1767,9 +1768,10 @@ def _iter_core_modes_for_target(
     if _is_batch_mode(batch_mode):
         if getattr(args, "_core_mode_explicit", False):
             return [args.core_mode]
-        if config_core_mode in {"multi", "global4", "global8"}:
-            raise SystemExit("batch benchmark only supports --core-mode single or auto")
-        return [config_core_mode or "auto"]
+        try:
+            return [_validate_batch_core_mode_common(config_core_mode or "auto")]
+        except ValueError as exc:
+            raise SystemExit("batch benchmark only supports --core-mode single or auto") from exc
     return list(_iter_core_modes_common(args.core_mode))
 
 

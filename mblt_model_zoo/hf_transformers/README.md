@@ -361,7 +361,7 @@ These are custom keyword parameters for Mobilint NPU execution (the compiled mod
   - `global8`: global scheduling across all cores (requires all clusters)
 
   Note: the effective/valid core mode depends on how the `*.mxq` was compiled. Some compiled models can reuse the same `*.mxq` file across `single`, `global4`, and `global8`, while newer MXQs can use `auto` to select among those modes per layer. `auto` requires qb Compiler 1.3 or newer and qb Runtime 1.4 or newer.
-  For general inference and benchmarks in this repository, the default runtime mode is `global8` unless you explicitly override it. Regulus variants (`regulus-ra`, `regulus-rb`, `regulus-ra-usb`, `regulus-rb-usb`) expose only one cluster and one core, so only `single` and `auto` are valid on those boards; `multi`, `global4`, and `global8` apply to `aries-rb` only.
+  For direct inference, a missing config value falls back to `auto`; benchmark entry points may use their documented suite-specific defaults. Regulus variants (`regulus-ra`, `regulus-rb`, `regulus-ra-usb`, `regulus-rb-usb`) expose only one cluster and one core, so only `single` and `auto` are valid on those boards; `multi`, `global4`, and `global8` apply to `aries-rb` only.
 
 - `target_cores` (`list[str]`)
 
