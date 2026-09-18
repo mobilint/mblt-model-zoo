@@ -103,9 +103,8 @@ def test_get_num_mxq_inputs_reads_variant_handle(shapes: list[tuple[int, ...]], 
 # ---------------------------------------------------------------------------
 # ``_classify_mxq_signature`` maps a compiled MXQ input count to the
 # ``(uses_split_deepstack_input, uses_rope_input)`` flags used by dispatch.
-# The batched-path invariant (split MXQ requires ``max_batch_size == 1``) is
-# enforced here so a mispaired MXQ / config fails at load, not at first
-# infer with a qbruntime shape mismatch.
+# Bundled and split dynamic MXQ layouts are both valid for batched releases;
+# the runtime preserves the compiled input order when packing DeepStack data.
 # ---------------------------------------------------------------------------
 
 
@@ -115,11 +114,12 @@ def test_get_num_mxq_inputs_reads_variant_handle(shapes: list[tuple[int, ...]], 
         # Bundled non-batch
         (2, 1, (False, False)),  # static
         (3, 1, (False, True)),   # dynamic
-        # Bundled batched: 3-input is the only supported batched layout
+        # Bundled batched
         (3, 16, (False, True)),
-        # Split non-batch
+        # Split non-batch and Batch16
         (4, 1, (True, False)),   # split/static
         (5, 1, (True, True)),    # split/dynamic
+        (5, 16, (True, True)),   # split/dynamic Batch16
     ],
 )
 def test_classify_mxq_signature_supported(
@@ -141,30 +141,10 @@ def test_classify_mxq_signature_rejects_unknown_count(num_mxq_inputs: int) -> No
         MobilintQwen3VLTextModel._classify_mxq_signature(num_mxq_inputs, max_batch_size=1)
 
 
-@pytest.mark.parametrize(
-    ("num_mxq_inputs", "max_batch_size"),
-    [
-        (4, 2),   # split/static + batch
-        (4, 16),  # split/static + Batch16 (would-be release)
-        (5, 2),   # split/dynamic + batch
-        (5, 16),  # split/dynamic + Batch16
-    ],
-)
-def test_classify_mxq_signature_rejects_split_with_batched(
-    num_mxq_inputs: int, max_batch_size: int
-) -> None:
-    """Split MXQ + ``max_batch_size > 1`` is unsupported: batched path is bundled-only.
-
-    The batched dispatch (``_llm_forward_batch_deepstack``) hard-codes the
-    3-input bundled layout, so a split MXQ paired with a batch build would
-    otherwise crash at first infer with an opaque qbruntime shape error.
-    """
-    with pytest.raises(
-        ValueError, match=r"split-deepstack.*only supported for max_batch_size == 1"
-    ):
-        MobilintQwen3VLTextModel._classify_mxq_signature(
-            num_mxq_inputs, max_batch_size=max_batch_size
-        )
+def test_classify_mxq_signature_rejects_split_static_batch() -> None:
+    """Split-static text MXQs cannot serve the batched dispatch path."""
+    with pytest.raises(ValueError, match=r"split-static.*max_batch_size == 1"):
+        MobilintQwen3VLTextModel._classify_mxq_signature(4, max_batch_size=16)
 
 
 # ---------------------------------------------------------------------------
@@ -623,7 +603,7 @@ def test_batched_path_rejects_2_input_mxq() -> None:
     inputs_embeds = torch.zeros((1, seq_len, hidden_size), dtype=torch.float32)
     attention_mask = torch.ones((1, seq_len), dtype=torch.long)
 
-    with pytest.raises(ValueError, match="requires a 3-input"):
+    with pytest.raises(ValueError, match="requires a dynamic text MXQ"):
         model._llm_forward_batch_deepstack(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,

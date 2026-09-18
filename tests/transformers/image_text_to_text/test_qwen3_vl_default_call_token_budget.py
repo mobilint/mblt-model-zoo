@@ -27,14 +27,14 @@ from tests.transformers.image_text_to_text.qwen3_vl_compat import (
 
 skip_if_transformers_lacks_qwen3_vl_support()
 
+from transformers.models.qwen2_vl.image_processing_qwen2_vl import (  # noqa: E402
+    Qwen2VLImageProcessor,
+)
 from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor  # noqa: E402
 
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
-)
-from transformers.models.qwen2_vl.image_processing_qwen2_vl import (  # noqa: E402
-    Qwen2VLImageProcessor,
 )
 
 # Transformers 5.x removed the scalar ``max_pixels`` / ``min_pixels`` attributes
@@ -67,19 +67,18 @@ def _make_processor_with_real_image_processor(
 
 
 @skip_if_no_scalar_pixels
-def test_clamp_writes_scalar_max_pixels_on_real_image_processor() -> None:
-    """The scalar attribute the tf 4.x fallback reads must be capped too."""
+def test_dynamic_resolution_does_not_modify_scalar_max_pixels() -> None:
+    """Dynamic resolution settings are not modified by Model Zoo."""
     proc = _make_processor_with_real_image_processor()
     ip = proc.image_processor
-    limit = proc.max_vision_tokens * ip.patch_size**2
+    limit = 2048 * ip.patch_size**2
     # Sanity: the default upstream ceiling is above the NPU budget, otherwise
     # this test would be a no-op and would not exercise the fix.
     assert ip.max_pixels > limit
 
     proc._clamp_dynamic_image_size()
 
-    assert ip.max_pixels == limit
-    assert ip.size["longest_edge"] == limit
+    assert ip.max_pixels > limit
 
 
 @skip_if_no_scalar_pixels
@@ -88,7 +87,7 @@ def test_clamp_leaves_small_min_pixels_untouched_on_real_image_processor() -> No
     proc = _make_processor_with_real_image_processor()
     ip = proc.image_processor
     original_min_pixels = ip.min_pixels
-    limit = proc.max_vision_tokens * ip.patch_size**2
+    limit = 2048 * ip.patch_size**2
     assert original_min_pixels <= limit
 
     proc._clamp_dynamic_image_size()
@@ -97,16 +96,16 @@ def test_clamp_leaves_small_min_pixels_untouched_on_real_image_processor() -> No
 
 
 @skip_if_no_scalar_pixels
-def test_clamp_caps_oversized_min_pixels_on_real_image_processor() -> None:
-    """``min_pixels`` above the ceiling would inflate a small input past the budget."""
+def test_dynamic_resolution_does_not_modify_oversized_min_pixels() -> None:
+    """An oversized ``min_pixels`` setting is passed through unchanged."""
     proc = _make_processor_with_real_image_processor()
     ip = proc.image_processor
-    limit = proc.max_vision_tokens * ip.patch_size**2
+    limit = 2048 * ip.patch_size**2
     ip.min_pixels = limit * 4  # simulate a caller-modified processor
 
     proc._clamp_dynamic_image_size()
 
-    assert ip.min_pixels == limit
+    assert ip.min_pixels == limit * 4
 
 
 def test_clamp_survives_image_processor_without_scalar_attribute() -> None:
@@ -125,8 +124,7 @@ def test_clamp_survives_image_processor_without_scalar_attribute() -> None:
     # Must not raise (no ``max_pixels`` attribute to touch).
     proc._clamp_dynamic_image_size()
 
-    limit = proc.max_vision_tokens * proc.image_processor.patch_size**2
-    assert proc.image_processor.size["longest_edge"] == limit
+    assert proc.image_processor.size["longest_edge"] == 4096 * 4096
     assert not hasattr(proc.image_processor, "max_pixels")
 
 
@@ -135,8 +133,8 @@ def test_clamp_survives_image_processor_without_scalar_attribute() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_default_call_on_oversized_image_stays_within_token_budget() -> None:
-    """No caller overrides: a 4K image must still land inside ``max_vision_tokens``.
+def test_default_call_on_oversized_image_is_not_capped() -> None:
+    """No caller overrides: a 4K image is allowed to exceed the former limit.
 
     This is the exact leak the reviewer called out: on tf 4.x, the effective
     ``max_pixels`` for a default call is ``self.max_pixels`` (via the
@@ -157,12 +155,10 @@ def test_default_call_on_oversized_image_stays_within_token_budget() -> None:
     per_image_tokens = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
 
     assert bool((per_image_tokens > 0).all())
-    assert bool((per_image_tokens <= proc.max_vision_tokens).all()), (
-        f"per-image grid exceeded budget: {per_image_tokens.tolist()} > {proc.max_vision_tokens}"
-    )
+    assert bool((per_image_tokens > 2048).all())
 
 
-def test_default_call_through_processor_stays_within_token_budget(
+def test_default_call_through_processor_is_not_capped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end via ``__call__``: no caller overrides, storage clamp is in effect.
@@ -175,7 +171,8 @@ def test_default_call_through_processor_stays_within_token_budget(
     """
     proc = _make_processor_with_real_image_processor()
     ip = proc.image_processor
-    limit = proc.max_vision_tokens * ip.patch_size**2
+    original_max_pixels = getattr(ip, "max_pixels", None)
+    original_longest_edge = ip.size["longest_edge"]
 
     seen: dict[str, object] = {}
 
@@ -193,11 +190,9 @@ def test_default_call_through_processor_stays_within_token_budget(
     image = torch.zeros((3, 2160, 3840), dtype=torch.uint8).numpy()
     proc(images=[image], text="describe <|image_pad|>")
 
-    if seen["max_pixels"] is not None:
-        assert seen["max_pixels"] == limit
-    assert seen["longest_edge"] == limit
+    if original_max_pixels is not None:
+        assert seen["max_pixels"] == original_max_pixels
+    assert seen["longest_edge"] == original_longest_edge
     grid_thw = seen["grid_thw"]
     per_image_tokens = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
-    assert bool((per_image_tokens <= proc.max_vision_tokens).all()), (
-        f"per-image grid exceeded budget after storage clamp: {per_image_tokens.tolist()} > {proc.max_vision_tokens}"
-    )
+    assert bool((per_image_tokens > 2048).all())
