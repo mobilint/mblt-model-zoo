@@ -37,6 +37,13 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         processor.dynamic_vision = bool(getattr(config, "dynamic_vision", False))
         return processor
 
+    def sync_dynamic_vision_from_model(self, model) -> None:
+        """Adopt the static/dynamic mode detected from a loaded vision MXQ."""
+        visual = getattr(getattr(model, "model", model), "visual", None)
+        if visual is None or not hasattr(visual, "_uses_dynamic_vision"):
+            raise ValueError("Expected a loaded Qwen2-VL model with a detected vision MXQ signature")
+        self.dynamic_vision = bool(visual._uses_dynamic_vision)
+
     def __call__(
         self,
         images: Optional[ImageInput] = None,

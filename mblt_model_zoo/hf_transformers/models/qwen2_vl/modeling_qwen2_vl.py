@@ -41,6 +41,18 @@ logger = logging.get_logger(__name__)
 
 
 @lru_cache(maxsize=1)
+def _upstream_qwen2_vl_vision_rotary_takes_position_ids() -> bool:
+    """Return whether the installed Qwen2-VL vision RoPE takes position IDs."""
+    try:
+        signature = inspect.signature(VisionRotaryEmbedding.forward)
+    except (TypeError, ValueError):
+        return False
+    parameters = list(signature.parameters.values())
+    first = parameters[1].name if len(parameters) >= 2 else ""
+    return first == "position_ids"
+
+
+@lru_cache(maxsize=1)
 def _upstream_qwen2_vl_uses_structured_vision_outputs() -> bool:
     """Check whether the installed Transformers expects ``visual()`` to return a model output.
 
@@ -99,8 +111,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
         if len(input_shapes) == 2:
             expected["rope"] = 2 * (((head_dim + 63) // 64) * 64)
         else:
-            expected["cos"] = 2 * head_dim
-            expected["sin"] = 2 * head_dim
+            expected["cos"] = head_dim
+            expected["sin"] = head_dim
         slots = {}
         folded_matches = [idx for idx, actual in enumerate(widths) if actual == fold_width]
         if len(folded_matches) != 1:
@@ -114,8 +126,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
                 slots[role] = matches[0]
         if len(input_shapes) == 3:
             remaining = [idx for idx in range(3) if idx != slots["folded"]]
-            if any(widths[idx] != 2 * head_dim for idx in remaining):
-                raise ValueError(f"Qwen2-VL dynamic vision widths {widths} do not match separate cos/sin width={2 * head_dim}.")
+            if any(widths[idx] != head_dim for idx in remaining):
+                raise ValueError(f"Qwen2-VL dynamic vision widths {widths} do not match separate cos/sin width={head_dim}.")
             # The compiler forward signature is (images, cos, sin). Widths
             # cannot distinguish these two same-shaped tensors, so preserve
             # their defined positional order after locating folded pixels.
@@ -226,7 +238,14 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
             pos_ids.append(torch.stack((hpos, wpos), dim=-1).repeat(int(t), 1))
         pos_ids = torch.cat(pos_ids, dim=0)
         max_grid_size = int(grid_thw[:, 1:].max())
-        return self.rotary_pos_emb(max_grid_size)[pos_ids].flatten(1)
+        if _upstream_qwen2_vl_vision_rotary_takes_position_ids():
+            inv_freq = self.rotary_pos_emb.inv_freq
+            device = torch.device("cpu") if inv_freq.device.type == "meta" else inv_freq.device
+            position_ids = torch.arange(max_grid_size, device=device, dtype=inv_freq.dtype)
+            freq_table = self.rotary_pos_emb(position_ids)
+        else:
+            freq_table = self.rotary_pos_emb(max_grid_size)
+        return freq_table[pos_ids.to(freq_table.device)].flatten(1)
 
     def _build_vision_rotate_tensor(self, grid_thw: torch.Tensor) -> np.ndarray:
         rotary = self._rot_pos_emb(grid_thw)
@@ -473,12 +492,19 @@ class MobilintQwen2VLForConditionalGeneration(
         self._pretrained_only_base_init(config, *args, **kwargs)
 
         self.model = MobilintQwen2VLModel(config, _internal_call=True)
+        self.config.dynamic_vision = bool(getattr(self.model.visual, "_uses_dynamic_vision", False))
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
 
     def get_cache_mxq_model(self):
         return self.model.language_model.get_mxq_model()
+
+    def sync_dynamic_vision_from_model(self) -> bool:
+        """Publish the detected vision-MXQ mode for an overridden processor."""
+        detected = bool(getattr(self.model.visual, "_uses_dynamic_vision", False))
+        self.config.dynamic_vision = detected
+        return detected
 
     @with_mobilint_generation_signature(
         Qwen2VLForConditionalGeneration.prepare_inputs_for_generation,
