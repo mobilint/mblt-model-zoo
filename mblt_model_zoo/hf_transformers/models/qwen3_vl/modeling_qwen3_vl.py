@@ -679,8 +679,24 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                 logger.debug("[Vision] Input[%d] (dynamic, %d tensors): %s", i, len(inp), shapes)
             else:
                 logger.debug("[Vision] Input[%d] shape: %s", i, np.asarray(inp).shape)
-        if not is_dynamic and core_mode == "multi" and len(npu_inputs) > 1:
-            encoder_outputs = mxq_model.infer(np.stack(npu_inputs, axis=0))
+        if (
+            core_mode == "multi"
+            and len(npu_inputs) > 1
+            and MobilintQwen3VLVisionModel._can_batch_vision_inputs(npu_inputs)
+        ):
+            # Dynamic vision inputs carry per-image RoPE and position tensors.
+            # They can be batched when all images resolve to the same token
+            # shape; otherwise the dynamic sequence axis requires one infer per
+            # image. This is the path used by batched Qwen3-VL releases such as
+            # Qwen3-VL-2B-Instruct-Batch16.
+            if is_dynamic:
+                batched_inputs = [
+                    np.stack([image_input[input_index] for image_input in npu_inputs], axis=0)
+                    for input_index in range(len(npu_inputs[0]))
+                ]
+                encoder_outputs = mxq_model.infer(batched_inputs)
+            else:
+                encoder_outputs = mxq_model.infer(np.stack(npu_inputs, axis=0))
             if encoder_outputs is None:
                 raise RuntimeError("Vision MXQ inference returned None.")
             return self._reorder_encoder_outputs(encoder_outputs, hidden_states.device, batch_size=len(npu_inputs))
@@ -699,6 +715,21 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
                 deepstack_by_layer[layer_idx].append(deepstack_embed)
 
         return torch.cat(image_embeds, dim=0), [torch.cat(layer_embeds, dim=0) for layer_embeds in deepstack_by_layer]
+
+    @staticmethod
+    def _can_batch_vision_inputs(npu_inputs: list) -> bool:
+        """Return whether all per-image vision payloads have identical shapes."""
+        if not npu_inputs or not isinstance(npu_inputs[0], list):
+            return not npu_inputs or all(
+                np.asarray(item).shape == np.asarray(npu_inputs[0]).shape for item in npu_inputs
+            )
+        first_shapes = [np.asarray(item).shape for item in npu_inputs[0]]
+        return all(
+            isinstance(item, list)
+            and len(item) == len(first_shapes)
+            and [np.asarray(value).shape for value in item] == first_shapes
+            for item in npu_inputs
+        )
 
 
 class MobilintQwen3VLRotaryEmbedding(nn.Module):
@@ -904,7 +935,7 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     # key sourced from ``config.text_config`` (e.g. ``mxq_input_layout``) or MXQ
     # variant-handle metadata, rather than extending these tuples further.
     _BUNDLED_MXQ_INPUT_COUNTS = (2, 3)  # 2: static, 3: dynamic non-batch or batched
-    _SPLIT_MXQ_INPUT_COUNTS = (4, 5)    # 4: split/static, 5: split/dynamic (non-batch)
+    _SPLIT_MXQ_INPUT_COUNTS = (4, 5)    # 4: split/static, 5: split/dynamic
     _ROPE_MXQ_INPUT_COUNTS = (3, 5)     # signatures that carry an external rope tensor
 
     @classmethod
@@ -933,9 +964,10 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         #     - 5-input ``[inputs_embeds, deepstack_0, deepstack_1,
         #       deepstack_2, rope]`` — split/dynamic.
         #   * Batch (``max_batch_size > 1``, e.g. the Batch16 W8 build):
-        #     3-input ``[inputs_embeds (1,-1,H), rope (1,-1,peSize),
-        #     deepstack (num_layers,-1,H)]`` only — the legacy 2-input batch
-        #     MXQ is no longer supported (see ``_llm_forward_batch_deepstack``).
+        #     bundled 3-input ``[inputs_embeds, rope, deepstack]`` or split
+        #     5-input ``[inputs_embeds, deepstack_0, deepstack_1,
+        #     deepstack_2, rope]``. Both dynamic layouts are supported by
+        #     ``_llm_forward_batch_deepstack``.
         # The 3-input orders differ between non-batch and batch builds; the
         # compiled signatures are independent and each dispatch honors its own
         # layout. We trust the compiled MXQ over any config attr for the input
@@ -980,12 +1012,9 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
     ) -> tuple[bool, bool]:
         """Map a compiled MXQ input count to ``(uses_split, uses_rope)`` or raise.
 
-        The classifier also enforces the batched-path invariant: the batched
-        deepstack dispatch (``_llm_forward_batch_deepstack``) hard-codes the
-        3-input bundled ``[inputs, rope, deepstack]`` layout, so a split MXQ
-        (4/5 inputs) with ``max_batch_size > 1`` is unsupported. Rejecting at
-        load time yields a legible ValueError instead of a downstream
-        qbruntime shape mismatch at first infer.
+        Batched dispatch supports both bundled and split DeepStack layouts;
+        the compiled input order is selected from ``_uses_split_deepstack_input``
+        and ``_uses_rope_input`` at inference time.
         """
         known_input_counts = cls._BUNDLED_MXQ_INPUT_COUNTS + cls._SPLIT_MXQ_INPUT_COUNTS
         if num_mxq_inputs not in known_input_counts:
@@ -994,21 +1023,13 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
                 f"got {num_mxq_inputs}. Supported layouts (assumes three "
                 "DeepStack layers, current Qwen3-VL family): "
                 "2 (bundled static non-batch), 3 (bundled dynamic non-batch OR "
-                "3-input batched), 4 (split static non-batch), 5 (split dynamic "
-                "non-batch). Extend ``_BUNDLED_MXQ_INPUT_COUNTS``, "
+                "3-input batched), 4 (split static), 5 (split dynamic). Extend "
+                "``_BUNDLED_MXQ_INPUT_COUNTS``, "
                 "``_SPLIT_MXQ_INPUT_COUNTS``, and ``_ROPE_MXQ_INPUT_COUNTS`` when "
                 "a variant with a different DeepStack layer count ships."
             )
         uses_split = num_mxq_inputs in cls._SPLIT_MXQ_INPUT_COUNTS
         uses_rope = num_mxq_inputs in cls._ROPE_MXQ_INPUT_COUNTS
-        if uses_split and max_batch_size > 1:
-            raise ValueError(
-                "Qwen3-VL split-deepstack text MXQ (per-layer inputs) is only "
-                f"supported for max_batch_size == 1; got max_batch_size="
-                f"{max_batch_size} with a {num_mxq_inputs}-input MXQ. Batched "
-                "builds must use the 3-input bundled layout "
-                "[inputs_embeds, rope, deepstack]."
-            )
         return uses_split, uses_rope
 
     def _get_num_mxq_inputs(self) -> int:
@@ -1534,22 +1555,18 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         we skip ``cache.set_deepstack_tensor`` / ``update_cache_position``
         (they are only needed by the single-batch decode replay path).
 
-        The batched path only supports the 3-input ``[inputs, rope,
-        deepstack]`` MXQ signature (i.e. the current Batch16 W8 build). The
-        caller supplies a shared ``position_embeddings`` array of shape
+        The batched path supports bundled dynamic MXQs with
+        ``[inputs, rope, deepstack]`` and split dynamic MXQs with
+        ``[inputs, deepstack_0, deepstack_1, deepstack_2, rope]``. The caller
+        supplies a shared ``position_embeddings`` array of shape
         ``(batch, seq_len, peSize)`` pre-computed once in :meth:`forward`;
-        per-item rope rows are sliced the same way as deepstack and
-        concatenated so the packed extras arrive at the compiled model as
-        ``[rope, deepstack]`` — the positions the 3-input MXQ expects.
+        per-item rope rows are sliced the same way as deepstack and packed in
+        the order required by the compiled signature.
         """
         del cache_position  # Batched path uses `update_seen_tokens` bookkeeping.
 
         if not self._uses_rope_input:
-            raise ValueError(
-                "Batched Qwen3-VL text inference requires a 3-input "
-                "[inputs, rope, deepstack] MXQ (the current Batch16 build). "
-                "The legacy 2-input batch MXQ is no longer supported."
-            )
+            raise ValueError("Batched Qwen3-VL text inference requires a dynamic text MXQ with a rope input.")
         assert position_embeddings is not None, (
             "position_embeddings must be provided for the 3-input Qwen3-VL text MXQ."
         )
@@ -1574,28 +1591,35 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             sequence_lengths_chunks: list[int],
             cache_ids: list[int],
         ) -> list[np.ndarray]:
-            # Batched builds ship the 3-input signature
-            # ``[inputs, rope, deepstack]``. Slice each active item's
-            # per-item tensors with the same
+            # Slice each active item's side inputs with the same
             # ``[chunk_start, chunk_start + chunk_len_k)`` window the base
-            # helper uses for ``inputs_embeds_masked`` and concat along the
-            # token axis so the packed shapes match the compiled model:
-            # rope becomes ``(1, packed_tokens, peSize)`` (leading batch
-            # axis lifted from the per-item ``(seq_len_j, peSize)`` slices)
-            # and deepstack becomes ``(num_layers, packed_tokens, hidden)``.
+            # helper uses for ``inputs_embeds_masked`` and concatenate along
+            # the token axis. Keep the compiled input order: bundled builds
+            # take ``[rope, deepstack]`` while split builds take one tensor per
+            # DeepStack layer followed by ``rope``.
             rope_chunks: list[np.ndarray] = []
-            deepstack_chunks: list[torch.Tensor] = []
+            deepstack_chunks_by_layer: list[list[torch.Tensor]] = [
+                [] for _ in range(self.num_deepstack_layers)
+            ]
             for k, cache_id in enumerate(cache_ids):
                 length = sequence_lengths_chunks[k]
                 end = chunk_start + length
                 rope_chunks.append(rope_by_item[cache_id][chunk_start:end, :])
-                deepstack_chunks.append(deepstack_by_item[cache_id][:, chunk_start:end, :])
+                deepstack_item = deepstack_by_item[cache_id][:, chunk_start:end, :]
+                for layer_idx in range(self.num_deepstack_layers):
+                    deepstack_chunks_by_layer[layer_idx].append(deepstack_item[layer_idx : layer_idx + 1])
             rope_concat = np.concatenate(rope_chunks, axis=0)[np.newaxis, :, :]
-            deepstack_concat = torch.cat(deepstack_chunks, dim=1)
-            return [
-                rope_concat.astype(np.float32, copy=False),
-                deepstack_concat.to(dtype=torch.float32).cpu().numpy(),
-            ]
+            rope_array = rope_concat.astype(np.float32, copy=False)
+            if self._uses_split_deepstack_input:
+                deepstack_arrays = [
+                    torch.cat(layer_chunks, dim=1).to(dtype=torch.float32).cpu().numpy()
+                    for layer_chunks in deepstack_chunks_by_layer
+                ]
+                return [*deepstack_arrays, rope_array]
+            deepstack_concat = torch.cat(
+                [torch.cat(layer_chunks, dim=1) for layer_chunks in deepstack_chunks_by_layer], dim=0
+            )
+            return [rope_array, deepstack_concat.to(dtype=torch.float32).cpu().numpy()]
 
         return self._llm_forward_batch(
             inputs_embeds,

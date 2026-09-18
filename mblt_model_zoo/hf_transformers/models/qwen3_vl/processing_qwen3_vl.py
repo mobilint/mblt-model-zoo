@@ -40,22 +40,10 @@ _VIDEO_OUTER_WRAP_RE = re.compile(
     r"<\|vision_start\|>\s*<\|video_pad\|>\s*<\|vision_end\|>"
 )
 
-# The dynamic vision MXQ takes the pre-merge patch sequence as `inputs[0]`. Its op
-# descriptor declares a 4096-token ceiling, but anything above 2048 hangs the NPU
-# (watchdog timeout -> `Model_NotAlive`) rather than erroring out, so the default is
-# the largest length measured to run. Override `max_vision_tokens` for an MXQ that
-# supports longer sequences.
-#
-# Enforcement strategy — cap-preprocessing (Option 1 from the design). The
-# stored processor defaults are capped once at load time by
-# ``_clamp_dynamic_image_size`` / ``_clamp_dynamic_video_size`` so the default
-# path is safe; caller overrides (``size``, ``max_pixels``, ``min_pixels``,
-# ``do_resize``, in either the top-level kwargs or the nested
-# ``images_kwargs`` / ``videos_kwargs``) are re-clamped at call time by
-# ``_clamp_dynamic_image_call_kwargs`` / ``_clamp_dynamic_video_call_kwargs``
-# right before dispatch to ``super().__call__``. ``do_resize=False`` is hard-
-# rejected because it strips the ceiling entirely — the resulting patch count
-# would depend on raw pixel resolution with no upper bound.
+# Video processors still use this conservative default because video token
+# volume is multiplied by the frame count. Image resolution is intentionally
+# not limited here: dynamic image MXQs may support larger sequences, and the
+# paired release's preprocessor configuration owns that contract.
 _NPU_MAX_VISION_TOKENS = 2048
 
 # Structural vision kwargs baked into the vision MXQ at compile time. The
@@ -537,96 +525,17 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         return cls._resize_one(images)
 
     def _clamp_dynamic_image_size(self) -> None:
-        """Cap `max_pixels` so dynamic-vision grids fit the NPU sequence limit.
+        """Keep the image processor's configured resolution unchanged.
 
-        The dynamic vision MXQ receives the pre-merge patch sequence as
-        `inputs[0]`, so its length is `grid_t * grid_h * grid_w` and must stay
-        within `max_vision_tokens`. `smart_resize` guarantees
-        `height * width <= max_pixels`, so bounding `max_pixels` by
-        `max_vision_tokens * patch_size ** 2` bounds the patch count as well,
-        while preserving the aspect ratio and the `patch_size * merge_size`
-        grid alignment.
-
-        Capping `max_pixels` rather than pre-resizing via `_resize_images` is
-        deliberate: `smart_resize` runs *after* that hook and re-rounds every
-        side to a `patch_size * merge_size` multiple, so a pre-resized side can
-        be rounded back up and silently overshoot the budget.
-
-        Two surfaces feed ``smart_resize`` and both must be capped. tf 4.x's
-        ``Qwen2VLImageProcessor`` (the base of Qwen3-VL's image processor)
-        stores ``max_pixels`` / ``min_pixels`` as separate scalar attributes,
-        and its ``preprocess()`` falls back to those attributes when the
-        caller omits ``max_pixels`` — the effective ``size`` is then derived
-        via a "backward-compatibility" branch as
-        ``{shortest_edge: self.min_pixels, longest_edge: self.max_pixels}``,
-        and ``self.size`` is never even consulted. Updating only ``self.size``
-        therefore does nothing on the default no-override path. tf 5.x's
-        image processor dropped those scalar attributes, so we guard with a
-        ``getattr`` sentinel and skip the scalar branch when they are absent.
+        Dynamic Qwen3-VL releases may be compiled for more than the historical
+        2048-token limit. Image resolution is therefore owned by the release's
+        processor configuration and is not capped by Model Zoo.
         """
-        ip = self.image_processor
-        limit = self.max_vision_tokens * ip.patch_size ** 2
-        current_longest = ip.size["longest_edge"]
-        _MISSING = object()
-        current_max_pixels = getattr(ip, "max_pixels", _MISSING)
-        size_over_budget = current_longest > limit
-        scalar_over_budget = (
-            current_max_pixels is not _MISSING
-            and current_max_pixels is not None
-            and current_max_pixels > limit
-        )
-        if not (size_over_budget or scalar_over_budget):
-            return
-
-        logger.info(
-            "[dynamic-vision] capped max_pixels %d -> %d (<= %d vision tokens)",
-            current_max_pixels if scalar_over_budget else current_longest,
-            limit,
-            self.max_vision_tokens,
-        )
-        if size_over_budget:
-            ip.size = _update_size(
-                ip.size,
-                longest_edge=limit,
-                shortest_edge=min(ip.size["shortest_edge"], limit),
-            )
-        if scalar_over_budget:
-            ip.max_pixels = limit
-            current_min_pixels = getattr(ip, "min_pixels", _MISSING)
-            if (
-                current_min_pixels is not _MISSING
-                and current_min_pixels is not None
-                and current_min_pixels > limit
-            ):
-                ip.min_pixels = limit
+        return
 
     def _clamp_dynamic_image_call_kwargs(self, kwargs: dict) -> None:
-        """Cap image-side caller overrides so nothing exceeds the NPU vision-token budget.
-
-        ``_clamp_dynamic_image_size`` caps the stored processor defaults, but the
-        caller can still smuggle a bypass through top-level ``kwargs`` (``size``,
-        ``max_pixels``, ``min_pixels``, ``do_resize``) or nested
-        ``images_kwargs``. Upstream ``_merge_kwargs`` reads both routes: a flat
-        top-level kwarg is copied into every modality's kwarg dict (``.get``,
-        not ``.pop``), and the nested per-modality dict wins on collision. Any
-        one of these can silently produce a grid with
-        ``grid_h * grid_w > max_vision_tokens``, which hangs the NPU rather
-        than erroring cleanly. Re-clamp both scopes here so the effective values
-        stay inside the budget after caller overrides land.
-
-        ``do_resize=False`` is a hard reject: the caller has asked the image
-        processor to skip resize entirely, so patch extraction runs at raw
-        resolution and the budget has no upper bound. Fail loudly with a
-        message pointing at the ceiling rather than silently overriding the
-        caller's intent.
-        """
-        ip = self.image_processor
-        limit = self.max_vision_tokens * ip.patch_size ** 2
-        for scope in self._call_kwargs_scopes(kwargs, "images_kwargs"):
-            self._reject_do_resize_false(scope, "image")
-            self._cap_pixel_kwargs(scope, limit, "image")
-            self._cap_size_edges(scope, limit, "image")
-        self._mirror_pixel_caps_to_image_size(kwargs, limit)
+        """Leave image resize overrides untouched for dynamic vision releases."""
+        del kwargs
 
     def _clamp_dynamic_video_size(self) -> None:
         """Cap `max_pixels` so dynamic-vision video frames fit the NPU sequence limit.
@@ -1066,16 +975,10 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
            still owns the story: it only clamps video kwargs on the dynamic
            branch and hands the reject to ``__call__`` for the static branch.
 
-        3. **Dynamic vision-token budget.** A dynamic-vision release accepts
-           variable resolutions, but the vision MXQ hangs the NPU (watchdog
-           timeout → ``Model_NotAlive``) above the pre-merge patch ceiling of
-           ``self.max_vision_tokens * patch_size ** 2``. Cap the storage
-           defaults (``ip.size`` / ``ip.max_pixels``, ``vp.size`` /
-           ``vp.max_pixels``) so an omitted-kwarg call is safe by default,
-           then re-clamp any per-call ``size`` / ``max_pixels`` /
-           ``min_pixels`` overrides in both the top-level and the nested
-           per-modality scopes. ``do_resize=False`` is a hard reject because
-           it strips the ceiling entirely.
+        3. **Dynamic video-token budget.** Dynamic images retain the full
+           resolution requested by their release processor. Dynamic video
+           frames keep the conservative token-volume guard because video
+           multiplies the visual sequence by the frame count.
 
         4. **MRoPE metadata invariant.** tf 5.x's ``Qwen3VLModel.compute_3d_position_ids``
            and the generate-side ``_prepare_position_ids_for_generation``
@@ -1094,13 +997,9 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         Release-level contract hard-fails (video-on-static, per-prompt
         multi-image-on-static) are *not* caller-kwargs invariants — they
         reject inputs the loaded release cannot serve at all — so they
-        happen in ``__call__`` before this envelope runs. Storage-level
-        defaults (``_clamp_dynamic_image_size`` / ``_clamp_dynamic_video_size``)
-        are invoked here as the belt-and-suspenders companion to the
-        per-call clamp: the envelope catches caller overrides, the storage
-        clamp catches the omitted-kwarg default path (tf 4.x's
-        ``Qwen2VLImageProcessor.preprocess`` reads ``self.max_pixels`` from
-        the scalar attribute when the caller omits it).
+        happen in ``__call__`` before this envelope runs. Dynamic image
+        resize defaults and overrides are passed through; only dynamic video
+        keeps its conservative frame-token guard.
         """
         if images is not None:
             self._reject_structural_vision_overrides(
