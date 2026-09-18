@@ -102,11 +102,24 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
             expected["cos"] = 2 * head_dim
             expected["sin"] = 2 * head_dim
         slots = {}
-        for role, width in expected.items():
+        folded_matches = [idx for idx, actual in enumerate(widths) if actual == fold_width]
+        if len(folded_matches) != 1:
+            raise ValueError(f"Qwen2-VL dynamic vision widths {widths} do not uniquely identify folded={fold_width}.")
+        slots["folded"] = folded_matches[0]
+        for role, width in list(expected.items())[1:]:
             matches = [idx for idx, actual in enumerate(widths) if actual == width]
-            if len(matches) != 1:
+            if role == "rope" and len(matches) != 1:
                 raise ValueError(f"Qwen2-VL dynamic vision widths {widths} do not match {role}={width}.")
-            slots[role] = matches[0]
+            if role == "rope":
+                slots[role] = matches[0]
+        if len(input_shapes) == 3:
+            remaining = [idx for idx in range(3) if idx != slots["folded"]]
+            if any(widths[idx] != 2 * head_dim for idx in remaining):
+                raise ValueError(f"Qwen2-VL dynamic vision widths {widths} do not match separate cos/sin width={2 * head_dim}.")
+            # The compiler forward signature is (images, cos, sin). Widths
+            # cannot distinguish these two same-shaped tensors, so preserve
+            # their defined positional order after locating folded pixels.
+            slots["cos"], slots["sin"] = remaining
         return slots
 
     @property
@@ -262,12 +275,6 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
     def _encode_images(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
         """Run Qwen2-VL vision encoding with core-mode-specific batch handling."""
         uses_dynamic = bool(getattr(self, "_uses_dynamic_vision", False))
-        limit = int(getattr(self.config, "max_vision_tokens", 2048))
-        if uses_dynamic:
-            for grid in grid_thw:
-                tokens = int(grid[0] * grid[1] * grid[2] // self.spatial_merge_size**2)
-                if tokens > limit:
-                    raise ValueError(f"Qwen2-VL vision token count {tokens} exceeds max_vision_tokens={limit}")
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
         mxq_inputs = (
             [self._prepare_dynamic_npu_inputs(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
@@ -299,20 +306,27 @@ class MobilintQwen2VLRotaryEmbedding:
 
     def __init__(self, config: MobilintQwen2VLTextConfig):
         self.head_dim = int(config.hidden_size) // int(config.num_attention_heads)
-        self.rope_theta = float(getattr(config, "rope_theta", 10000.0))
         scaling = getattr(config, "rope_scaling", None) or {}
+        self.rope_theta = float(getattr(config, "rope_theta", None) or scaling.get("rope_theta", 10000.0))
         section = scaling.get("mrope_section")
         if section is not None and sum(section) * 2 != self.head_dim:
             raise ValueError(f"Qwen2-VL mrope_section={section} does not cover head_dim={self.head_dim}")
         self.mrope_section = section
-        self.inv_freq = 1.0 / (
-            self.rope_theta ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32) / self.head_dim)
-        )
+        self.inv_freq = None
         self.pe_size = 2 * (((self.head_dim + 63) // 64) * 64)
 
+    def _get_inv_freq(self) -> torch.Tensor:
+        if self.inv_freq is None or self.inv_freq.device.type == "meta":
+            self.inv_freq = 1.0 / (
+                self.rope_theta
+                ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32, device="cpu") / self.head_dim)
+            )
+        return self.inv_freq
+
     def __call__(self, position_ids: torch.Tensor) -> np.ndarray:
-        position_ids = position_ids[:3].to(dtype=torch.float32, device=self.inv_freq.device)
-        freqs = torch.einsum("d,nbs->nbsd", self.inv_freq, position_ids)
+        inv_freq = self._get_inv_freq()
+        position_ids = position_ids[:3].to(dtype=torch.float32, device=inv_freq.device)
+        freqs = torch.einsum("d,nbs->nbsd", inv_freq, position_ids)
         emb = torch.cat((freqs, freqs), dim=-1)
         cos, sin = emb.cos(), emb.sin()
         if self.mrope_section is not None:

@@ -15,12 +15,10 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
     """Qwen2-VL processor with a compiled-graph-driven dynamic path."""
 
     dynamic_vision = False
-    max_vision_tokens = 2048
 
-    def __init__(self, *args, dynamic_vision: bool = False, max_vision_tokens: int = 2048, **kwargs):
+    def __init__(self, *args, dynamic_vision: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self.dynamic_vision = bool(dynamic_vision)
-        self.max_vision_tokens = int(max_vision_tokens)
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *args, **kwargs):
@@ -37,32 +35,7 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         except (OSError, ValueError, KeyError):
             return processor
         processor.dynamic_vision = bool(getattr(config, "dynamic_vision", False))
-        processor.max_vision_tokens = int(getattr(config, "max_vision_tokens", 2048))
         return processor
-
-    @staticmethod
-    def _cap_scope(scope: dict, limit: int) -> None:
-        for key in ("max_pixels", "min_pixels"):
-            if scope.get(key) is not None:
-                scope[key] = min(int(scope[key]), limit)
-        size = scope.get("size")
-        if isinstance(size, dict):
-            for key in ("longest_edge", "shortest_edge"):
-                if size.get(key) is not None:
-                    size[key] = min(int(size[key]), limit)
-
-    def _clamp_dynamic_kwargs(self, kwargs: dict, *, patch_area: int, nested_key: str) -> None:
-        """Limit smart_resize's pixel budget so the merged patch count stays bounded."""
-        pixel_limit = max(1, int(self.max_vision_tokens)) * patch_area
-        scopes = [kwargs]
-        nested = kwargs.get(nested_key)
-        if isinstance(nested, dict):
-            scopes.append(nested)
-        for scope in scopes:
-            self._cap_scope(scope, pixel_limit)
-        processor = self.image_processor if nested_key == "images_kwargs" else self.video_processor
-        if processor is not None and hasattr(processor, "max_pixels"):
-            processor.max_pixels = min(int(processor.max_pixels), pixel_limit)
 
     def __call__(
         self,
@@ -74,11 +47,6 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         if text is None:
             raise ValueError("text is required for Qwen2-VL processing")
         if self.dynamic_vision:
-            patch_area = (int(self.image_processor.patch_size) * int(self.image_processor.merge_size)) ** 2
-            if images is not None:
-                self._clamp_dynamic_kwargs(kwargs, patch_area=patch_area, nested_key="images_kwargs")
-            if videos is not None:
-                self._clamp_dynamic_kwargs(kwargs, patch_area=patch_area, nested_key="videos_kwargs")
             return super().__call__(images, text, videos, **kwargs)
 
         if videos is not None:
