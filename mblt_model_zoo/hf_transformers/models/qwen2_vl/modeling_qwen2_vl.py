@@ -2,6 +2,7 @@ import inspect
 from functools import lru_cache
 from typing import Any, Union, cast
 
+import numpy as np
 import torch
 import torch.nn as nn
 from transformers.modeling_outputs import BaseModelOutputWithPast, BaseModelOutputWithPooling
@@ -14,6 +15,7 @@ from transformers.models.qwen2_vl.modeling_qwen2_vl import (
     Qwen2VLCausalLMOutputWithPast,
     Qwen2VLForConditionalGeneration,
     Qwen2VLModel,
+    VisionRotaryEmbedding,
 )
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
@@ -67,6 +69,45 @@ class MobilintQwen2VLPreTrainedModel(PreTrainedModel):
 class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, MobilintQwen2VLPreTrainedModel):
     config: MobilintQwen2VLVisionConfig
     input_modalities = ("image", "video")
+
+    def __init__(self, config: MobilintQwen2VLVisionConfig, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
+        input_shapes = self.get_mxq_model().get_model_variant_handle(0).get_model_input_shape()
+        self._uses_dynamic_vision = self._resolve_dynamic_vision_flag(len(input_shapes))
+        if bool(getattr(config, "dynamic_vision", False)) != self._uses_dynamic_vision:
+            logger.warning("Qwen2-VL vision MXQ signature overrides config.dynamic_vision=%s", config.dynamic_vision)
+        config.dynamic_vision = self._uses_dynamic_vision
+        if self._uses_dynamic_vision:
+            head_dim = int(config.embed_dim) // int(config.num_heads)
+            self.rotary_pos_emb = VisionRotaryEmbedding(head_dim // 2)
+            self._dynamic_input_slots = self._resolve_dynamic_input_slots(input_shapes, config)
+
+    @staticmethod
+    def _resolve_dynamic_vision_flag(num_mxq_inputs: int) -> bool:
+        if num_mxq_inputs == 1:
+            return False
+        if num_mxq_inputs in (2, 3):
+            return True
+        raise ValueError(f"Qwen2-VL vision MXQ must expose 1, 2, or 3 inputs; got {num_mxq_inputs}.")
+
+    @staticmethod
+    def _resolve_dynamic_input_slots(input_shapes, config) -> dict[str, int]:
+        widths = [int(shape[-1]) for shape in input_shapes]
+        fold_width = int(config.in_channels) * int(config.temporal_patch_size) * int(config.patch_size) ** 2
+        head_dim = int(config.embed_dim) // int(config.num_heads)
+        expected = {"folded": fold_width}
+        if len(input_shapes) == 2:
+            expected["rope"] = 2 * (((head_dim + 63) // 64) * 64)
+        else:
+            expected["cos"] = 2 * head_dim
+            expected["sin"] = 2 * head_dim
+        slots = {}
+        for role, width in expected.items():
+            matches = [idx for idx, actual in enumerate(widths) if actual == width]
+            if len(matches) != 1:
+                raise ValueError(f"Qwen2-VL dynamic vision widths {widths} do not match {role}={width}.")
+            slots[role] = matches[0]
+        return slots
 
     @property
     def dtype(self) -> torch.dtype:
@@ -161,6 +202,48 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
             raise ValueError(f"Unexpected total Qwen2-VL pixel token count: {hidden_states.shape[0]} vs {offset}")
         return chunks
 
+    def _rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
+        pos_ids = []
+        for t, h, w in grid_thw:
+            hpos = torch.arange(h, device=grid_thw.device).unsqueeze(1).expand(-1, w)
+            wpos = torch.arange(w, device=grid_thw.device).unsqueeze(0).expand(h, -1)
+            shape = (h // self.spatial_merge_size, self.spatial_merge_size, w // self.spatial_merge_size, self.spatial_merge_size)
+            hpos = hpos.reshape(shape).permute(0, 2, 1, 3).flatten()
+            wpos = wpos.reshape(shape).permute(0, 2, 1, 3).flatten()
+            pos_ids.append(torch.stack((hpos, wpos), dim=-1).repeat(int(t), 1))
+        pos_ids = torch.cat(pos_ids, dim=0)
+        max_grid_size = int(grid_thw[:, 1:].max())
+        return self.rotary_pos_emb(max_grid_size)[pos_ids].flatten(1)
+
+    def _build_vision_rotate_tensor(self, grid_thw: torch.Tensor) -> np.ndarray:
+        rotary = self._rot_pos_emb(grid_thw)
+        emb = torch.cat((rotary, rotary), dim=-1)
+        cos_val, sin_val = emb.cos(), emb.sin()
+        dim = int(emb.shape[-1])
+        half = dim // 2
+        tgt_half = ((dim + 63) // 64) * 64
+        packed = torch.zeros((emb.shape[0], 2 * tgt_half), dtype=torch.float32, device=emb.device)
+        packed[:, 0:dim:2] = cos_val[:, :half]
+        packed[:, 1:dim:2] = -sin_val[:, :half]
+        packed[:, tgt_half : tgt_half + dim : 2] = sin_val[:, half:]
+        packed[:, tgt_half + 1 : tgt_half + dim : 2] = cos_val[:, half:]
+        return packed.reshape(1, -1, 2 * tgt_half).cpu().numpy()
+
+    def _prepare_dynamic_npu_inputs(self, hidden_states: torch.Tensor, grid: torch.Tensor) -> list[np.ndarray]:
+        grid = grid.unsqueeze(0) if grid.ndim == 1 else grid
+        folded = hidden_states.transpose(0, 1).reshape(1, hidden_states.shape[1], 1, hidden_states.shape[0])
+        folded_np = folded.squeeze(2).permute(0, 2, 1).float().cpu().numpy()
+        payloads: list[np.ndarray | None] = [None] * len(self._dynamic_input_slots)
+        payloads[self._dynamic_input_slots["folded"]] = folded_np
+        rotary = self._rot_pos_emb(grid)
+        emb = torch.cat((rotary, rotary), dim=-1)
+        if "rope" in self._dynamic_input_slots:
+            payloads[self._dynamic_input_slots["rope"]] = self._build_vision_rotate_tensor(grid)
+        else:
+            payloads[self._dynamic_input_slots["cos"]] = emb.cos().reshape(1, -1, emb.shape[-1]).float().cpu().numpy()
+            payloads[self._dynamic_input_slots["sin"]] = emb.sin().reshape(1, -1, emb.shape[-1]).float().cpu().numpy()
+        return cast(list[np.ndarray], payloads)
+
     def _flatten_encoder_output(
         self,
         output: torch.Tensor,
@@ -178,16 +261,75 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
 
     def _encode_images(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor) -> torch.Tensor:
         """Run Qwen2-VL vision encoding with core-mode-specific batch handling."""
+        uses_dynamic = bool(getattr(self, "_uses_dynamic_vision", False))
+        limit = int(getattr(self.config, "max_vision_tokens", 2048))
+        if uses_dynamic:
+            for grid in grid_thw:
+                tokens = int(grid[0] * grid[1] * grid[2] // self.spatial_merge_size**2)
+                if tokens > limit:
+                    raise ValueError(f"Qwen2-VL vision token count {tokens} exceeds max_vision_tokens={limit}")
         chunks = self._split_hidden_states_by_grid(hidden_states, grid_thw)
-        mxq_inputs = [self._preprocess_image_tokens(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+        mxq_inputs = (
+            [self._prepare_dynamic_npu_inputs(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+            if uses_dynamic
+            else [self._preprocess_image_tokens(chunk, grid) for chunk, grid in zip(chunks, grid_thw)]
+        )
         npu_backend = getattr(self, "npu_backend", None)
         core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "auto"))
         if core_mode == "multi" and len(mxq_inputs) > 1:
+            if uses_dynamic:
+                raise NotImplementedError("Batched dynamic Qwen2-VL vision MXQ inputs are not supported")
             batched_inputs = torch.stack(mxq_inputs, dim=0)
             return self._flatten_encoder_output(self.mxq_forward(batched_inputs), batch_size=len(mxq_inputs))
 
-        outputs = [self._flatten_encoder_output(self.mxq_forward(mxq_input), batch_size=1) for mxq_input in mxq_inputs]
+        if uses_dynamic:
+            outputs = []
+            for mxq_input in mxq_inputs:
+                result = self.npu_backend.mxq_models[0].infer(mxq_input)
+                if result is None:
+                    raise RuntimeError("Qwen2-VL dynamic vision MXQ inference returned None")
+                outputs.append(self._flatten_encoder_output(torch.as_tensor(result[0]), batch_size=1))
+        else:
+            outputs = [self._flatten_encoder_output(self.mxq_forward(mxq_input), batch_size=1) for mxq_input in mxq_inputs]
         return torch.cat(outputs, dim=0)
+
+
+class MobilintQwen2VLRotaryEmbedding:
+    """Runtime Qwen2-VL MRoPE using upstream's chunked mrope_section layout."""
+
+    def __init__(self, config: MobilintQwen2VLTextConfig):
+        self.head_dim = int(config.hidden_size) // int(config.num_attention_heads)
+        self.rope_theta = float(getattr(config, "rope_theta", 10000.0))
+        scaling = getattr(config, "rope_scaling", None) or {}
+        section = scaling.get("mrope_section")
+        if section is not None and sum(section) * 2 != self.head_dim:
+            raise ValueError(f"Qwen2-VL mrope_section={section} does not cover head_dim={self.head_dim}")
+        self.mrope_section = section
+        self.inv_freq = 1.0 / (
+            self.rope_theta ** (torch.arange(0, self.head_dim, 2, dtype=torch.float32) / self.head_dim)
+        )
+        self.pe_size = 2 * (((self.head_dim + 63) // 64) * 64)
+
+    def __call__(self, position_ids: torch.Tensor) -> np.ndarray:
+        position_ids = position_ids[:3].to(dtype=torch.float32, device=self.inv_freq.device)
+        freqs = torch.einsum("d,nbs->nbsd", self.inv_freq, position_ids)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos, sin = emb.cos(), emb.sin()
+        if self.mrope_section is not None:
+            sections = [value * 2 for value in self.mrope_section]
+            cos = torch.cat([part[i % 3] for i, part in enumerate(cos.split(sections, dim=-1))], dim=-1)
+            sin = torch.cat([part[i % 3] for i, part in enumerate(sin.split(sections, dim=-1))], dim=-1)
+        else:
+            cos, sin = cos[0], sin[0]
+        dim = int(cos.shape[-1])
+        half = dim // 2
+        tgt_half = ((dim + 63) // 64) * 64
+        packed = torch.zeros((*cos.shape[:-1], 2 * tgt_half), dtype=torch.float32)
+        packed[..., 0:dim:2] = cos[..., :half]
+        packed[..., 1:dim:2] = -sin[..., :half]
+        packed[..., tgt_half : tgt_half + dim : 2] = sin[..., half:]
+        packed[..., tgt_half + 1 : tgt_half + dim : 2] = cos[..., half:]
+        return packed.cpu().numpy()
 
 
 class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, MobilintQwen2VLPreTrainedModel):
@@ -198,6 +340,11 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         super().__init__(config, *args, **kwargs)
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        input_shapes = self.get_mxq_model().get_model_variant_handle(0).get_model_input_shape()
+        self._uses_rope_input = len(input_shapes) == 2
+        if len(input_shapes) not in (1, 2):
+            raise ValueError(f"Qwen2-VL text MXQ must expose 1 static or 2 dynamic inputs; got {len(input_shapes)}")
+        self._mobilint_rotary_emb = MobilintQwen2VLRotaryEmbedding(config) if self._uses_rope_input else None
 
     def get_input_embeddings(self) -> nn.Module:
         return self.embed_tokens
@@ -237,6 +384,8 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         # Route attention_mask through so batch>1 hits MobilintModelMixin._llm_forward_batch.
         # Qwen2-VL text decoder has the same structural contract as plain Qwen2 here.
         effective_attention_mask = self.resolve_batched_attention_mask(inputs_embeds, attention_mask)
+        if self._uses_rope_input and effective_attention_mask is not None:
+            raise NotImplementedError("Batched Qwen2-VL text MXQs with an external RoPE input are not supported")
 
         if use_cache and past_key_values is None:
             past_key_values = self._get_cache("", 0, 0)
@@ -254,6 +403,15 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         if output_hidden_states:
             logger.warning("output_hidden_states is not supported.")
 
+        position_embeddings = None
+        if self._uses_rope_input:
+            if position_ids is None:
+                position_ids = cache_position.view(1, 1, -1).expand(3, inputs_embeds.shape[0], -1)
+            elif position_ids.ndim == 2:
+                position_ids = position_ids[None].expand(3, position_ids.shape[0], -1)
+            assert self._mobilint_rotary_emb is not None
+            position_embeddings = self._mobilint_rotary_emb(position_ids)
+
         logits = self.llm_forward(
             inputs_embeds,
             past_key_values,
@@ -262,6 +420,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             count_npu_time=count_npu_time,
             attention_mask=effective_attention_mask,
             logits_to_keep=logits_to_keep,
+            extra_inputs=position_embeddings,
         )
 
         if not return_dict:
