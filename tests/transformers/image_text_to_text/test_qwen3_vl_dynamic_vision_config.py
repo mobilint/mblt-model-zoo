@@ -28,7 +28,6 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  
     MobilintQwen3VLVisionModel,
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
-    _NPU_MAX_VISION_TOKENS,
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
 )
@@ -501,45 +500,40 @@ class _ImageProcessorStub:
 def _make_processor_with_image_processor(size) -> MobilintQwen3VLProcessor:
     proc = object.__new__(MobilintQwen3VLProcessor)
     proc.image_processor = _ImageProcessorStub(size=size, patch_size=14)
-    proc.max_vision_tokens = _NPU_MAX_VISION_TOKENS
     return proc
 
 
-def test_clamp_dynamic_image_size_plain_dict_caps_longest_edge() -> None:
-    """tf 4.x path: ``size`` is a plain dict and gets replaced in-place."""
-    limit = _NPU_MAX_VISION_TOKENS * 14**2
+def test_clamp_dynamic_image_size_plain_dict_preserves_resolution() -> None:
+    """Dynamic image resolution is not capped by Model Zoo."""
+    limit = 2048 * 14**2
     proc = _make_processor_with_image_processor({"longest_edge": limit * 4, "shortest_edge": limit * 2})
     proc._clamp_dynamic_image_size()
-    assert isinstance(proc.image_processor.size, dict)
-    assert proc.image_processor.size["longest_edge"] == limit
-    assert proc.image_processor.size["shortest_edge"] == limit
+    assert proc.image_processor.size["longest_edge"] == limit * 4
+    assert proc.image_processor.size["shortest_edge"] == limit * 2
 
 
 def test_clamp_dynamic_image_size_plain_dict_preserves_small_shortest_edge() -> None:
-    """``shortest_edge`` below the limit must not be inflated."""
-    limit = _NPU_MAX_VISION_TOKENS * 14**2
+    """Resolution below or above the former limit is passed through unchanged."""
+    limit = 2048 * 14**2
     proc = _make_processor_with_image_processor({"longest_edge": limit * 4, "shortest_edge": 3136})
     proc._clamp_dynamic_image_size()
+    assert proc.image_processor.size["longest_edge"] == limit * 4
     assert proc.image_processor.size["shortest_edge"] == 3136
 
 
-def test_clamp_dynamic_image_size_size_dict_caps_longest_edge() -> None:
-    """tf 5.x path: ``size`` is a frozen ``SizeDict``; clamp must not raise
-    ``TypeError`` from ``**size`` unpacking and must yield a new instance."""
-    limit = _NPU_MAX_VISION_TOKENS * 14**2
+def test_clamp_dynamic_image_size_size_dict_preserves_resolution() -> None:
+    """A frozen processor size is left unchanged."""
+    limit = 2048 * 14**2
     original = _SizeDictLike(longest_edge=limit * 4, shortest_edge=limit * 2)
     proc = _make_processor_with_image_processor(original)
     proc._clamp_dynamic_image_size()
     new_size = proc.image_processor.size
-    assert isinstance(new_size, _SizeDictLike)
-    assert new_size is not original  # dataclasses.replace returns a fresh instance
-    assert new_size.longest_edge == limit
-    assert new_size.shortest_edge == limit
+    assert new_size is original
 
 
 def test_clamp_dynamic_image_size_noop_when_already_within_limit() -> None:
     """Neither the dict nor the SizeDict path mutates when already under budget."""
-    limit = _NPU_MAX_VISION_TOKENS * 14**2
+    limit = 2048 * 14**2
     small_dict = {"longest_edge": limit // 2, "shortest_edge": limit // 4}
     proc_dict = _make_processor_with_image_processor(small_dict)
     proc_dict._clamp_dynamic_image_size()

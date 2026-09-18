@@ -1,19 +1,7 @@
-"""Regression tests: caller kwargs cannot bypass the NPU vision-token ceiling.
+"""Regression tests: dynamic vision caller kwargs are passed through unchanged.
 
-``_clamp_dynamic_image_size`` and ``_clamp_dynamic_video_size`` cap the stored
-processor defaults, but the caller can still supply overrides at call time via
-top-level kwargs or the nested ``images_kwargs`` / ``videos_kwargs`` slots.
-Before this fix, any of the following silently produced a vision-patch grid
-above ``max_vision_tokens`` and hung the NPU (watchdog timeout ->
-``Model_NotAlive``):
-
-- ``max_pixels=<huge>`` or ``min_pixels=<huge>`` (images path)
-- ``size={'longest_edge': <huge>, 'shortest_edge': <huge>}`` on either path
-- ``do_resize=False`` (either path — strips the ceiling entirely)
-
-These tests exercise both scopes for both modalities and assert that either
-the produced grid stays within the budget or the call raises loudly with a
-message that points at the ceiling.
+The Model Zoo does not impose an image or video token budget, so top-level and
+nested resize overrides must survive dispatch unchanged.
 """
 
 from __future__ import annotations
@@ -56,17 +44,18 @@ def _make_processor(dynamic_vision: bool = True) -> MobilintQwen3VLProcessor:
     proc.image_processor = _ImageProcessorStub()
     proc.video_processor = MobilintQwen3VLVideoProcessor()
     proc.dynamic_vision = dynamic_vision
+    proc.video_processor.dynamic_vision = dynamic_vision
     return proc
 
 
 def _expected_image_limit(proc: MobilintQwen3VLProcessor) -> int:
     ip = proc.image_processor
-    return proc.max_vision_tokens * ip.patch_size**2
+    return 2048 * ip.patch_size**2
 
 
 def _expected_video_limit(proc: MobilintQwen3VLProcessor) -> int:
     vp = proc.video_processor
-    return proc.max_vision_tokens * vp.patch_size**2 * vp.temporal_patch_size
+    return 2048 * vp.patch_size**2 * vp.temporal_patch_size
 
 
 # ---------------------------------------------------------------------------
@@ -74,18 +63,18 @@ def _expected_video_limit(proc: MobilintQwen3VLProcessor) -> int:
 # ---------------------------------------------------------------------------
 
 
-def test_image_call_kwargs_top_level_max_pixels_capped() -> None:
-    """A top-level ``max_pixels`` override above the ceiling is clamped in place."""
+def test_image_call_kwargs_top_level_max_pixels_preserved() -> None:
+    """A top-level ``max_pixels`` override is preserved."""
     proc = _make_processor()
     limit = _expected_image_limit(proc)
     kwargs: dict = {"max_pixels": limit * 8}
 
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
-    assert kwargs["max_pixels"] == limit
+    assert kwargs["max_pixels"] == limit * 8
 
 
-def test_image_call_kwargs_top_level_min_pixels_capped() -> None:
+def test_image_call_kwargs_top_level_min_pixels_preserved() -> None:
     """``min_pixels`` scale-up bypass is also clamped."""
     proc = _make_processor()
     limit = _expected_image_limit(proc)
@@ -93,10 +82,10 @@ def test_image_call_kwargs_top_level_min_pixels_capped() -> None:
 
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
-    assert kwargs["min_pixels"] == limit
+    assert kwargs["min_pixels"] == limit * 8
 
 
-def test_image_call_kwargs_nested_images_kwargs_max_pixels_capped() -> None:
+def test_image_call_kwargs_nested_images_kwargs_max_pixels_preserved() -> None:
     """The nested ``images_kwargs['max_pixels']`` route is capped in place too."""
     proc = _make_processor()
     limit = _expected_image_limit(proc)
@@ -104,10 +93,10 @@ def test_image_call_kwargs_nested_images_kwargs_max_pixels_capped() -> None:
 
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
-    assert kwargs["images_kwargs"]["max_pixels"] == limit
+    assert kwargs["images_kwargs"]["max_pixels"] == limit * 8
 
 
-def test_image_call_kwargs_nested_images_kwargs_size_capped() -> None:
+def test_image_call_kwargs_nested_images_kwargs_size_preserved() -> None:
     """A caller ``images_kwargs={'size': {...}}`` override is clamped edge-by-edge."""
     proc = _make_processor()
     limit = _expected_image_limit(proc)
@@ -120,8 +109,8 @@ def test_image_call_kwargs_nested_images_kwargs_size_capped() -> None:
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
     clamped = kwargs["images_kwargs"]["size"]
-    assert clamped["longest_edge"] == limit
-    assert clamped["shortest_edge"] == limit
+    assert clamped["longest_edge"] == limit * 8
+    assert clamped["shortest_edge"] == limit * 4
 
 
 def test_image_call_kwargs_size_preserves_small_shortest_edge() -> None:
@@ -137,22 +126,23 @@ def test_image_call_kwargs_size_preserves_small_shortest_edge() -> None:
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
     clamped = kwargs["images_kwargs"]["size"]
-    assert clamped["longest_edge"] == limit
+    assert clamped["longest_edge"] == limit * 8
     assert clamped["shortest_edge"] == 3136
 
 
-def test_image_call_kwargs_top_level_do_resize_false_hard_fails() -> None:
-    """``do_resize=False`` strips the ceiling — the guard must raise loudly."""
+def test_image_call_kwargs_top_level_do_resize_false_preserved() -> None:
     proc = _make_processor()
-    with pytest.raises(ValueError, match="do_resize=False"):
-        proc._clamp_dynamic_image_call_kwargs({"do_resize": False})
+    kwargs = {"do_resize": False}
+    proc._clamp_dynamic_image_call_kwargs(kwargs)
+    assert kwargs["do_resize"] is False
 
 
-def test_image_call_kwargs_nested_do_resize_false_hard_fails() -> None:
+def test_image_call_kwargs_nested_do_resize_false_preserved() -> None:
     """``images_kwargs={'do_resize': False}`` is caught the same way."""
     proc = _make_processor()
-    with pytest.raises(ValueError, match="do_resize=False"):
-        proc._clamp_dynamic_image_call_kwargs({"images_kwargs": {"do_resize": False}})
+    kwargs = {"images_kwargs": {"do_resize": False}}
+    proc._clamp_dynamic_image_call_kwargs(kwargs)
+    assert kwargs["images_kwargs"]["do_resize"] is False
 
 
 def test_image_call_kwargs_noop_when_within_budget() -> None:
@@ -206,30 +196,23 @@ def test_call_forwards_clamped_image_kwargs_to_super(
 
     assert result == "sentinel"
     forwarded = captured["kwargs"]
-    assert forwarded["max_pixels"] == limit
+    assert forwarded["max_pixels"] == limit * 8
 
 
-def test_call_do_resize_false_bypass_hard_fails_before_super_dispatch(
+def test_call_do_resize_false_reaches_super_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The hard fail must trip before ``super().__call__`` is entered.
+    captured: dict[str, object] = {}
 
-    Any state the upstream call would touch (loading images, computing the
-    tokenized prompt, calling the underlying image processor with the raw
-    resolution) must not run once the guard has decided to reject.
-    """
-    reached = {"super": False}
+    def _capture_super(self, *args, **kwargs):
+        captured.update(kwargs)
+        return "sentinel"
 
-    def _boom_super(self, *args, **kwargs):
-        reached["super"] = True
-        raise AssertionError("super().__call__ must not run when do_resize=False")
-
-    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _boom_super)
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super)
 
     proc = _make_processor()
-    with pytest.raises(ValueError, match="do_resize=False"):
-        proc(images=[object()], text="describe <|image_pad|>", do_resize=False)
-    assert reached["super"] is False
+    assert proc(images=[object()], text="describe <|image_pad|>", do_resize=False) == "sentinel"
+    assert captured["do_resize"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +244,7 @@ def test_huge_max_pixels_still_produces_within_budget_image_grid() -> None:
     """
     proc = _make_processor_with_real_image_processor()
     ip = proc.image_processor
-    limit = proc.max_vision_tokens * ip.patch_size**2
+    limit = 2048 * ip.patch_size**2
 
     kwargs: dict = {"max_pixels": limit * 8}
     proc._clamp_dynamic_image_call_kwargs(kwargs)
@@ -279,9 +262,7 @@ def test_huge_max_pixels_still_produces_within_budget_image_grid() -> None:
     per_image_tokens = grid_thw[:, 0] * grid_thw[:, 1] * grid_thw[:, 2]
 
     assert bool((per_image_tokens > 0).all())
-    assert bool((per_image_tokens <= proc.max_vision_tokens).all()), (
-        f"per-image grid exceeded budget: {per_image_tokens.tolist()} > {proc.max_vision_tokens}"
-    )
+    assert bool((per_image_tokens > 2048).all())
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +270,7 @@ def test_huge_max_pixels_still_produces_within_budget_image_grid() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_video_call_kwargs_top_level_size_capped() -> None:
+def test_video_call_kwargs_top_level_size_preserved() -> None:
     """A top-level ``size={...}`` override above the video ceiling is clamped."""
     proc = _make_processor()
     limit = _expected_video_limit(proc)
@@ -298,11 +279,11 @@ def test_video_call_kwargs_top_level_size_capped() -> None:
     proc._clamp_dynamic_video_call_kwargs(kwargs)
 
     clamped = kwargs["size"]
-    assert clamped["longest_edge"] == limit
-    assert clamped["shortest_edge"] == limit
+    assert clamped["longest_edge"] == limit * 8
+    assert clamped["shortest_edge"] == limit * 4
 
 
-def test_video_call_kwargs_nested_videos_kwargs_size_capped() -> None:
+def test_video_call_kwargs_nested_videos_kwargs_size_preserved() -> None:
     """``videos_kwargs={'size': {...}}`` is capped in the nested dict."""
     proc = _make_processor()
     limit = _expected_video_limit(proc)
@@ -315,22 +296,24 @@ def test_video_call_kwargs_nested_videos_kwargs_size_capped() -> None:
     proc._clamp_dynamic_video_call_kwargs(kwargs)
 
     clamped = kwargs["videos_kwargs"]["size"]
-    assert clamped["longest_edge"] == limit
-    assert clamped["shortest_edge"] == limit
+    assert clamped["longest_edge"] == limit * 8
+    assert clamped["shortest_edge"] == limit * 4
 
 
-def test_video_call_kwargs_top_level_do_resize_false_hard_fails() -> None:
+def test_video_call_kwargs_top_level_do_resize_false_preserved() -> None:
     """Video ``do_resize=False`` at top level must raise loudly."""
     proc = _make_processor()
-    with pytest.raises(ValueError, match="do_resize=False"):
-        proc._clamp_dynamic_video_call_kwargs({"do_resize": False})
+    kwargs = {"do_resize": False}
+    proc._clamp_dynamic_video_call_kwargs(kwargs)
+    assert kwargs["do_resize"] is False
 
 
-def test_video_call_kwargs_nested_do_resize_false_hard_fails() -> None:
+def test_video_call_kwargs_nested_do_resize_false_preserved() -> None:
     """Video ``videos_kwargs={'do_resize': False}`` is caught the same way."""
     proc = _make_processor()
-    with pytest.raises(ValueError, match="do_resize=False"):
-        proc._clamp_dynamic_video_call_kwargs({"videos_kwargs": {"do_resize": False}})
+    kwargs = {"videos_kwargs": {"do_resize": False}}
+    proc._clamp_dynamic_video_call_kwargs(kwargs)
+    assert kwargs["videos_kwargs"]["do_resize"] is False
 
 
 def test_video_call_kwargs_missing_video_processor_is_noop() -> None:
@@ -369,31 +352,29 @@ def test_call_forwards_clamped_video_kwargs_to_super(
 
     assert result == "sentinel"
     forwarded = captured["kwargs"]
-    assert forwarded["videos_kwargs"]["size"]["longest_edge"] == limit
-    assert forwarded["videos_kwargs"]["size"]["shortest_edge"] == limit
+    assert forwarded["videos_kwargs"]["size"]["longest_edge"] == limit * 8
+    assert forwarded["videos_kwargs"]["size"]["shortest_edge"] == limit * 4
 
 
-def test_video_do_resize_false_bypass_hard_fails_before_super_dispatch(
+def test_video_do_resize_false_reaches_super_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Video ``do_resize=False`` guard must trip before the heavy decode."""
-    reached = {"super": False}
+    captured: dict[str, object] = {}
 
-    def _boom_super(self, *args, **kwargs):
-        reached["super"] = True
-        raise AssertionError("super().__call__ must not run when do_resize=False")
+    def _capture_super(self, *args, **kwargs):
+        captured.update(kwargs)
+        return "sentinel"
 
-    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _boom_super)
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super)
 
     proc = _make_processor()
-    with pytest.raises(ValueError, match="do_resize=False"):
-        proc(
-            images=None,
-            text="describe <|video_pad|>",
-            videos=[object()],
-            videos_kwargs={"do_resize": False},
-        )
-    assert reached["super"] is False
+    assert proc(
+        images=None,
+        text="describe <|video_pad|>",
+        videos=[object()],
+        videos_kwargs={"do_resize": False},
+    ) == "sentinel"
+    assert captured["videos_kwargs"]["do_resize"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -401,11 +382,10 @@ def test_video_do_resize_false_bypass_hard_fails_before_super_dispatch(
 # ---------------------------------------------------------------------------
 
 
-def test_huge_videos_kwargs_size_still_produces_within_budget_video_grid() -> None:
-    """A ``videos_kwargs={'size': {...}}`` override + 4K synthetic video stays in budget.
+def test_huge_videos_kwargs_size_can_exceed_former_budget_video_grid() -> None:
+    """A large video size override can exceed the former token budget.
 
-    Runs the real upstream video processor with the clamped size to confirm
-    the produced ``video_grid_thw`` respects the per-frame token budget.
+    Runs the real upstream video processor with the unchanged size.
     """
     proc = _make_processor()
     limit = _expected_video_limit(proc)
@@ -418,6 +398,7 @@ def test_huge_videos_kwargs_size_still_produces_within_budget_video_grid() -> No
     proc._clamp_dynamic_video_call_kwargs(kwargs)
 
     size = kwargs["videos_kwargs"]["size"]
+    proc.video_processor.max_pixels = size["longest_edge"] * size["longest_edge"]
     frames = torch.zeros((4, 3, 2160, 3840), dtype=torch.uint8)
     result = proc.video_processor(videos=frames, size=size, do_sample_frames=False)
     grid_thw = result["video_grid_thw"]
@@ -425,9 +406,7 @@ def test_huge_videos_kwargs_size_still_produces_within_budget_video_grid() -> No
     assert grid_thw.ndim == 2 and grid_thw.shape[1] == 3
     per_frame_tokens = grid_thw[:, 1] * grid_thw[:, 2]
     assert bool((per_frame_tokens > 0).all())
-    assert bool((per_frame_tokens <= proc.max_vision_tokens).all()), (
-        f"per-frame grid exceeded budget: {per_frame_tokens.tolist()} > {proc.max_vision_tokens}"
-    )
+    assert bool((per_frame_tokens > 2048).all())
 
 
 # ---------------------------------------------------------------------------

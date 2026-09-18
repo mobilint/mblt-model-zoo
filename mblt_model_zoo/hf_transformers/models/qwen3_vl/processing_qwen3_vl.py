@@ -40,10 +40,6 @@ _VIDEO_OUTER_WRAP_RE = re.compile(
     r"<\|vision_start\|>\s*<\|video_pad\|>\s*<\|vision_end\|>"
 )
 
-# Retained as a compatibility attribute for callers that inspected the old
-# processor, but no image or video token budget is enforced by Model Zoo.
-_NPU_MAX_VISION_TOKENS = 2048
-
 # Structural vision kwargs baked into the vision MXQ at compile time. The
 # folded feature width handed to the language model at the vision-language
 # boundary is ``patch_size * merge_size``, and the temporal stride is
@@ -331,7 +327,6 @@ class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
 
 class MobilintQwen3VLProcessor(Qwen3VLProcessor):
     dynamic_vision = False
-    max_vision_tokens = _NPU_MAX_VISION_TOKENS
 
     def __init__(
         self,
@@ -536,86 +531,12 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         del kwargs
 
     def _clamp_dynamic_video_size(self) -> None:
-        """Cap `max_pixels` so dynamic-vision video frames fit the NPU sequence limit.
-
-        Mirrors ``_clamp_dynamic_image_size`` for the video processor. The
-        dynamic vision MXQ takes the pre-merge patch sequence as ``inputs[0]``
-        and hangs the NPU (watchdog timeout -> ``Model_NotAlive``) above
-        ``max_vision_tokens`` per frame, so a high-resolution video frame must
-        not produce a grid with ``grid_h * grid_w > max_vision_tokens``.
-
-        The video ``smart_resize`` bounds the *volume* ``t_bar * h_bar * w_bar``
-        by ``max_pixels`` with ``t_bar >= temporal_patch_size``. That means
-        ``h_bar * w_bar <= max_pixels / temporal_patch_size``, so setting
-        ``max_pixels = max_vision_tokens * patch_size ** 2 * temporal_patch_size``
-        guarantees per-frame ``grid_h * grid_w <= max_vision_tokens`` while
-        preserving the aspect ratio and grid alignment.
-
-        Scalar ``max_pixels`` / ``min_pixels`` attributes are handled the same
-        way as on the image path: on tf versions that keep them as separate
-        fallbacks (``preprocess`` reads them when the caller omits
-        ``max_pixels``), we cap them alongside ``size``. On versions where
-        the attribute is absent (default for the tf 4.x
-        ``Qwen3VLVideoProcessor`` at the time of writing), the ``getattr``
-        sentinel skips the scalar branch so the clamp is version-tolerant.
-        """
+        """Keep dynamic video resolution unchanged."""
         return
-        vp = self.video_processor
-        if vp is None:
-            return
-        limit = self.max_vision_tokens * vp.patch_size ** 2 * vp.temporal_patch_size
-        current_longest = vp.size["longest_edge"]
-        _MISSING = object()
-        current_max_pixels = getattr(vp, "max_pixels", _MISSING)
-        size_over_budget = current_longest > limit
-        scalar_over_budget = (
-            current_max_pixels is not _MISSING
-            and current_max_pixels is not None
-            and current_max_pixels > limit
-        )
-        if not (size_over_budget or scalar_over_budget):
-            return
-
-        logger.info(
-            "[dynamic-vision] capped video max_pixels %d -> %d (<= %d vision tokens/frame)",
-            current_max_pixels if scalar_over_budget else current_longest,
-            limit,
-            self.max_vision_tokens,
-        )
-        if size_over_budget:
-            vp.size = _update_size(
-                vp.size,
-                longest_edge=limit,
-                shortest_edge=min(vp.size["shortest_edge"], limit),
-            )
-        if scalar_over_budget:
-            vp.max_pixels = limit
-            current_min_pixels = getattr(vp, "min_pixels", _MISSING)
-            if (
-                current_min_pixels is not _MISSING
-                and current_min_pixels is not None
-                and current_min_pixels > limit
-            ):
-                vp.min_pixels = limit
 
     def _clamp_dynamic_video_call_kwargs(self, kwargs: dict) -> None:
-        """Cap video-side caller overrides so nothing exceeds the NPU vision-token budget.
-
-        Companion to :meth:`_clamp_dynamic_image_call_kwargs` for the video path.
-        The video processor doesn't accept ``max_pixels`` / ``min_pixels`` as
-        call kwargs (they aren't declared on ``VideosKwargs``), so the attack
-        surface here is limited to ``size`` and ``do_resize``. Both are still
-        reachable via top-level ``kwargs`` (a flat ``size=`` is copied into
-        every modality by ``_merge_kwargs``) or via ``videos_kwargs``.
-        """
-        return
-        vp = self.video_processor
-        if vp is None:
-            return
-        limit = self.max_vision_tokens * vp.patch_size ** 2 * vp.temporal_patch_size
-        for scope in self._call_kwargs_scopes(kwargs, "videos_kwargs"):
-            self._reject_do_resize_false(scope, "video")
-            self._cap_size_edges(scope, limit, "video")
+        """Leave dynamic video resize overrides untouched."""
+        del kwargs
 
     @staticmethod
     def _call_kwargs_scopes(kwargs: dict, nested_key: str) -> list:

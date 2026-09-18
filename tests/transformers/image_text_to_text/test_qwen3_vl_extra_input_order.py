@@ -141,6 +141,12 @@ def test_classify_mxq_signature_rejects_unknown_count(num_mxq_inputs: int) -> No
         MobilintQwen3VLTextModel._classify_mxq_signature(num_mxq_inputs, max_batch_size=1)
 
 
+def test_classify_mxq_signature_rejects_split_static_batch() -> None:
+    """Split-static text MXQs cannot serve the batched dispatch path."""
+    with pytest.raises(ValueError, match=r"split-static.*max_batch_size == 1"):
+        MobilintQwen3VLTextModel._classify_mxq_signature(4, max_batch_size=16)
+
+
 # ---------------------------------------------------------------------------
 # End-to-end pack-order checks. The two 3-input dispatches emit different
 # extras orders on purpose (each matches the actual compiled MXQ):

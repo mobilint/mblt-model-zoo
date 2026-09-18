@@ -1030,6 +1030,12 @@ class MobilintQwen3VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
             )
         uses_split = num_mxq_inputs in cls._SPLIT_MXQ_INPUT_COUNTS
         uses_rope = num_mxq_inputs in cls._ROPE_MXQ_INPUT_COUNTS
+        if uses_split and max_batch_size > 1 and not uses_rope:
+            raise ValueError(
+                "Qwen3-VL split-static text MXQ (per-layer inputs without rope) is "
+                "only supported for max_batch_size == 1; batched Qwen3-VL text "
+                "inference requires a dynamic split or bundled MXQ with a rope input."
+            )
         return uses_split, uses_rope
 
     def _get_num_mxq_inputs(self) -> int:
