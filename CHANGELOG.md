@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 2.7.0
+
+### Added
+
+- Qwen3-VL Batch16 now supports split dynamic text MXQs with per-layer DeepStack inputs
+  and external RoPE. Batched split-static layouts remain unsupported.
+
+### Changed
+
+- Qwen3-VL dynamic image and video processing no longer imposes Model Zoo's former 2048-token
+  vision limit; processor resolution and resize overrides are passed through to the artifact.
+
 ## 2.6.0
 
 ### Added
