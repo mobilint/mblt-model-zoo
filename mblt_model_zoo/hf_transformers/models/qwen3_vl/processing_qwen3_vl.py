@@ -40,10 +40,8 @@ _VIDEO_OUTER_WRAP_RE = re.compile(
     r"<\|vision_start\|>\s*<\|video_pad\|>\s*<\|vision_end\|>"
 )
 
-# Video processors still use this conservative default because video token
-# volume is multiplied by the frame count. Image resolution is intentionally
-# not limited here: dynamic image MXQs may support larger sequences, and the
-# paired release's preprocessor configuration owns that contract.
+# Retained as a compatibility attribute for callers that inspected the old
+# processor, but no image or video token budget is enforced by Model Zoo.
 _NPU_MAX_VISION_TOKENS = 2048
 
 # Structural vision kwargs baked into the vision MXQ at compile time. The
@@ -561,6 +559,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         ``Qwen3VLVideoProcessor`` at the time of writing), the ``getattr``
         sentinel skips the scalar branch so the clamp is version-tolerant.
         """
+        return
         vp = self.video_processor
         if vp is None:
             return
@@ -609,6 +608,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         reachable via top-level ``kwargs`` (a flat ``size=`` is copied into
         every modality by ``_merge_kwargs``) or via ``videos_kwargs``.
         """
+        return
         vp = self.video_processor
         if vp is None:
             return
@@ -975,10 +975,9 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
            still owns the story: it only clamps video kwargs on the dynamic
            branch and hands the reject to ``__call__`` for the static branch.
 
-        3. **Dynamic video-token budget.** Dynamic images retain the full
-           resolution requested by their release processor. Dynamic video
-           frames keep the conservative token-volume guard because video
-           multiplies the visual sequence by the frame count.
+        3. **Dynamic vision resolution.** Dynamic images and video retain the
+           full resolution requested by their release processors. Model Zoo
+           does not impose an image- or video-token budget.
 
         4. **MRoPE metadata invariant.** tf 5.x's ``Qwen3VLModel.compute_3d_position_ids``
            and the generate-side ``_prepare_position_ids_for_generation``
@@ -997,9 +996,8 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         Release-level contract hard-fails (video-on-static, per-prompt
         multi-image-on-static) are *not* caller-kwargs invariants — they
         reject inputs the loaded release cannot serve at all — so they
-        happen in ``__call__`` before this envelope runs. Dynamic image
-        resize defaults and overrides are passed through; only dynamic video
-        keeps its conservative frame-token guard.
+        happen in ``__call__`` before this envelope runs. Dynamic image and
+        video resize defaults and overrides are passed through unchanged.
         """
         if images is not None:
             self._reject_structural_vision_overrides(
