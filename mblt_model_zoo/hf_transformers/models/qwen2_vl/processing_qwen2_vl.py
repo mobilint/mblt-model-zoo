@@ -10,6 +10,19 @@ from transformers.video_utils import VideoInput
 
 from .configuration_qwen2_vl import MobilintQwen2VLConfig
 
+_HF_LOADING_KWARGS = (
+    "cache_dir",
+    "force_download",
+    "resume_download",
+    "proxies",
+    "token",
+    "local_files_only",
+    "revision",
+    "subfolder",
+    "trust_remote_code",
+    "code_revision",
+)
+
 
 class MobilintQwen2VLProcessor(Qwen2VLProcessor):
     """Qwen2-VL processor with a compiled-graph-driven dynamic path."""
@@ -25,11 +38,7 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
         processor = super().from_pretrained(pretrained_model_name_or_path, *args, **kwargs)
         if not isinstance(processor, cls):
             return processor
-        config_kwargs = {
-            key: kwargs[key]
-            for key in ("cache_dir", "revision", "subfolder", "token", "trust_remote_code")
-            if key in kwargs
-        }
+        config_kwargs = {key: kwargs[key] for key in _HF_LOADING_KWARGS if key in kwargs}
         try:
             config = MobilintQwen2VLConfig.from_pretrained(pretrained_model_name_or_path, **config_kwargs)
         except (OSError, ValueError, KeyError):

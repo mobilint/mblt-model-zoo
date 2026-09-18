@@ -238,6 +238,7 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
             pos_ids.append(torch.stack((hpos, wpos), dim=-1).repeat(int(t), 1))
         pos_ids = torch.cat(pos_ids, dim=0)
         max_grid_size = int(grid_thw[:, 1:].max())
+        self._materialize_vision_rotary()
         if _upstream_qwen2_vl_vision_rotary_takes_position_ids():
             inv_freq = self.rotary_pos_emb.inv_freq
             device = torch.device("cpu") if inv_freq.device.type == "meta" else inv_freq.device
@@ -246,6 +247,14 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
         else:
             freq_table = self.rotary_pos_emb(max_grid_size)
         return freq_table[pos_ids.to(freq_table.device)].flatten(1)
+
+    def _materialize_vision_rotary(self) -> None:
+        """Rebuild upstream's runtime-only vision frequencies off the meta device."""
+        dim = (int(self.config.embed_dim) // int(self.config.num_heads)) // 2
+        inv_freq = 1.0 / (
+            10000.0 ** (torch.arange(0, dim, 2, dtype=torch.float32, device="cpu") / dim)
+        )
+        self.rotary_pos_emb.inv_freq = inv_freq
 
     def _build_vision_rotate_tensor(self, grid_thw: torch.Tensor) -> np.ndarray:
         rotary = self._rot_pos_emb(grid_thw)
@@ -476,7 +485,21 @@ class MobilintQwen2VLModel(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, 
             config.text_config,
             _internal_call=True,
         )
+        self._reconcile_dynamic_vision(config)
         self.rope_deltas = None  # cache rope_deltas here
+
+    def _reconcile_dynamic_vision(self, config: MobilintQwen2VLConfig) -> bool:
+        vision_dynamic = bool(getattr(self.visual, "_uses_dynamic_vision", False))
+        text_dynamic = bool(getattr(self.language_model, "_uses_rope_input", False))
+        if vision_dynamic != text_dynamic:
+            raise ValueError(
+                "Qwen2-VL vision and text MXQs must agree on dynamic mode: "
+                f"vision_dynamic={vision_dynamic}, text_dynamic={text_dynamic}. "
+                "Load a matching vision/text MXQ pair; a dynamic vision MXQ "
+                "requires a text MXQ with an external RoPE input."
+            )
+        config.dynamic_vision = vision_dynamic
+        return vision_dynamic
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -492,7 +515,7 @@ class MobilintQwen2VLForConditionalGeneration(
         self._pretrained_only_base_init(config, *args, **kwargs)
 
         self.model = MobilintQwen2VLModel(config, _internal_call=True)
-        self.config.dynamic_vision = bool(getattr(self.model.visual, "_uses_dynamic_vision", False))
+        self.config.dynamic_vision = bool(self.model._reconcile_dynamic_vision(config))
         # lm_head is done in self.model
         # So we just replace self.lm_head with identity module
         self.lm_head = nn.Identity()
@@ -502,9 +525,7 @@ class MobilintQwen2VLForConditionalGeneration(
 
     def sync_dynamic_vision_from_model(self) -> bool:
         """Publish the detected vision-MXQ mode for an overridden processor."""
-        detected = bool(getattr(self.model.visual, "_uses_dynamic_vision", False))
-        self.config.dynamic_vision = detected
-        return detected
+        return self.model._reconcile_dynamic_vision(self.config)
 
     @with_mobilint_generation_signature(
         Qwen2VLForConditionalGeneration.prepare_inputs_for_generation,
