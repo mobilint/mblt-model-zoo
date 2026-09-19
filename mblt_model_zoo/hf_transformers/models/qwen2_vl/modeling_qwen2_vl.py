@@ -333,8 +333,13 @@ class MobilintQwen2VLRotaryEmbedding:
     def __init__(self, config: MobilintQwen2VLTextConfig):
         self.head_dim = int(config.hidden_size) // int(config.num_attention_heads)
         scaling = getattr(config, "rope_scaling", None) or {}
-        self.rope_theta = float(getattr(config, "rope_theta", None) or scaling.get("rope_theta", 10000.0))
-        section = scaling.get("mrope_section")
+        rope_parameters = getattr(config, "rope_parameters", None) or {}
+        self.rope_theta = float(
+            getattr(config, "rope_theta", None)
+            or scaling.get("rope_theta")
+            or rope_parameters.get("rope_theta", 10000.0)
+        )
+        section = scaling.get("mrope_section") or rope_parameters.get("mrope_section")
         if section is not None and sum(section) * 2 != self.head_dim:
             raise ValueError(f"Qwen2-VL mrope_section={section} does not cover head_dim={self.head_dim}")
         self.mrope_section = section
@@ -351,7 +356,13 @@ class MobilintQwen2VLRotaryEmbedding:
 
     def __call__(self, position_ids: torch.Tensor) -> np.ndarray:
         inv_freq = self._get_inv_freq()
-        position_ids = position_ids[:3].to(dtype=torch.float32, device=inv_freq.device)
+        # Qwen2-VL generation may prepend text-only positions for packed inputs.
+        # The decoder RoPE uses only the temporal/height/width rows, matching HF.
+        if position_ids.ndim == 3 and position_ids.shape[0] == 4:
+            position_ids = position_ids[1:]
+        else:
+            position_ids = position_ids[:3]
+        position_ids = position_ids.to(dtype=torch.float32, device=inv_freq.device)
         freqs = torch.einsum("d,nbs->nbsd", inv_freq, position_ids)
         emb = torch.cat((freqs, freqs), dim=-1)
         cos, sin = emb.cos(), emb.sin()
@@ -404,6 +415,7 @@ class MobilintQwen2VLTextModel(MobilintModelMixin, MobilintGenerationMixin, Mobi
         logits_to_keep: Union[int, torch.Tensor] = 0,
         npu_prefill_chunk_size: Union[int, None] = None,
         count_npu_time: bool = False,
+        **kwargs: Any,
     ) -> Union[tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
