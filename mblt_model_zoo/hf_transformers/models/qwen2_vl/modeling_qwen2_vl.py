@@ -324,7 +324,8 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
                 outputs.append(self._flatten_encoder_output(torch.as_tensor(result[0]), batch_size=1))
         else:
             outputs = [self._flatten_encoder_output(self.mxq_forward(mxq_input), batch_size=1) for mxq_input in mxq_inputs]
-        return torch.cat(outputs, dim=0)
+        result = torch.cat(outputs, dim=0)
+        return result.to(device=hidden_states.device) if uses_dynamic else result
 
 
 class MobilintQwen2VLRotaryEmbedding:
