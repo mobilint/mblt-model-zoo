@@ -745,6 +745,7 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
         count_npu_time: bool = False,
         attention_mask: Optional[torch.Tensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 1,
+        extra_inputs: Optional[np.ndarray] = None,
     ):
         """Chunked MXQ prefill / decode with HF-style ``logits_to_keep``.
 
@@ -808,15 +809,18 @@ class MobilintModelMixin(PretrainedOnlyMixin, PreTrainedModel):
             # prefills; the same fix covers them.
             cache_size = start if past_key_values is None else past_key_values.get_seq_length()
             chunk = inputs_embeds_numpy[:, :, start:end, :]
+            infer_inputs = [chunk]
+            if extra_inputs is not None:
+                infer_inputs.append(extra_inputs[:, start:end, :])
             if count_npu_time:
                 t0 = time.perf_counter()
-                result = mxq_model.infer([chunk], None, cache_size)
+                result = mxq_model.infer(infer_inputs, None, cache_size)
                 elapsed = time.perf_counter() - t0
                 assert self.npu_time is not None
                 self.npu_time += elapsed
                 self._record_npu_timing(timing_phase, elapsed)
             else:
-                result = mxq_model.infer([chunk], None, cache_size)
+                result = mxq_model.infer(infer_inputs, None, cache_size)
             assert result is not None, "mxq infer result is None!"
             if past_key_values is not None:
                 past_key_values.update_cache_position(cache_position[start:end])
