@@ -311,9 +311,7 @@ class MobilintQwen2VisionTransformerPretrainedModel(MobilintModelMixin, Mobilint
         )
         npu_backend = getattr(self, "npu_backend", None)
         core_mode = getattr(npu_backend, "core_mode", getattr(self.config, "core_mode", "auto"))
-        if core_mode == "multi" and len(mxq_inputs) > 1:
-            if uses_dynamic:
-                raise NotImplementedError("Batched dynamic Qwen2-VL vision MXQ inputs are not supported")
+        if core_mode == "multi" and len(mxq_inputs) > 1 and not uses_dynamic:
             batched_inputs = torch.stack(mxq_inputs, dim=0)
             return self._flatten_encoder_output(self.mxq_forward(batched_inputs), batch_size=len(mxq_inputs))
 
@@ -488,6 +486,9 @@ class MobilintQwen2VLModel(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, 
         self._reconcile_dynamic_vision(config)
         self.rope_deltas = None  # cache rope_deltas here
 
+        # Initialize weights and apply final processing
+        self.post_init()
+
     def _reconcile_dynamic_vision(self, config: MobilintQwen2VLConfig) -> bool:
         vision_dynamic = bool(getattr(self.visual, "_uses_dynamic_vision", False))
         text_dynamic = bool(getattr(self.language_model, "_uses_rope_input", False))
@@ -500,9 +501,6 @@ class MobilintQwen2VLModel(PretrainedOnlyMixin, MobilintQwen2VLPreTrainedModel, 
             )
         config.dynamic_vision = vision_dynamic
         return vision_dynamic
-
-        # Initialize weights and apply final processing
-        self.post_init()
 
 
 class MobilintQwen2VLForConditionalGeneration(
