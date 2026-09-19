@@ -29,8 +29,22 @@ class MobilintQwen2VLProcessor(Qwen2VLProcessor):
 
     dynamic_vision = False
 
-    def __init__(self, *args, dynamic_vision: bool = False, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        image_processor=None,
+        tokenizer=None,
+        video_processor=None,
+        chat_template=None,
+        dynamic_vision: bool = False,
+        **kwargs,
+    ):
+        super().__init__(
+            image_processor=image_processor,
+            tokenizer=tokenizer,
+            video_processor=video_processor,
+            chat_template=chat_template,
+            **kwargs,
+        )
         self.dynamic_vision = bool(dynamic_vision)
 
     @classmethod
