@@ -68,8 +68,12 @@ class _MobilintVisionRotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", torch.empty(dim // 2), persistent=False)
         self.inv_freq.copy_(1.0 / (10000.0 ** (torch.arange(0, dim, 2) / dim)))
 
-    def forward(self, sequence_length: int) -> torch.Tensor:
-        positions = torch.arange(sequence_length, device=self.inv_freq.device)
+    def forward(self, sequence_length_or_positions: int | torch.Tensor) -> torch.Tensor:
+        """Support both legacy length and Transformers 5.17 position-id calls."""
+        if torch.is_tensor(sequence_length_or_positions):
+            positions = sequence_length_or_positions.to(device=self.inv_freq.device)
+            return positions.unsqueeze(-1) * self.inv_freq
+        positions = torch.arange(sequence_length_or_positions, device=self.inv_freq.device)
         return torch.outer(positions, self.inv_freq)
 
 
@@ -100,6 +104,16 @@ def _upstream_qwen3_vl_uses_structured_vision_outputs() -> bool:
         return "pooler_output" in inspect.getsource(get_image_features)
     except OSError:
         return True
+
+
+@lru_cache(maxsize=1)
+def _upstream_qwen3_vl_uses_mm_token_type_ids() -> bool:
+    """Return whether upstream uses the Transformers 5.x RoPE signature."""
+    try:
+        parameters = list(inspect.signature(Qwen3VLModel.get_rope_index).parameters.values())
+    except (TypeError, ValueError):
+        return True
+    return len(parameters) >= 3 and parameters[2].name == "mm_token_type_ids"
 
 
 @lru_cache(maxsize=1)
@@ -1696,26 +1710,23 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         # particular, its second positional argument can look like a grid,
         # not like the 5.x ``mm_token_type_ids`` tensor.  Normalize that call
         # before applying the 5.x compatibility workaround below.
-        if (
-            mm_token_type_ids is not None
-            and mm_token_type_ids.ndim == 2
-            and mm_token_type_ids.shape[-1] == 3
-            and mm_token_type_ids.shape != input_ids.shape
-        ):
+        uses_mm_token_type_ids = _upstream_qwen3_vl_uses_mm_token_type_ids()
+        if uses_mm_token_type_ids and mm_token_type_ids is None and image_grid_thw is not None:
+            # Some 5.x generation paths forward the modality type tensor under
+            # the legacy ``image_grid_thw`` name. It has the input sequence
+            # shape, unlike a real grid's ``(N, 3)`` shape.
+            if image_grid_thw.ndim == input_ids.ndim and image_grid_thw.shape == input_ids.shape:
+                mm_token_type_ids, image_grid_thw = image_grid_thw, None
+
+        if not uses_mm_token_type_ids:
             # The legacy fourth positional argument is ``attention_mask``;
             # with this wrapper's 5.x signature it initially lands in
             # ``video_grid_thw``. Preserve it before shifting the grids.
-            legacy_attention_mask = video_grid_thw
-            if (
-                attention_mask is None
-                and legacy_attention_mask is not None
-                and not (
-                    legacy_attention_mask.ndim == 2
-                    and legacy_attention_mask.shape[-1] == 3
-                )
-            ):
-                attention_mask = legacy_attention_mask
-            image_grid_thw, video_grid_thw = mm_token_type_ids, image_grid_thw
+            if mm_token_type_ids is not None:
+                legacy_attention_mask = video_grid_thw
+                if attention_mask is None:
+                    attention_mask = legacy_attention_mask
+                image_grid_thw, video_grid_thw = mm_token_type_ids, image_grid_thw
             mm_token_type_ids = None
 
         # The legacy video call passes ``None`` for image_grid_thw, which

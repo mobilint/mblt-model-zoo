@@ -272,6 +272,7 @@ def test_qwen3_vl_legacy_rope_call_preserves_positional_attention_mask(
         return "sentinel"
 
     monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: False)
     video_token_id = 99
     model = object.__new__(MobilintQwen3VLModel)
     model.config = SimpleNamespace(video_token_id=video_token_id)
@@ -292,6 +293,49 @@ def test_qwen3_vl_legacy_rope_call_preserves_positional_attention_mask(
     assert captured["image_grid_thw"] is image_grid_thw
     assert captured["video_grid_thw"] is video_grid_thw
     assert captured["attention_mask"] is attention_mask
+
+
+def test_qwen3_vl_5x_rope_call_rebinds_misnamed_modality_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Normalize a 5.x modality tensor that arrives under ``image_grid_thw``."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: True)
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=99)
+    input_ids = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+    mm_token_type_ids = torch.tensor([[0, 1, 1, 0]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    attention_mask = torch.ones_like(input_ids)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids,
+        image_grid_thw=mm_token_type_ids,
+        video_grid_thw=video_grid_thw,
+        attention_mask=attention_mask,
+    )
+
+    assert result == "sentinel"
+    assert captured["args"][1] is mm_token_type_ids
+    assert captured["image_grid_thw"] is None
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is attention_mask
+
+
+def test_qwen3_vl_rotary_fallback_accepts_position_ids() -> None:
+    """The 5.17 constructor path must keep the upstream tensor-call contract."""
+    rotary = modeling_qwen3_vl._MobilintVisionRotaryEmbedding(64)
+    position_ids = torch.arange(4, dtype=torch.long)
+    output = rotary(position_ids)
+    assert output.shape == (4, 32)
 
 
 @pytest.mark.parametrize("core_mode", ["single", "global4", "global8"])
