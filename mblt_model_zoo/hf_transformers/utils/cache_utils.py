@@ -52,7 +52,8 @@ class MobilintLayer(CacheLayerMixin):
         self.buffer: list[bytes] = []
         self.buffer_seq_length: Optional[int] = None
 
-    def lazy_initialization(self, key_states: torch.Tensor):
+    def lazy_initialization(self, key_states: torch.Tensor, value_states: Optional[torch.Tensor] = None):
+        del value_states
         raise NotImplementedError("lazy_initialization is not implemented")
 
     def update(
@@ -60,9 +61,9 @@ class MobilintLayer(CacheLayerMixin):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("update is not implemented")
 
-    def get_mask_sizes(self, cache_position: torch.Tensor) -> tuple[int, int]:
+    def get_mask_sizes(self, cache_position: int | torch.Tensor) -> tuple[int, int]:
         kv_offset = 0
-        query_length = cache_position.shape[0]
+        query_length = int(cache_position) if isinstance(cache_position, int) else cache_position.shape[0]
         past_seen_tokens = self.get_seq_length()
         kv_length = query_length + past_seen_tokens
         return kv_length, kv_offset
@@ -72,6 +73,10 @@ class MobilintLayer(CacheLayerMixin):
 
     def get_max_cache_shape(self) -> Optional[int]:
         return self.mxq_model.get_input_buffer_info()[0].max_cache_size
+
+    def get_max_length(self) -> Optional[int]:
+        """Return the maximum sequence length under the Transformers 5.13 cache API."""
+        return self.get_max_cache_shape()
 
     def set_seq_length(self, seq_length: int) -> None:
         """Set the cached sequence length for an in-memory cache snapshot."""
@@ -204,7 +209,7 @@ class MobilintCache(Cache):
         self.mxq_models: List[qbruntime.Model] = models_list
         self.k_per_model: int = max(1, int(per_model_batch))
         self.n_models: int = len(self.mxq_models)
-        self.batch_size: int = self.n_models * self.k_per_model
+        self._batch_size: int = self.n_models * self.k_per_model
 
         self.layers: list[MobilintLayer] = [
             MobilintLayer(self.mxq_models[model_idx], cache_id)
@@ -215,6 +220,16 @@ class MobilintCache(Cache):
 
         self.num_hidden_layers = 1
         self.cache_processor = None
+
+    @property
+    def batch_size(self) -> int:
+        """Return the logical batch capacity across all runtime-model slots."""
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value: int) -> None:
+        """Keep the legacy single-model growth path compatible with HF 5.13+."""
+        self._batch_size = int(value)
 
     @property
     def mxq_model(self) -> Optional[qbruntime.Model]:

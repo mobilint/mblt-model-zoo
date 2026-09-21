@@ -44,9 +44,7 @@ def test_transformers_config_defaults_to_aries_rb() -> None:
         ("regulus-rb-usb", "MobilintRegulusBackend"),
     ],
 )
-def test_transformers_config_forwards_target_device(
-    target_device: str, backend_class_name: str
-) -> None:
+def test_transformers_config_forwards_target_device(target_device: str, backend_class_name: str) -> None:
     """Forward every documented Model Zoo target device without direct class usage.
 
     ``regulus-rb-usb`` reaches ``MobilintRegulusBackend`` via mblt-npu-python's
@@ -80,9 +78,9 @@ def test_target_device_setter_reassigns_backend_class_across_boards(
     spec.
     """
 
-    config = _TargetDeviceConfig()  # defaults to Aries, expands 8-core grid
+    config = _TargetDeviceConfig()  # defaults to Aries in auto mode
     assert type(config.npu_backend).__name__ == "MobilintAriesBackend"
-    assert len(config.to_dict()["target_cores"]) == 8
+    assert set(config.to_dict()["target_clusters"]) == {"0:0", "0:1"}
 
     config.target_device = target_device
 
@@ -96,7 +94,7 @@ def test_target_device_setter_is_a_noop_when_the_class_does_not_change() -> None
 
     config = _TargetDeviceConfig()
     original_backend = config.npu_backend
-    original_cores = list(config.to_dict()["target_cores"])
+    original_clusters = list(config.to_dict()["target_clusters"])
 
     # ``aries`` normalizes to ``aries-rb`` — same class as the default, so
     # the setter must not rebuild the backend and must preserve the
@@ -104,7 +102,7 @@ def test_target_device_setter_is_a_noop_when_the_class_does_not_change() -> None
     config.target_device = "aries"
 
     assert config.npu_backend is original_backend
-    assert config.to_dict()["target_cores"] == original_cores
+    assert config.to_dict()["target_clusters"] == original_clusters
 
 
 @pytest.mark.parametrize(
@@ -432,10 +430,7 @@ def test_qwen3_asr_from_dict_buffers_prefixed_target_device_atomically(prefix: s
 
     prefix_ = f"{prefix}_"
     inner_config = "audio_config" if prefix == "encoder" else "text_config"
-    inner_model_type = (
-        "mobilint-qwen3_asr_audio_encoder" if prefix == "encoder"
-        else "mobilint-qwen3_asr_text"
-    )
+    inner_model_type = "mobilint-qwen3_asr_audio_encoder" if prefix == "encoder" else "mobilint-qwen3_asr_text"
 
     config = MobilintQwen3ASRConfig.from_dict(
         {

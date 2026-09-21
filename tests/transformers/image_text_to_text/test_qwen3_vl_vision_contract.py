@@ -132,6 +132,26 @@ def test_qwen3_vl_visual_forward_returns_upstream_style_output(monkeypatch: pyte
     assert dummy.mxq_model.inputs[0].shape == (1024, 64, 6)
 
 
+def test_qwen3_vl_dynamic_mxq_signature_maps_shape_roles_without_runtime() -> None:
+    """Resolve dynamic MXQ input slots from mock shapes without loading an MXQ."""
+    config = SimpleNamespace(
+        hidden_size=2048,
+        num_heads=16,
+        in_channels=3,
+        temporal_patch_size=2,
+        patch_size=14,
+    )
+    input_shapes = [(1, 64, 1176), (1, 64, 2048), (1, 64, 256)]
+
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(1) is False
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(3) is True
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_input_slots(input_shapes, config) == {
+        "folded": 0,
+        "pos": 1,
+        "rope": 2,
+    }
+
+
 def test_qwen3_vl_visual_forward_supports_return_dict_false(monkeypatch: pytest.MonkeyPatch) -> None:
     """Convert structured vision outputs to tuple form when requested."""
     monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_structured_vision_outputs", lambda: True)

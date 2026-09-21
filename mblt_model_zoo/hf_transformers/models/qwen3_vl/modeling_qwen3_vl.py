@@ -60,6 +60,30 @@ except ImportError:
         deepstack_features: Optional[list[torch.FloatTensor]] = None
 
 
+class _MobilintVisionRotaryEmbedding(nn.Module):
+    """Preserve the frequency-table contract used by the dynamic vision MXQ."""
+
+    def __init__(self, dim: int):
+        super().__init__()
+        spatial_dim = dim // 2
+        self.register_buffer("inv_freq", torch.empty(spatial_dim // 2), persistent=False)
+        self.inv_freq.copy_(1.0 / (10000.0 ** (torch.arange(0, spatial_dim, 2) / spatial_dim)))
+
+    def forward(self, sequence_length: int) -> torch.Tensor:
+        positions = torch.arange(sequence_length, device=self.inv_freq.device)
+        frequencies = torch.outer(positions, self.inv_freq)
+        return torch.cat((frequencies, frequencies), dim=-1)
+
+
+def _build_vision_rotary_embedding(config: "MobilintQwen3VLVisionConfig", dim: int) -> nn.Module:
+    """Construct the upstream or legacy-compatible vision RoPE implementation."""
+    parameters = list(inspect.signature(Qwen3VLVisionRotaryEmbedding).parameters.values())
+    first_argument = parameters[0].name if parameters else ""
+    if first_argument == "config":
+        return _MobilintVisionRotaryEmbedding(dim)
+    return Qwen3VLVisionRotaryEmbedding(dim)
+
+
 @lru_cache(maxsize=1)
 def _upstream_qwen3_vl_uses_structured_vision_outputs() -> bool:
     """Check whether the installed Transformers expects ``visual()`` to return a model output.
@@ -90,7 +114,7 @@ def _upstream_vision_rotary_takes_position_ids() -> bool:
     ``forward(self, position_ids: torch.Tensor)`` and return the
     already-flattened freqs, so we must build the arange tensor ourselves.
     Detecting by the first non-``self`` parameter name keeps us compatible
-    across the whole supported range (>=4.57.0, <=5.12.1) without pinning
+    across the whole supported range (>=4.57.0) without pinning
     to a specific transformers version.
     """
     try:
@@ -144,7 +168,7 @@ class MobilintQwen3VLVisionModel(MobilintModelMixin, MobilintQwen3VLPreTrainedMo
             self.pos_embed = nn.Embedding(config.num_position_embeddings, config.hidden_size)
             self.num_grid_per_side = int(config.num_position_embeddings**0.5)
             head_dim = config.hidden_size // config.num_heads
-            self.rotary_pos_emb = Qwen3VLVisionRotaryEmbedding(head_dim // 2)
+            self.rotary_pos_emb = _build_vision_rotary_embedding(config, head_dim // 2)
             # Different compile pipelines emit the three dynamic inputs in
             # different orders (mobilint's shipped 8B: ``[rope, pos, folded]``;
             # a tutorial recompile through ``VisionModelForQwen3VL``'s forward
@@ -1650,6 +1674,84 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         self.rope_deltas = None
         self._reconcile_dynamic_vision(config, visual=self.visual, language_model=self.language_model)
 
+    def get_rope_index(
+        self,
+        input_ids,
+        mm_token_type_ids=None,
+        image_grid_thw=None,
+        video_grid_thw=None,
+        attention_mask=None,
+        **kwargs,
+    ):
+        """Adapt frame-separated video metadata to the Transformers 5.3 RoPE helper.
+
+        Transformers 5.3 emits one ``mm_token_type_ids == 2`` group per video
+        frame because timestamps separate the frame placeholders, but its
+        ``video_grid_thw`` contains one row ``[T, H, W]`` per video. The
+        upstream helper consumes one grid row per token group and therefore
+        raises ``StopIteration`` on the second frame. Expand only when the
+        observed token groups exactly match the temporal frame counts; newer
+        Transformers releases keep their native metadata unchanged.
+        """
+        # Transformers 4.57 calls this method with the legacy positional
+        # signature ``(input_ids, image_grid_thw, video_grid_thw)``.  In
+        # particular, its second positional argument can look like a grid,
+        # not like the 5.x ``mm_token_type_ids`` tensor.  Normalize that call
+        # before applying the 5.x compatibility workaround below.
+        if (
+            mm_token_type_ids is not None
+            and mm_token_type_ids.ndim == 2
+            and mm_token_type_ids.shape[-1] == 3
+        ):
+            image_grid_thw, video_grid_thw = mm_token_type_ids, image_grid_thw
+            mm_token_type_ids = None
+
+        # The legacy video call passes ``None`` for image_grid_thw, which
+        # binds its video grid to our image_grid_thw parameter.  Use the
+        # presence of video tokens to disambiguate it from an image call.
+        video_token_id = getattr(self.config, "video_token_id", None)
+        if (
+            mm_token_type_ids is None
+            and video_grid_thw is None
+            and image_grid_thw is not None
+            and video_token_id is not None
+            and torch.any(input_ids == video_token_id)
+        ):
+            video_grid_thw = image_grid_thw
+            image_grid_thw = None
+
+        if mm_token_type_ids is None:
+            return super().get_rope_index(
+                input_ids=input_ids,
+                image_grid_thw=image_grid_thw,
+                video_grid_thw=video_grid_thw,
+                attention_mask=attention_mask,
+                **kwargs,
+            )
+        if video_grid_thw is not None and video_grid_thw.shape[0] > 0:
+            video_group_count = 0
+            for batch_idx, active_types in enumerate(mm_token_type_ids):
+                if attention_mask is not None:
+                    active_types = active_types[attention_mask[batch_idx].bool()]
+                previous_types = torch.cat((active_types.new_zeros(1), active_types[:-1]))
+                video_group_count += int(((active_types == 2) & (previous_types != 2)).sum())
+            frame_count = int(video_grid_thw[:, 0].sum().item())
+            if video_group_count == frame_count and frame_count > video_grid_thw.shape[0]:
+                frame_grids = video_grid_thw.new_zeros((frame_count, 3))
+                frame_grids[:, 0] = 1
+                frame_grids[:, 1:] = torch.repeat_interleave(
+                    video_grid_thw[:, 1:], video_grid_thw[:, 0].to(torch.long), dim=0
+                )
+                video_grid_thw = frame_grids
+        return super().get_rope_index(
+            input_ids,
+            mm_token_type_ids,
+            image_grid_thw=image_grid_thw,
+            video_grid_thw=video_grid_thw,
+            attention_mask=attention_mask,
+            **kwargs,
+        )
+
     @staticmethod
     def _reconcile_dynamic_vision(
         config: MobilintQwen3VLConfig,
@@ -1731,7 +1833,9 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
                 "vision_mxq_path= and text_mxq_path= to a matching pair."
             )
         detected = vision_dynamic
-        config_hint = bool(getattr(config, "dynamic_vision", False))
+        config_hint = bool(
+            getattr(config, "is_dynamic", getattr(config, "dynamic_vision", False))
+        )
         if config_hint != detected:
             logger.warning_once(
                 "Qwen3-VL config.dynamic_vision=%s disagrees with vision MXQ "
@@ -1740,6 +1844,7 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
                 config_hint,
                 detected,
             )
+        config.is_dynamic = detected
         config.dynamic_vision = detected
         return detected
 

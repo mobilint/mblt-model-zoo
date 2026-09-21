@@ -50,8 +50,9 @@ class MobilintQwen3VLConfig(MobilintVisionTextConfigMixin, Qwen3VLConfig):
     model_type = "mobilint-qwen3_vl"
     sub_configs = {"vision_config": MobilintQwen3VLVisionConfig, "text_config": MobilintQwen3VLTextConfig}
 
-    def __init__(self, dynamic_vision: bool = False, **kwargs):
-        # ``dynamic_vision`` pairs the vision MXQ, text MXQ, image processor,
+    def __init__(self, is_dynamic: Optional[bool] = None, dynamic_vision: Optional[bool] = None, **kwargs):
+        # ``is_dynamic`` is the release-level field shipped in Qwen3-VL
+        # ``config.json``. It pairs the vision MXQ, text MXQ, image processor,
         # and video processor as one release-level bundle. Nesting it under
         # ``vision_config`` would misleadingly frame it as a vision-only
         # property, so it lives at the top level. Guard against JSON
@@ -65,7 +66,10 @@ class MobilintQwen3VLConfig(MobilintVisionTextConfigMixin, Qwen3VLConfig):
 
         self.tie_word_embeddings = False
         self._attn_implementation = "eager"
-        self.dynamic_vision = bool(dynamic_vision)
+        if is_dynamic is None:
+            is_dynamic = dynamic_vision
+        self.is_dynamic = bool(is_dynamic)
+        self.dynamic_vision = self.is_dynamic
 
 
 AutoConfig.register("mobilint-qwen3_vl", MobilintQwen3VLConfig)

@@ -30,6 +30,12 @@ logger = logging.get_logger(__name__)
 # NPU vision model fixed input shape: (H_npu, W_npu, C_npu) = (1024, 64, 6)
 _NPU_H, _NPU_W = 1024, 64
 
+# The dynamic vision MXQ accepts a variable pre-merge patch sequence, but its
+# input descriptor has a 4096-token maximum. Keep preprocessing below that
+# limit; larger inputs reach the NPU as a shape mismatch instead of being
+# safely resized by the upstream processor.
+_NPU_MAX_VISION_TOKENS = 4096
+
 # transformers 5.x's Qwen3VLProcessor.replace_video_token expands `<|video_pad|>`
 # to a per-frame string that already carries its own `<|vision_start|>...<|vision_end|>`
 # pairs, so the chat template's outer `<|vision_start|><|video_pad|><|vision_end|>`
@@ -327,6 +333,7 @@ class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
 
 class MobilintQwen3VLProcessor(Qwen3VLProcessor):
     dynamic_vision = False
+    max_vision_tokens = _NPU_MAX_VISION_TOKENS
 
     def __init__(
         self,
@@ -390,7 +397,11 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             )
             vision_dyn = False
         else:
-            vision_dyn = bool(getattr(config, "dynamic_vision", False))
+            # ``is_dynamic`` is the release contract in current Hub configs;
+            # fall back to the legacy Model Zoo alias for older artifacts.
+            vision_dyn = bool(
+                getattr(config, "is_dynamic", getattr(config, "dynamic_vision", False))
+            )
         processor.dynamic_vision = vision_dyn
         processor._sync_dynamic_vision_to_video_processor()
         return processor
@@ -518,25 +529,72 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         return cls._resize_one(images)
 
     def _clamp_dynamic_image_size(self) -> None:
-        """Keep the image processor's configured resolution unchanged.
-
-        Dynamic Qwen3-VL releases may be compiled for more than the historical
-        2048-token limit. Image resolution is therefore owned by the release's
-        processor configuration and is not capped by Model Zoo.
-        """
-        return
+        """Cap stored image resolution so the dynamic vision MXQ stays in range."""
+        ip = self.image_processor
+        if ip is None:
+            return
+        limit = self.max_vision_tokens * int(ip.patch_size) ** 2
+        current_size = ip.size
+        longest = _size_get(current_size, "longest_edge")
+        shortest = _size_get(current_size, "shortest_edge")
+        updates = {}
+        if longest is not None and longest > limit:
+            updates["longest_edge"] = limit
+        if shortest is not None and shortest > limit:
+            updates["shortest_edge"] = limit
+        if updates:
+            ip.size = _update_size(current_size, **updates)
+        max_pixels = getattr(ip, "max_pixels", None)
+        if max_pixels is not None and max_pixels > limit:
+            ip.max_pixels = limit
+        min_pixels = getattr(ip, "min_pixels", None)
+        if min_pixels is not None and min_pixels > limit:
+            ip.min_pixels = limit
 
     def _clamp_dynamic_image_call_kwargs(self, kwargs: dict) -> None:
-        """Leave image resize overrides untouched for dynamic vision releases."""
-        del kwargs
+        """Cap image resize overrides so dynamic inputs stay within the MXQ limit."""
+        ip = self.image_processor
+        if ip is None:
+            return
+        limit = self.max_vision_tokens * int(ip.patch_size) ** 2
+        for scope in self._call_kwargs_scopes(kwargs, "images_kwargs"):
+            self._reject_do_resize_false(scope, "image")
+            self._cap_pixel_kwargs(scope, limit, "image")
+            self._cap_size_edges(scope, limit, "image")
+        self._mirror_pixel_caps_to_image_size(kwargs, limit)
 
     def _clamp_dynamic_video_size(self) -> None:
-        """Keep dynamic video resolution unchanged."""
-        return
+        """Cap stored video resolution so each dynamic frame stays in range."""
+        vp = self.video_processor
+        if vp is None:
+            return
+        limit = self.max_vision_tokens * int(vp.patch_size) ** 2 * int(vp.temporal_patch_size)
+        current_size = vp.size
+        longest = _size_get(current_size, "longest_edge")
+        shortest = _size_get(current_size, "shortest_edge")
+        updates = {}
+        if longest is not None and longest > limit:
+            updates["longest_edge"] = limit
+        if shortest is not None and shortest > limit:
+            updates["shortest_edge"] = limit
+        if updates:
+            vp.size = _update_size(current_size, **updates)
+        max_pixels = getattr(vp, "max_pixels", None)
+        if max_pixels is not None and max_pixels > limit:
+            vp.max_pixels = limit
+        min_pixels = getattr(vp, "min_pixels", None)
+        if min_pixels is not None and min_pixels > limit:
+            vp.min_pixels = limit
 
     def _clamp_dynamic_video_call_kwargs(self, kwargs: dict) -> None:
-        """Leave dynamic video resize overrides untouched."""
-        del kwargs
+        """Cap video resize overrides so dynamic frames stay within the MXQ limit."""
+        vp = self.video_processor
+        if vp is None:
+            return
+        limit = self.max_vision_tokens * int(vp.patch_size) ** 2 * int(vp.temporal_patch_size)
+        for scope in self._call_kwargs_scopes(kwargs, "videos_kwargs"):
+            self._reject_do_resize_false(scope, "video")
+            self._cap_size_edges(scope, limit, "video")
 
     @staticmethod
     def _call_kwargs_scopes(kwargs: dict, nested_key: str) -> list:
@@ -733,7 +791,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         # budget therefore overshoots on both square and high-aspect-ratio
         # inputs — Codex's follow-up example: 28×2800 with ``min_pixels
         # == 379456`` upscales to ~62×6160, ceil-aligns to 84×6160
-        # (2640 pre-merge patches, above the 2048-token ceiling and into
+        # (2640 pre-merge patches, above the 4096-token ceiling and into
         # the documented NPU hang path).
         #
         # Bound the mirrored floor by solving for the largest area whose
@@ -980,6 +1038,11 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             return _VIDEO_OUTER_WRAP_RE.sub("<|video_pad|>", text)
         if isinstance(text, list):
             return [MobilintQwen3VLProcessor._strip_video_outer_wrap(item) for item in text]
+        if isinstance(text, dict):
+            return {key: MobilintQwen3VLProcessor._strip_video_outer_wrap(value) for key, value in text.items()}
+        messages = getattr(text, "messages", None)
+        if isinstance(messages, list):
+            text.messages = MobilintQwen3VLProcessor._strip_video_outer_wrap(messages)
         return text
 
     def __call__(
