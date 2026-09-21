@@ -33,8 +33,7 @@ except ImportError:
 
         def forward(self, sequence_length: int) -> torch.Tensor:
             positions = torch.arange(sequence_length, device=self.inv_freq.device)
-            frequencies = torch.outer(positions, self.inv_freq)
-            return torch.cat((frequencies, frequencies), dim=-1)
+            return torch.outer(positions, self.inv_freq)
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 

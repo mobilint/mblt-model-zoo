@@ -65,14 +65,12 @@ class _MobilintVisionRotaryEmbedding(nn.Module):
 
     def __init__(self, dim: int):
         super().__init__()
-        spatial_dim = dim // 2
-        self.register_buffer("inv_freq", torch.empty(spatial_dim // 2), persistent=False)
-        self.inv_freq.copy_(1.0 / (10000.0 ** (torch.arange(0, spatial_dim, 2) / spatial_dim)))
+        self.register_buffer("inv_freq", torch.empty(dim // 2), persistent=False)
+        self.inv_freq.copy_(1.0 / (10000.0 ** (torch.arange(0, dim, 2) / dim)))
 
     def forward(self, sequence_length: int) -> torch.Tensor:
         positions = torch.arange(sequence_length, device=self.inv_freq.device)
-        frequencies = torch.outer(positions, self.inv_freq)
-        return torch.cat((frequencies, frequencies), dim=-1)
+        return torch.outer(positions, self.inv_freq)
 
 
 def _build_vision_rotary_embedding(config: "MobilintQwen3VLVisionConfig", dim: int) -> nn.Module:
