@@ -1718,7 +1718,18 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
             if image_grid_thw.ndim == input_ids.ndim and image_grid_thw.shape == input_ids.shape:
                 mm_token_type_ids, image_grid_thw = image_grid_thw, None
 
-        if not uses_mm_token_type_ids:
+        # A normal keyword call is already bound to the names above.  Only
+        # shift the arguments when the legacy image grid actually arrived in
+        # ``mm_token_type_ids`` (or when the legacy fourth positional mask is
+        # recognizable by its input-shaped tensor).  Unconditionally shifting
+        # would corrupt correctly bound image/video keyword calls.
+        legacy_positional_call = mm_token_type_ids is not None or (
+            attention_mask is None
+            and video_grid_thw is not None
+            and video_grid_thw.ndim == input_ids.ndim
+            and video_grid_thw.shape == input_ids.shape
+        )
+        if not uses_mm_token_type_ids and legacy_positional_call:
             # The legacy fourth positional argument is ``attention_mask``;
             # with this wrapper's 5.x signature it always lands in
             # ``video_grid_thw``. Rebind all four legacy positions, including
