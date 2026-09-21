@@ -1720,13 +1720,16 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
 
         if not uses_mm_token_type_ids:
             # The legacy fourth positional argument is ``attention_mask``;
-            # with this wrapper's 5.x signature it initially lands in
-            # ``video_grid_thw``. Preserve it before shifting the grids.
-            if mm_token_type_ids is not None:
-                legacy_attention_mask = video_grid_thw
-                if attention_mask is None:
-                    attention_mask = legacy_attention_mask
-                image_grid_thw, video_grid_thw = mm_token_type_ids, image_grid_thw
+            # with this wrapper's 5.x signature it always lands in
+            # ``video_grid_thw``. Rebind all four legacy positions, including
+            # video-only calls where the legacy image grid is ``None``.
+            legacy_image_grid_thw = mm_token_type_ids
+            legacy_video_grid_thw = image_grid_thw
+            legacy_attention_mask = video_grid_thw
+            if attention_mask is None:
+                attention_mask = legacy_attention_mask
+            image_grid_thw = legacy_image_grid_thw
+            video_grid_thw = legacy_video_grid_thw
             mm_token_type_ids = None
 
         # The legacy video call passes ``None`` for image_grid_thw, which

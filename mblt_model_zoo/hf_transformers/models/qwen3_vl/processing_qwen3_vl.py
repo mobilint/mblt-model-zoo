@@ -553,22 +553,23 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if ip is None:
             return
         limit = self.max_vision_tokens * int(ip.patch_size) ** 2
+        aligned_safe_floor = _aligned_safe_pixel_floor(ip, limit)
         current_size = ip.size
         longest = _size_get(current_size, "longest_edge")
         shortest = _size_get(current_size, "shortest_edge")
         updates = {}
         if longest is not None and longest > limit:
             updates["longest_edge"] = limit
-        if shortest is not None and shortest > limit:
-            updates["shortest_edge"] = limit
+        if shortest is not None and shortest > aligned_safe_floor:
+            updates["shortest_edge"] = aligned_safe_floor
         if updates:
             ip.size = _update_size(current_size, **updates)
         max_pixels = getattr(ip, "max_pixels", None)
         if max_pixels is not None and max_pixels > limit:
             ip.max_pixels = limit
         min_pixels = getattr(ip, "min_pixels", None)
-        if min_pixels is not None and min_pixels > limit:
-            ip.min_pixels = limit
+        if min_pixels is not None and min_pixels > aligned_safe_floor:
+            ip.min_pixels = aligned_safe_floor
 
     def _clamp_dynamic_image_call_kwargs(self, kwargs: dict) -> None:
         """Cap image resize overrides so dynamic inputs stay within the MXQ limit."""
@@ -588,22 +589,23 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         if vp is None:
             return
         limit = self.max_vision_tokens * int(vp.patch_size) ** 2 * int(vp.temporal_patch_size)
+        aligned_safe_floor = _aligned_safe_pixel_floor(vp, limit)
         current_size = vp.size
         longest = _size_get(current_size, "longest_edge")
         shortest = _size_get(current_size, "shortest_edge")
         updates = {}
         if longest is not None and longest > limit:
             updates["longest_edge"] = limit
-        if shortest is not None and shortest > limit:
-            updates["shortest_edge"] = limit
+        if shortest is not None and shortest > aligned_safe_floor:
+            updates["shortest_edge"] = aligned_safe_floor
         if updates:
             vp.size = _update_size(current_size, **updates)
         max_pixels = getattr(vp, "max_pixels", None)
         if max_pixels is not None and max_pixels > limit:
             vp.max_pixels = limit
         min_pixels = getattr(vp, "min_pixels", None)
-        if min_pixels is not None and min_pixels > limit:
-            vp.min_pixels = limit
+        if min_pixels is not None and min_pixels > aligned_safe_floor:
+            vp.min_pixels = aligned_safe_floor
 
     def _clamp_dynamic_video_call_kwargs(self, kwargs: dict) -> None:
         """Cap video resize overrides so dynamic frames stay within the MXQ limit."""

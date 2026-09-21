@@ -29,6 +29,7 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     _NPU_MAX_VISION_TOKENS,
+    _aligned_safe_pixel_floor,
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
 )
@@ -559,7 +560,7 @@ def test_clamp_dynamic_image_size_plain_dict_caps_longest_edge() -> None:
     proc._clamp_dynamic_image_size()
     assert isinstance(proc.image_processor.size, dict)
     assert proc.image_processor.size["longest_edge"] == limit
-    assert proc.image_processor.size["shortest_edge"] == limit
+    assert proc.image_processor.size["shortest_edge"] == _aligned_safe_pixel_floor(proc.image_processor, limit)
 
 
 def test_clamp_dynamic_image_size_plain_dict_preserves_small_shortest_edge() -> None:
@@ -581,7 +582,7 @@ def test_clamp_dynamic_image_size_size_dict_caps_longest_edge() -> None:
     assert isinstance(new_size, _SizeDictLike)
     assert new_size is not original  # dataclasses.replace returns a fresh instance
     assert new_size.longest_edge == limit
-    assert new_size.shortest_edge == limit
+    assert new_size.shortest_edge == _aligned_safe_pixel_floor(proc.image_processor, limit)
 
 
 def test_clamp_dynamic_image_size_noop_when_already_within_limit() -> None:
