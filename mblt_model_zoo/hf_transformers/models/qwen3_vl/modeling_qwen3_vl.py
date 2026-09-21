@@ -1700,7 +1700,21 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
             mm_token_type_ids is not None
             and mm_token_type_ids.ndim == 2
             and mm_token_type_ids.shape[-1] == 3
+            and mm_token_type_ids.shape != input_ids.shape
         ):
+            # The legacy fourth positional argument is ``attention_mask``;
+            # with this wrapper's 5.x signature it initially lands in
+            # ``video_grid_thw``. Preserve it before shifting the grids.
+            legacy_attention_mask = video_grid_thw
+            if (
+                attention_mask is None
+                and legacy_attention_mask is not None
+                and not (
+                    legacy_attention_mask.ndim == 2
+                    and legacy_attention_mask.shape[-1] == 3
+                )
+            ):
+                attention_mask = legacy_attention_mask
             image_grid_thw, video_grid_thw = mm_token_type_ids, image_grid_thw
             mm_token_type_ids = None
 

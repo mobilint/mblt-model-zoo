@@ -32,6 +32,7 @@ from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor  #
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
+    _aligned_safe_pixel_floor,
 )
 
 
@@ -121,7 +122,20 @@ def test_image_call_kwargs_nested_images_kwargs_size_capped() -> None:
 
     clamped = kwargs["images_kwargs"]["size"]
     assert clamped["longest_edge"] == limit
-    assert clamped["shortest_edge"] == limit
+    assert clamped["shortest_edge"] == _aligned_safe_pixel_floor(proc.image_processor, limit)
+
+
+def test_image_call_kwargs_integer_size_is_normalized_and_capped() -> None:
+    """An integer ``size`` shorthand must not bypass the pixel-area ceiling."""
+    proc = _make_processor()
+    limit = _expected_image_limit(proc)
+    kwargs: dict = {"images_kwargs": {"size": limit * 8}}
+
+    proc._clamp_dynamic_image_call_kwargs(kwargs)
+
+    clamped = kwargs["images_kwargs"]["size"]
+    assert clamped["longest_edge"] == limit
+    assert clamped["shortest_edge"] == _aligned_safe_pixel_floor(proc.image_processor, limit)
 
 
 def test_image_call_kwargs_size_preserves_small_shortest_edge() -> None:
@@ -299,7 +313,7 @@ def test_video_call_kwargs_top_level_size_capped() -> None:
 
     clamped = kwargs["size"]
     assert clamped["longest_edge"] == limit
-    assert clamped["shortest_edge"] == limit
+    assert clamped["shortest_edge"] == _aligned_safe_pixel_floor(proc.video_processor, limit)
 
 
 def test_video_call_kwargs_nested_videos_kwargs_size_capped() -> None:
@@ -316,7 +330,7 @@ def test_video_call_kwargs_nested_videos_kwargs_size_capped() -> None:
 
     clamped = kwargs["videos_kwargs"]["size"]
     assert clamped["longest_edge"] == limit
-    assert clamped["shortest_edge"] == limit
+    assert clamped["shortest_edge"] == _aligned_safe_pixel_floor(proc.video_processor, limit)
 
 
 def test_video_call_kwargs_top_level_do_resize_false_hard_fails() -> None:
@@ -370,7 +384,9 @@ def test_call_forwards_clamped_video_kwargs_to_super(
     assert result == "sentinel"
     forwarded = captured["kwargs"]
     assert forwarded["videos_kwargs"]["size"]["longest_edge"] == limit
-    assert forwarded["videos_kwargs"]["size"]["shortest_edge"] == limit
+    assert forwarded["videos_kwargs"]["size"]["shortest_edge"] == _aligned_safe_pixel_floor(
+        proc.video_processor, limit
+    )
 
 
 def test_video_do_resize_false_bypass_hard_fails_before_super_dispatch(

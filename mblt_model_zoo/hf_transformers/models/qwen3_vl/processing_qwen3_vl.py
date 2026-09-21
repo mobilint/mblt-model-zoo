@@ -310,6 +310,25 @@ def _size_get(size_obj, key: str):
     return getattr(size_obj, key, None)
 
 
+def _aligned_safe_pixel_floor(processor, limit: int) -> int:
+    """Return a conservative ``min_pixels`` floor safe after smart-resize alignment.
+
+    ``smart_resize`` rounds both dimensions up to the patch/merge alignment
+    after applying the pixel-area floor. Keep enough headroom for that round-up
+    even for the largest aspect ratio accepted by the upstream processor.
+    """
+    merge_size = int(getattr(processor, "merge_size", 2) or 2)
+    alignment_factor = int(processor.patch_size) * merge_size
+    max_ratio = 200
+    k_factor = max_ratio**0.5 + max_ratio**-0.5
+    f_k = alignment_factor * k_factor
+    discriminant = f_k * f_k + 4 * (limit - alignment_factor * alignment_factor)
+    if discriminant < 0:
+        return 0
+    u_max = (-f_k + discriminant**0.5) / 2
+    return max(0, int(u_max * u_max))
+
+
 class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
     """Force NPU-compatible frame size before upstream `_preprocess`.
 
@@ -804,17 +823,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         # substitute ``MAX_RATIO`` for r and solve the quadratic in
         # ``sqrt(M)`` for the tightest safe floor. Falls back to zero when
         # ``limit`` is smaller than the alignment overhead itself.
-        merge_size = int(getattr(self.image_processor, "merge_size", 2) or 2)
-        alignment_factor = int(self.image_processor.patch_size) * merge_size
-        max_ratio = 200
-        k_factor = max_ratio ** 0.5 + max_ratio ** -0.5
-        f_k = alignment_factor * k_factor
-        discriminant = f_k * f_k + 4 * (limit - alignment_factor * alignment_factor)
-        if discriminant < 0:
-            aligned_safe_floor = 0
-        else:
-            u_max = (-f_k + discriminant ** 0.5) / 2
-            aligned_safe_floor = max(0, int(u_max * u_max))
+        aligned_safe_floor = _aligned_safe_pixel_floor(self.image_processor, limit)
 
         # Same key-presence precedence as ``_pick``: an explicit nested
         # ``images_kwargs={"size": None}`` must survive as ``None`` (which we
@@ -899,13 +908,21 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         size = scope.get("size")
         if size is None:
             return
+        processor = self.image_processor if kind == "image" else self.video_processor
+        aligned_safe_floor = _aligned_safe_pixel_floor(processor, limit)
+        if isinstance(size, int) and not isinstance(size, bool):
+            scope["size"] = {
+                "longest_edge": min(size, limit),
+                "shortest_edge": min(size, aligned_safe_floor),
+            }
+            return
         longest = _size_get(size, "longest_edge")
         shortest = _size_get(size, "shortest_edge")
         updates: dict = {}
         if longest is not None and longest > limit:
             updates["longest_edge"] = limit
-        if shortest is not None and shortest > limit:
-            updates["shortest_edge"] = limit
+        if shortest is not None and shortest > aligned_safe_floor:
+            updates["shortest_edge"] = aligned_safe_floor
         if not updates:
             return
         logger.info(

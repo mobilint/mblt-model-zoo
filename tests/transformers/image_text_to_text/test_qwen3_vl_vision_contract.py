@@ -260,6 +260,40 @@ def test_qwen3_vl_get_image_features_uses_config_return_dict_default() -> None:
     assert dummy.visual.call_kwargs == expected_call_kwargs
 
 
+def test_qwen3_vl_legacy_rope_call_preserves_positional_attention_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 4.57 positional signature must not lose its fourth mask argument."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    video_token_id = 99
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=video_token_id)
+    input_ids = torch.tensor([[1, video_token_id, 2, 3]], dtype=torch.long)
+    image_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[2, 2, 2]], dtype=torch.long)
+    attention_mask = torch.tensor([[1, 1, 1, 0]], dtype=torch.long)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids,
+        image_grid_thw,
+        video_grid_thw,
+        attention_mask,
+    )
+
+    assert result == "sentinel"
+    assert captured["image_grid_thw"] is image_grid_thw
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is attention_mask
+
+
 @pytest.mark.parametrize("core_mode", ["single", "global4", "global8"])
 def test_qwen3_vl_visual_forward_loops_batched_images_for_non_multi_core_modes(
     monkeypatch: pytest.MonkeyPatch,
