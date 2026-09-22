@@ -19,9 +19,9 @@ For each target version this script:
        otherwise sweep single/global4/global8) from breaking the phase.
 
 Version selection defaults to the latest stable patch of every major.minor
-release of `transformers` on PyPI at or above the minimum declared in
-`pyproject.toml` (`>=4.54.0`). The upper bound is intentionally open so this
-matrix keeps extending to newly released Transformers versions automatically.
+release of `transformers` on PyPI within the supported range declared in
+`pyproject.toml` (`>=4.54.0,<5.18.0`). Newer releases require an explicit
+`--versions` override until the compatibility matrix is extended and verified.
 
 Logs land under `logs/tx-matrix/<timestamp>/`:
   - install-<V>.log
@@ -78,6 +78,7 @@ VENV_DIR = REPO_ROOT / ".venv"
 UV_LOCK = REPO_ROOT / "uv.lock"
 DEFAULT_PYTHON = "3.12"
 VERSION_MIN = (4, 54, 0)
+VERSION_MAX = (5, 18, 0)
 
 TESTS_ROOT = REPO_ROOT / "tests" / "transformers"
 BATCH_DIRS = (
@@ -115,7 +116,7 @@ def fetch_latest_patches() -> list[str]:
         parsed = parse_version(raw)
         if parsed is None:
             continue
-        if parsed < VERSION_MIN:
+        if parsed < VERSION_MIN or parsed >= VERSION_MAX:
             continue
         key = (parsed[0], parsed[1])
         if key not in per_minor or parsed > per_minor[key]:

@@ -26,6 +26,9 @@ pip install -e .[transformers]
 - NPU execution (`MobilintCache`, `MobilintLayer`, and all Mobilint LLM/VLM backends) requires
   `transformers>=4.54.0`, which introduced `transformers.cache_utils.CacheLayerMixin` — the class
   `MobilintLayer` subclasses.
+- The supported package range is currently `transformers>=4.54.0,<5.18.0`; Transformers 5.17 is
+  the latest release line covered by the compatibility matrix. Newer releases require an explicit
+  compatibility validation before they are added to the package range.
 - GPU-only benchmark workflows (for example
   `benchmark/transformers/benchmark_text_generation_models.py sweep --original-models --device cuda:0`)
   can run against `transformers>=4.53,<4.54` via a compat shim in

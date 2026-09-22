@@ -16,6 +16,9 @@ description: >-
 ## Preserve Contracts
 
 - Install the matching `transformers` optional extra before running integration tests.
+- The supported package range is `transformers>=4.54.0,<5.18.0`; Transformers 5.17 is the
+  latest release line covered by the compatibility matrix. Newer releases require explicit
+  compatibility validation before they are added to the package range.
 - `MobilintNPUBackend` hosts `N` `qbruntime.Model` slots; `max_batch_size` is the aggregate batch
   capacity `N * K`, where `K` is the compiled MXQ batch axis probed from slot 0. The backend
   launches `N = ceil(max_batch_size / K)` slots and distributes them round-robin across the

@@ -116,6 +116,59 @@ def _upstream_qwen3_vl_uses_mm_token_type_ids() -> bool:
     return len(parameters) >= 3 and parameters[2].name == "mm_token_type_ids"
 
 
+def _normalize_qwen3_vl_rope_call(
+    input_ids: torch.Tensor,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    uses_mm_token_type_ids: bool,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None, Any, dict[str, Any]]:
+    """Normalize 4.x and 5.x RoPE calls without losing keyword binding information.
+
+    The wrapper must inspect ``args`` before Python binds them to a synthetic signature. Otherwise
+    a 4.x call that mixes a positional image grid with named video metadata is indistinguishable
+    from a different legacy positional call after binding.
+    """
+    names = (
+        ("mm_token_type_ids", "image_grid_thw", "video_grid_thw", "attention_mask")
+        if uses_mm_token_type_ids
+        else ("image_grid_thw", "video_grid_thw", "attention_mask")
+    )
+    if len(args) > len(names):
+        raise TypeError(f"get_rope_index() takes at most {len(names) + 1} positional arguments")
+
+    bound: dict[str, Any] = {name: None for name in names}
+    for name, value in zip(names, args):
+        bound[name] = value
+    remaining_kwargs = dict(kwargs)
+    for name in names:
+        if name in remaining_kwargs:
+            if name in names[: len(args)]:
+                raise TypeError(f"get_rope_index() got multiple values for argument '{name}'")
+            bound[name] = remaining_kwargs.pop(name)
+
+    if uses_mm_token_type_ids:
+        mm_token_type_ids = bound["mm_token_type_ids"]
+    else:
+        mm_token_type_ids = None
+    image_grid_thw = bound["image_grid_thw"]
+    video_grid_thw = bound["video_grid_thw"]
+    attention_mask = bound["attention_mask"]
+
+    # A few 5.x generation paths still use the old image-grid keyword for the modality tensor.
+    # This is safe to recognize only by the exact input-shaped tensor contract.
+    if (
+        uses_mm_token_type_ids
+        and mm_token_type_ids is None
+        and torch.is_tensor(image_grid_thw)
+        and image_grid_thw.ndim == input_ids.ndim
+        and image_grid_thw.shape == input_ids.shape
+    ):
+        mm_token_type_ids, image_grid_thw = image_grid_thw, None
+
+    return input_ids, mm_token_type_ids, image_grid_thw, video_grid_thw, attention_mask, remaining_kwargs
+
+
 @lru_cache(maxsize=1)
 def _upstream_vision_rotary_takes_position_ids() -> bool:
     """Return True when upstream ``Qwen3VLVisionRotaryEmbedding.forward`` takes ``position_ids``.
@@ -1688,11 +1741,8 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
 
     def get_rope_index(
         self,
-        input_ids,
-        mm_token_type_ids=None,
-        image_grid_thw=None,
-        video_grid_thw=None,
-        attention_mask=None,
+        input_ids=None,
+        *args,
         **kwargs,
     ):
         """Adapt frame-separated video metadata to the Transformers 5.3 RoPE helper.
@@ -1705,57 +1755,21 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
         observed token groups exactly match the temporal frame counts; newer
         Transformers releases keep their native metadata unchanged.
         """
-        # Transformers 4.57 calls this method with the legacy positional
-        # signature ``(input_ids, image_grid_thw, video_grid_thw)``.  In
-        # particular, its second positional argument can look like a grid,
-        # not like the 5.x ``mm_token_type_ids`` tensor.  Normalize that call
-        # before applying the 5.x compatibility workaround below.
-        uses_mm_token_type_ids = _upstream_qwen3_vl_uses_mm_token_type_ids()
-        if uses_mm_token_type_ids and mm_token_type_ids is None and image_grid_thw is not None:
-            # Some 5.x generation paths forward the modality type tensor under
-            # the legacy ``image_grid_thw`` name. It has the input sequence
-            # shape, unlike a real grid's ``(N, 3)`` shape.
-            if image_grid_thw.ndim == input_ids.ndim and image_grid_thw.shape == input_ids.shape:
-                mm_token_type_ids, image_grid_thw = image_grid_thw, None
-
-        # A normal keyword call is already bound to the names above.  Only
-        # shift the arguments when the legacy image grid actually arrived in
-        # ``mm_token_type_ids`` (or when the legacy fourth positional mask is
-        # recognizable by its input-shaped tensor).  Unconditionally shifting
-        # would corrupt correctly bound image/video keyword calls.
-        legacy_positional_call = mm_token_type_ids is not None or (
-            attention_mask is None
-            and video_grid_thw is not None
-            and video_grid_thw.ndim == input_ids.ndim
-            and video_grid_thw.shape == input_ids.shape
+        if input_ids is None:
+            input_ids = kwargs.pop("input_ids")
+        (
+            input_ids,
+            mm_token_type_ids,
+            image_grid_thw,
+            video_grid_thw,
+            attention_mask,
+            kwargs,
+        ) = _normalize_qwen3_vl_rope_call(
+            input_ids,
+            args,
+            kwargs,
+            uses_mm_token_type_ids=_upstream_qwen3_vl_uses_mm_token_type_ids(),
         )
-        mixed_legacy_call = (
-            mm_token_type_ids is not None
-            and image_grid_thw is None
-            and video_grid_thw is not None
-            and video_grid_thw.ndim == 2
-            and video_grid_thw.shape[-1] == 3
-        )
-        if not uses_mm_token_type_ids and mixed_legacy_call:
-            # A 4.x caller may pass the image grid positionally while naming
-            # the video grid and mask. Those named values are already bound to
-            # the correct parameters; only move the positional image grid.
-            image_grid_thw = mm_token_type_ids
-            mm_token_type_ids = None
-            legacy_positional_call = False
-        if not uses_mm_token_type_ids and legacy_positional_call:
-            # The legacy fourth positional argument is ``attention_mask``;
-            # with this wrapper's 5.x signature it always lands in
-            # ``video_grid_thw``. Rebind all four legacy positions, including
-            # video-only calls where the legacy image grid is ``None``.
-            legacy_image_grid_thw = mm_token_type_ids
-            legacy_video_grid_thw = image_grid_thw
-            legacy_attention_mask = video_grid_thw
-            if attention_mask is None:
-                attention_mask = legacy_attention_mask
-            image_grid_thw = legacy_image_grid_thw
-            video_grid_thw = legacy_video_grid_thw
-            mm_token_type_ids = None
 
         # The legacy video call passes ``None`` for image_grid_thw, which
         # binds its video grid to our image_grid_thw parameter.  Use the

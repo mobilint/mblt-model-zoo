@@ -622,16 +622,16 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
 
     @staticmethod
     def _validate_video_grid_budget(grid_thw: torch.Tensor, max_tokens: int) -> None:
-        """Reject a video grid whose full temporal-spatial sequence exceeds the MXQ limit."""
+        """Reject a video grid whose per-frame spatial grid exceeds the MXQ limit."""
         grid_thw = torch.as_tensor(grid_thw)
         if grid_thw.numel() == 0:
             return
-        tokens_per_video = grid_thw.to(dtype=torch.long).prod(dim=-1)
-        if bool((tokens_per_video > max_tokens).any()):
+        tokens_per_frame = grid_thw.to(dtype=torch.long)[..., 1:].prod(dim=-1)
+        if bool((tokens_per_frame > max_tokens).any()):
             raise ValueError(
-                "Qwen3-VL dynamic video preprocessing produced a temporal-spatial grid above "
-                f"the {max_tokens}-token vision MXQ limit: {tokens_per_video.tolist()}. "
-                "Reduce the video frame count or spatial resolution."
+                "Qwen3-VL dynamic video preprocessing produced a per-frame spatial grid above "
+                f"the {max_tokens}-token vision MXQ limit: {tokens_per_frame.tolist()}. "
+                "Reduce the video spatial resolution."
             )
 
     @staticmethod
