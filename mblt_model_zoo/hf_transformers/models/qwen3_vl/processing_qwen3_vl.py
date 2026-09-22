@@ -780,25 +780,22 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         into an image-scoped ``size`` override so 5.x still honors the ceiling
         while keeping 4.x's smaller-wins semantics.
         """
+        processor = self.image_processor if kind == "image" else self.video_processor
+        aligned_safe_floor = _aligned_safe_pixel_floor(processor, limit)
         for field in ("max_pixels", "min_pixels"):
             value = scope.get(field)
-            if value is None or value <= limit:
+            cap = limit if field == "max_pixels" else aligned_safe_floor
+            if value is None or value <= cap:
                 continue
             logger.info(
                 "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
                 kind,
                 field,
                 value,
-                limit if field == "max_pixels" else _aligned_safe_pixel_floor(
-                    self.image_processor if kind == "image" else self.video_processor, limit
-                ),
+                cap,
                 self.max_vision_tokens,
             )
-            if field == "min_pixels":
-                processor = self.image_processor if kind == "image" else self.video_processor
-                scope[field] = _aligned_safe_pixel_floor(processor, limit)
-            else:
-                scope[field] = limit
+            scope[field] = cap
 
     def _mirror_pixel_caps_to_image_size(self, kwargs: dict, limit: int) -> None:
         """Mirror ``max_pixels`` / ``min_pixels`` into image-scoped ``size``.

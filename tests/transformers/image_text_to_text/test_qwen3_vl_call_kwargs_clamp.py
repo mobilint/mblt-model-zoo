@@ -91,7 +91,8 @@ def test_image_call_kwargs_top_level_min_pixels_capped() -> None:
     """``min_pixels`` scale-up bypass is also clamped."""
     proc = _make_processor()
     limit = _expected_image_limit(proc)
-    kwargs: dict = {"min_pixels": limit * 8}
+    safe_floor = _aligned_safe_pixel_floor(proc.image_processor, limit)
+    kwargs: dict = {"min_pixels": safe_floor + 1}
 
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 

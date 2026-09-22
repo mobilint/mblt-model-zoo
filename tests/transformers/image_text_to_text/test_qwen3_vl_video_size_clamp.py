@@ -94,7 +94,8 @@ def test_dynamic_vision_call_clamps_video_pixel_overrides(
     """Scalar video pixel overrides are capped in both supported kwarg scopes."""
     proc = _make_processor(dynamic_vision=True)
     limit = _expected_video_limit(proc)
-    oversized = limit * 8
+    safe_floor = _aligned_safe_pixel_floor(proc.video_processor, limit)
+    oversized = safe_floor + 1 if field == "min_pixels" else limit * 8
     kwargs = {field: oversized}
     if nested:
         kwargs = {"videos_kwargs": kwargs}
