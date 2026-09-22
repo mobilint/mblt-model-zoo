@@ -23,6 +23,7 @@ from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor  #
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
+    _aligned_safe_pixel_floor,
     _update_size,
 )
 
@@ -83,6 +84,34 @@ def test_dynamic_vision_call_clamps_video_size_before_super_dispatch(
     proc(images=None, text="describe <|video_pad|>", videos=[object()])
 
     assert captured["longest_edge"] == limit
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("field", ["min_pixels", "max_pixels"])
+def test_dynamic_vision_call_clamps_video_pixel_overrides(
+    monkeypatch: pytest.MonkeyPatch, nested: bool, field: str
+) -> None:
+    """Scalar video pixel overrides are capped in both supported kwarg scopes."""
+    proc = _make_processor(dynamic_vision=True)
+    limit = _expected_video_limit(proc)
+    oversized = limit * 8
+    kwargs = {field: oversized}
+    if nested:
+        kwargs = {"videos_kwargs": kwargs}
+
+    captured: dict[str, object] = {}
+
+    def _capture_super(self, images, text, videos, **forwarded):
+        captured["kwargs"] = forwarded
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super)
+
+    proc(images=None, text="describe <|video_pad|>", videos=[object()], **kwargs)
+
+    scope = captured["kwargs"].get("videos_kwargs", captured["kwargs"])
+    expected = limit if field == "max_pixels" else _aligned_safe_pixel_floor(proc.video_processor, limit)
+    assert scope[field] == expected
 
 
 def test_preprocessed_4k_video_grid_stays_within_token_budget() -> None:
