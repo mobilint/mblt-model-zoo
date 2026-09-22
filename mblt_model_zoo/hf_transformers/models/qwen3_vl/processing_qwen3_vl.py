@@ -621,6 +621,19 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             self._cap_size_edges(scope, limit, "video")
 
     @staticmethod
+    def _validate_video_grid_budget(grid_thw: torch.Tensor, max_tokens: int) -> None:
+        """Reject a video grid whose full temporal-spatial sequence exceeds the MXQ limit."""
+        if grid_thw.numel() == 0:
+            return
+        tokens_per_video = grid_thw.to(dtype=torch.long).prod(dim=-1)
+        if bool((tokens_per_video > max_tokens).any()):
+            raise ValueError(
+                "Qwen3-VL dynamic video preprocessing produced a temporal-spatial grid above "
+                f"the {max_tokens}-token vision MXQ limit: {tokens_per_video.tolist()}. "
+                "Reduce the video frame count or spatial resolution."
+            )
+
+    @staticmethod
     def _call_kwargs_scopes(kwargs: dict, nested_key: str) -> list:
         """Return the top-level kwargs plus the nested per-modality dict when present.
 
@@ -771,9 +784,19 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
                 continue
             logger.info(
                 "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
-                kind, field, value, limit, self.max_vision_tokens,
+                kind,
+                field,
+                value,
+                limit if field == "max_pixels" else _aligned_safe_pixel_floor(
+                    self.image_processor if kind == "image" else self.video_processor, limit
+                ),
+                self.max_vision_tokens,
             )
-            scope[field] = limit
+            if field == "min_pixels":
+                processor = self.image_processor if kind == "image" else self.video_processor
+                scope[field] = _aligned_safe_pixel_floor(processor, limit)
+            else:
+                scope[field] = limit
 
     def _mirror_pixel_caps_to_image_size(self, kwargs: dict, limit: int) -> None:
         """Mirror ``max_pixels`` / ``min_pixels`` into image-scoped ``size``.
@@ -1142,6 +1165,8 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             text = self._strip_video_outer_wrap(text)
 
         result = super().__call__(images, text, videos, **kwargs)
+        if videos is not None and self.dynamic_vision and "video_grid_thw" in result:
+            self._validate_video_grid_budget(result["video_grid_thw"], self.max_vision_tokens)
         # Only apply the tf 5.4 tensor-restack workaround when the caller
         # actually asked for PyTorch tensors — omitting ``return_tensors``
         # (or explicitly passing ``None`` / a non-``"pt"`` value) is a

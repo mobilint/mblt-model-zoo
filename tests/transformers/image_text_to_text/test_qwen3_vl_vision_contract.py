@@ -392,6 +392,39 @@ def test_qwen3_vl_mixed_legacy_rope_call_keeps_named_video_grid(
     assert captured["attention_mask"] is attention_mask
 
 
+def test_qwen3_vl_mixed_legacy_rope_call_without_mask_keeps_named_video_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing optional mask must not make a named video grid look positional."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: False)
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=99)
+    input_ids = torch.tensor([[1, 99, 2, 3]], dtype=torch.long)
+    image_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[2, 2, 2]], dtype=torch.long)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids,
+        image_grid_thw,
+        video_grid_thw=video_grid_thw,
+    )
+
+    assert result == "sentinel"
+    assert captured["args"] == ()
+    assert captured["image_grid_thw"] is image_grid_thw
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is None
+
+
 def test_qwen3_vl_5x_rope_call_rebinds_misnamed_modality_types(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

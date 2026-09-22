@@ -94,7 +94,18 @@ def test_image_call_kwargs_top_level_min_pixels_capped() -> None:
 
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
-    assert kwargs["min_pixels"] == limit
+    assert kwargs["min_pixels"] == _aligned_safe_pixel_floor(proc.image_processor, limit)
+
+
+def test_video_grid_budget_includes_temporal_axis() -> None:
+    """The dynamic MXQ budget applies to the complete temporal-spatial grid."""
+    proc = _make_processor()
+    grid_thw = torch.tensor([[4, 64, 64]], dtype=torch.long)
+
+    with pytest.raises(ValueError, match="temporal-spatial grid"):
+        proc._validate_video_grid_budget(grid_thw, max_tokens=4096)
+
+    proc._validate_video_grid_budget(torch.tensor([[4, 32, 32]], dtype=torch.long), max_tokens=4096)
 
 
 def test_image_call_kwargs_nested_images_kwargs_max_pixels_capped() -> None:

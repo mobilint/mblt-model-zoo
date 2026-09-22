@@ -1735,7 +1735,6 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
             and video_grid_thw is not None
             and video_grid_thw.ndim == 2
             and video_grid_thw.shape[-1] == 3
-            and attention_mask is not None
         )
         if not uses_mm_token_type_ids and mixed_legacy_call:
             # A 4.x caller may pass the image grid positionally while naming

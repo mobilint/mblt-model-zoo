@@ -72,7 +72,8 @@ description: >-
 - Keep VLM non-batch tests under `tests/transformers/image_text_to_text/non_batch`. Keep batch
   text-generation and image-text-to-text suites in their `batch` directories and route both
   through serial Phase B in `scripts/test_transformers_matrix.py`.
-- Qwen3-VL release contract: `MobilintQwen3VLConfig.dynamic_vision` pairs the vision MXQ, text
+- Qwen3-VL release contract: `MobilintQwen3VLConfig.is_dynamic` (with the `dynamic_vision`
+  compatibility alias) pairs the vision MXQ, text
   MXQ, and processor. Dynamic releases accept video and per-prompt multi-image; static releases
   reject both with `NotImplementedError`. Batched single-image prompts are always allowed.
   `sync_dynamic_vision_from_model()` is only needed when a runtime `vision_mxq_path=` override
