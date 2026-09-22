@@ -75,7 +75,8 @@ Before editing, run `git status --short` and preserve unrelated work.
   `mblt_model_zoo/cli/tps_table.py`; update its schema and focused tests together.
 - Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Run batch
   text-generation and image-text-to-text suites through `scripts/test_transformers_matrix.py`.
-- Qwen3-VL: dynamic vs. static release contract, `sync_dynamic_vision_from_model()`, and the
+- Qwen3-VL: the current `is_dynamic` (with `dynamic_vision` compatibility alias) dynamic vs.
+  static release contract, `sync_dynamic_vision_from_model()`, and the
   per-artifact `vision_output_order` config live in `mblt_model_zoo/hf_transformers/README.md`
   and the code docstrings under `mblt_model_zoo/hf_transformers/models/qwen3_vl/`. A recompile
   that permutes the four same-shape vision outputs must publish the new order in `config.json`.

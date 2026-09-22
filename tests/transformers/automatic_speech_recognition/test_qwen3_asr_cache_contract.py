@@ -19,7 +19,7 @@ except (TypeError, AttributeError) as exc:
     # ``qwen_asr``'s ``__init__`` eagerly imports its transformers backend,
     # which pins a specific ``transformers`` decorator API (e.g.
     # ``check_model_inputs()`` as a factory). Newer / older transformers in
-    # our supported range (``>=4.54.0, <=5.12.1``) expose incompatible
+    # our supported range (``>=4.54.0``) expose incompatible
     # signatures and raise ``TypeError``/``AttributeError`` at class-body
     # evaluation time rather than at import time — those escape
     # ``pytest.importorskip`` and turn into a collection error. Treat any

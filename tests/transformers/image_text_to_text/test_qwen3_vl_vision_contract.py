@@ -132,6 +132,26 @@ def test_qwen3_vl_visual_forward_returns_upstream_style_output(monkeypatch: pyte
     assert dummy.mxq_model.inputs[0].shape == (1024, 64, 6)
 
 
+def test_qwen3_vl_dynamic_mxq_signature_maps_shape_roles_without_runtime() -> None:
+    """Resolve dynamic MXQ input slots from mock shapes without loading an MXQ."""
+    config = SimpleNamespace(
+        hidden_size=2048,
+        num_heads=16,
+        in_channels=3,
+        temporal_patch_size=2,
+        patch_size=14,
+    )
+    input_shapes = [(1, 64, 1176), (1, 64, 2048), (1, 64, 256)]
+
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(1) is False
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_vision_flag(3) is True
+    assert MobilintQwen3VLVisionModel._resolve_dynamic_input_slots(input_shapes, config) == {
+        "folded": 0,
+        "pos": 1,
+        "rope": 2,
+    }
+
+
 def test_qwen3_vl_visual_forward_supports_return_dict_false(monkeypatch: pytest.MonkeyPatch) -> None:
     """Convert structured vision outputs to tuple form when requested."""
     monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_structured_vision_outputs", lambda: True)
@@ -238,6 +258,239 @@ def test_qwen3_vl_get_image_features_uses_config_return_dict_default() -> None:
         [{"return_dict": True}] if modeling_qwen3_vl._upstream_qwen3_vl_uses_structured_vision_outputs() else [{}]
     )
     assert dummy.visual.call_kwargs == expected_call_kwargs
+
+
+def test_qwen3_vl_legacy_rope_call_preserves_positional_attention_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 4.57 positional signature must not lose its fourth mask argument."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: False)
+    video_token_id = 99
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=video_token_id)
+    input_ids = torch.tensor([[1, video_token_id, 2, 3]], dtype=torch.long)
+    image_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[2, 2, 2]], dtype=torch.long)
+    attention_mask = torch.tensor([[1, 1, 1, 0]], dtype=torch.long)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids,
+        image_grid_thw,
+        video_grid_thw,
+        attention_mask,
+    )
+
+    assert result == "sentinel"
+    assert captured["image_grid_thw"] is image_grid_thw
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is attention_mask
+
+
+def test_qwen3_vl_legacy_video_only_rope_call_rebinds_grid_and_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The legacy video-only call also shifts its fourth positional argument."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: False)
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=99)
+    input_ids = torch.tensor([[1, 99, 2, 3]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[2, 2, 2]], dtype=torch.long)
+    attention_mask = torch.tensor([[1, 1, 1, 0]], dtype=torch.long)
+
+    result = MobilintQwen3VLModel.get_rope_index(model, input_ids, None, video_grid_thw, attention_mask)
+
+    assert result == "sentinel"
+    assert captured["image_grid_thw"] is None
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is attention_mask
+
+
+def test_qwen3_vl_legacy_rope_keyword_call_keeps_named_grids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keyword-bound legacy calls must not be mistaken for positional calls."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: False)
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=99)
+    input_ids = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+    image_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[2, 2, 2]], dtype=torch.long)
+    attention_mask = torch.tensor([[1, 1, 1, 0]], dtype=torch.long)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids=input_ids,
+        image_grid_thw=image_grid_thw,
+        video_grid_thw=video_grid_thw,
+        attention_mask=attention_mask,
+    )
+
+    assert result == "sentinel"
+    assert captured["args"] == ()
+    assert captured["image_grid_thw"] is image_grid_thw
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is attention_mask
+
+
+def test_qwen3_vl_mixed_legacy_rope_call_keeps_named_video_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A positional image grid must not replace a keyword-bound video grid."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: False)
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=99)
+    input_ids = torch.tensor([[1, 99, 2, 3]], dtype=torch.long)
+    image_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[2, 2, 2]], dtype=torch.long)
+    attention_mask = torch.tensor([[1, 1, 1, 0]], dtype=torch.long)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids,
+        image_grid_thw,
+        video_grid_thw=video_grid_thw,
+        attention_mask=attention_mask,
+    )
+
+    assert result == "sentinel"
+    assert captured["args"] == ()
+    assert captured["image_grid_thw"] is image_grid_thw
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is attention_mask
+
+
+def test_qwen3_vl_mixed_legacy_rope_call_without_mask_keeps_named_video_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing optional mask must not make a named video grid look positional."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: False)
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=99)
+    input_ids = torch.tensor([[1, 99, 2, 3]], dtype=torch.long)
+    image_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[2, 2, 2]], dtype=torch.long)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids,
+        image_grid_thw,
+        video_grid_thw=video_grid_thw,
+    )
+
+    assert result == "sentinel"
+    assert captured["args"] == ()
+    assert captured["image_grid_thw"] is image_grid_thw
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is None
+
+
+def test_qwen3_vl_5x_rope_call_rebinds_misnamed_modality_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Normalize a 5.x modality tensor that arrives under ``image_grid_thw``."""
+    captured: dict[str, object] = {}
+
+    def capture_rope_index(self, *args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return "sentinel"
+
+    monkeypatch.setattr(modeling_qwen3_vl.Qwen3VLModel, "get_rope_index", capture_rope_index)
+    monkeypatch.setattr(modeling_qwen3_vl, "_upstream_qwen3_vl_uses_mm_token_type_ids", lambda: True)
+    model = object.__new__(MobilintQwen3VLModel)
+    model.config = SimpleNamespace(video_token_id=99)
+    input_ids = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+    mm_token_type_ids = torch.tensor([[0, 1, 1, 0]], dtype=torch.long)
+    video_grid_thw = torch.tensor([[1, 2, 2]], dtype=torch.long)
+    attention_mask = torch.ones_like(input_ids)
+
+    result = MobilintQwen3VLModel.get_rope_index(
+        model,
+        input_ids,
+        image_grid_thw=mm_token_type_ids,
+        video_grid_thw=video_grid_thw,
+        attention_mask=attention_mask,
+    )
+
+    assert result == "sentinel"
+    assert captured["args"][1] is mm_token_type_ids
+    assert captured["image_grid_thw"] is None
+    assert captured["video_grid_thw"] is video_grid_thw
+    assert captured["attention_mask"] is attention_mask
+
+
+def test_qwen3_vl_rotary_fallback_accepts_position_ids() -> None:
+    """The 5.17 constructor path must keep the upstream tensor-call contract."""
+    rotary = modeling_qwen3_vl._MobilintVisionRotaryEmbedding(64)
+    position_ids = torch.arange(4, dtype=torch.long)
+    output = rotary(position_ids)
+    assert output.shape == (4, 32)
+
+
+def test_qwen3_vl_rotary_fallback_rebuilds_meta_frequency_buffer() -> None:
+    """Meta-device loading must not leave the runtime-only frequencies uninitialized."""
+    rotary = modeling_qwen3_vl._MobilintVisionRotaryEmbedding(64)
+    rotary.inv_freq = torch.empty_like(rotary.inv_freq, device="meta")
+
+    output = rotary(torch.arange(4, dtype=torch.long))
+
+    expected_inv_freq = 1.0 / (10000.0 ** (torch.arange(0, 64, 2, dtype=torch.float32) / 64))
+    assert rotary.inv_freq.device.type != "meta"
+    assert torch.allclose(rotary.inv_freq, expected_inv_freq)
+    assert torch.allclose(output[1], expected_inv_freq)
+
+
+def test_qwen3_vl_rotary_fallback_rebuilds_materialized_frequency_buffer() -> None:
+    """Materialization on CPU must not leave an uninitialized frequency table."""
+    rotary = modeling_qwen3_vl._MobilintVisionRotaryEmbedding(64)
+    rotary.inv_freq = torch.empty_like(rotary.inv_freq)
+
+    output = rotary(torch.arange(4, dtype=torch.long))
+
+    expected_inv_freq = 1.0 / (10000.0 ** (torch.arange(0, 64, 2, dtype=torch.float32) / 64))
+    assert torch.allclose(rotary.inv_freq, expected_inv_freq)
+    assert torch.allclose(output[1], expected_inv_freq)
 
 
 @pytest.mark.parametrize("core_mode", ["single", "global4", "global8"])

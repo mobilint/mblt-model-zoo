@@ -29,7 +29,8 @@ description: >-
    compiled with `qbcompiler>=1.3.0` and `mobilint-qb-runtime>=1.4.0`, and lets Batch LLM
    artifacts choose `single`, `global4`, or `global8` per layer.
 5. Keep TPS output driven by `mblt_model_zoo/cli/tps_table.py`. Preserve local conventions in
-   `hf_transformers` and `MeloTTS`. Qwen3-VL has its own release/vision-output contracts — see
+   `hf_transformers` and `MeloTTS`. Qwen3-VL uses `is_dynamic` as its current release-level
+   field and retains `dynamic_vision` as a compatibility alias; its release/vision-output contracts — see
    the `mblt-transformers` skill and `mblt_model_zoo/hf_transformers/README.md` before touching
    the `qwen3_vl` module.
 6. Start with focused tests. Report unavailable hardware, downloads, and optional extras instead of

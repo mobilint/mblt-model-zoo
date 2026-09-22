@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 2.9.0
+
+### Added
+
+- Transformers compatibility now covers the validated `4.54.0 <= transformers < 5.18.0`
+  range, including the 5.17 release line.
+
+### Changed
+
+- Qwen3-VL dynamic vision configuration, rotary embeddings, and image/video resize safety
+  handling now preserve the supported Transformers 4.x and 5.x contracts.
+- Dynamic Qwen3-VL image and video call-time overrides are clamped to the compiled vision
+  token budget, including alignment headroom and integer `size` shorthand semantics.
+
 ## 2.7.0
 
 ### Added

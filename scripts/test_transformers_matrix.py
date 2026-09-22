@@ -18,9 +18,10 @@ For each target version this script:
        layout; forcing global4 explicitly keeps `--full-matrix` (which would
        otherwise sweep single/global4/global8) from breaking the phase.
 
-Version selection defaults to the latest patch of every major.minor release of
-`transformers` on PyPI that falls within the range declared in `pyproject.toml`
-(`>=4.54.0, <=5.12.1`).
+Version selection defaults to the latest stable patch of every major.minor
+release of `transformers` on PyPI within the supported range declared in
+`pyproject.toml` (`>=4.54.0,<5.18.0`). Newer releases require an explicit
+`--versions` override until the compatibility matrix is extended and verified.
 
 Logs land under `logs/tx-matrix/<timestamp>/`:
   - install-<V>.log
@@ -52,7 +53,7 @@ Usage (Linux/macOS/Windows, uv required):
     python scripts/test_transformers_matrix.py                           # workers=8
     python scripts/test_transformers_matrix.py --workers 4
     python scripts/test_transformers_matrix.py --no-parallel             # workers=1
-    python scripts/test_transformers_matrix.py -v 5.11.0 5.12.1
+    python scripts/test_transformers_matrix.py --versions VERSION [VERSION ...]
     python scripts/test_transformers_matrix.py --start-from 5.5.4
     python scripts/test_transformers_matrix.py --dry-run
     python scripts/test_transformers_matrix.py -- -k Qwen                # extra pytest args
@@ -77,7 +78,7 @@ VENV_DIR = REPO_ROOT / ".venv"
 UV_LOCK = REPO_ROOT / "uv.lock"
 DEFAULT_PYTHON = "3.12"
 VERSION_MIN = (4, 54, 0)
-VERSION_MAX = (5, 12, 1)
+VERSION_MAX = (5, 18, 0)
 
 TESTS_ROOT = REPO_ROOT / "tests" / "transformers"
 BATCH_DIRS = (
@@ -115,7 +116,7 @@ def fetch_latest_patches() -> list[str]:
         parsed = parse_version(raw)
         if parsed is None:
             continue
-        if not (VERSION_MIN <= parsed <= VERSION_MAX):
+        if parsed < VERSION_MIN or parsed >= VERSION_MAX:
             continue
         key = (parsed[0], parsed[1])
         if key not in per_minor or parsed > per_minor[key]:

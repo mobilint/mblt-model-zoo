@@ -30,6 +30,12 @@ logger = logging.get_logger(__name__)
 # NPU vision model fixed input shape: (H_npu, W_npu, C_npu) = (1024, 64, 6)
 _NPU_H, _NPU_W = 1024, 64
 
+# The dynamic vision MXQ accepts a variable pre-merge patch sequence, but its
+# input descriptor has a 4096-token maximum. Keep preprocessing below that
+# limit; larger inputs reach the NPU as a shape mismatch instead of being
+# safely resized by the upstream processor.
+_NPU_MAX_VISION_TOKENS = 4096
+
 # transformers 5.x's Qwen3VLProcessor.replace_video_token expands `<|video_pad|>`
 # to a per-frame string that already carries its own `<|vision_start|>...<|vision_end|>`
 # pairs, so the chat template's outer `<|vision_start|><|video_pad|><|vision_end|>`
@@ -304,6 +310,25 @@ def _size_get(size_obj, key: str):
     return getattr(size_obj, key, None)
 
 
+def _aligned_safe_pixel_floor(processor, limit: int) -> int:
+    """Return a conservative ``min_pixels`` floor safe after smart-resize alignment.
+
+    ``smart_resize`` rounds both dimensions up to the patch/merge alignment
+    after applying the pixel-area floor. Keep enough headroom for that round-up
+    even for the largest aspect ratio accepted by the upstream processor.
+    """
+    merge_size = int(getattr(processor, "merge_size", 2) or 2)
+    alignment_factor = int(processor.patch_size) * merge_size
+    max_ratio = 200
+    k_factor = max_ratio**0.5 + max_ratio**-0.5
+    f_k = alignment_factor * k_factor
+    discriminant = f_k * f_k + 4 * (limit - alignment_factor * alignment_factor)
+    if discriminant < 0:
+        return 0
+    u_max = (-f_k + discriminant**0.5) / 2
+    return max(0, int(u_max * u_max))
+
+
 class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
     """Force NPU-compatible frame size before upstream `_preprocess`.
 
@@ -327,6 +352,7 @@ class MobilintQwen3VLVideoProcessor(Qwen3VLVideoProcessor):
 
 class MobilintQwen3VLProcessor(Qwen3VLProcessor):
     dynamic_vision = False
+    max_vision_tokens = _NPU_MAX_VISION_TOKENS
 
     def __init__(
         self,
@@ -390,7 +416,11 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             )
             vision_dyn = False
         else:
-            vision_dyn = bool(getattr(config, "dynamic_vision", False))
+            # ``is_dynamic`` is the release contract in current Hub configs;
+            # fall back to the legacy Model Zoo alias for older artifacts.
+            vision_dyn = bool(
+                getattr(config, "is_dynamic", getattr(config, "dynamic_vision", False))
+            )
         processor.dynamic_vision = vision_dyn
         processor._sync_dynamic_vision_to_video_processor()
         return processor
@@ -518,25 +548,92 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         return cls._resize_one(images)
 
     def _clamp_dynamic_image_size(self) -> None:
-        """Keep the image processor's configured resolution unchanged.
-
-        Dynamic Qwen3-VL releases may be compiled for more than the historical
-        2048-token limit. Image resolution is therefore owned by the release's
-        processor configuration and is not capped by Model Zoo.
-        """
-        return
+        """Cap stored image resolution so the dynamic vision MXQ stays in range."""
+        ip = self.image_processor
+        if ip is None:
+            return
+        limit = self.max_vision_tokens * int(ip.patch_size) ** 2
+        aligned_safe_floor = _aligned_safe_pixel_floor(ip, limit)
+        current_size = ip.size
+        longest = _size_get(current_size, "longest_edge")
+        shortest = _size_get(current_size, "shortest_edge")
+        updates = {}
+        if longest is not None and longest > limit:
+            updates["longest_edge"] = limit
+        if shortest is not None and shortest > aligned_safe_floor:
+            updates["shortest_edge"] = aligned_safe_floor
+        if updates:
+            ip.size = _update_size(current_size, **updates)
+        max_pixels = getattr(ip, "max_pixels", None)
+        if max_pixels is not None and max_pixels > limit:
+            ip.max_pixels = limit
+        min_pixels = getattr(ip, "min_pixels", None)
+        if min_pixels is not None and min_pixels > aligned_safe_floor:
+            ip.min_pixels = aligned_safe_floor
 
     def _clamp_dynamic_image_call_kwargs(self, kwargs: dict) -> None:
-        """Leave image resize overrides untouched for dynamic vision releases."""
-        del kwargs
+        """Cap image resize overrides so dynamic inputs stay within the MXQ limit."""
+        ip = self.image_processor
+        if ip is None:
+            return
+        limit = self.max_vision_tokens * int(ip.patch_size) ** 2
+        for scope in self._call_kwargs_scopes(kwargs, "images_kwargs"):
+            self._reject_do_resize_false(scope, "image")
+            self._cap_pixel_kwargs(scope, limit, "image")
+            self._cap_size_edges(scope, limit, "image")
+        self._mirror_pixel_caps_to_image_size(kwargs, limit)
 
     def _clamp_dynamic_video_size(self) -> None:
-        """Keep dynamic video resolution unchanged."""
-        return
+        """Cap stored video resolution so each dynamic frame stays in range."""
+        vp = self.video_processor
+        if vp is None:
+            return
+        # Video resizing applies this spatial budget independently to each
+        # frame before folding the temporal axis into the model input.
+        limit = self.max_vision_tokens * int(vp.patch_size) ** 2
+        aligned_safe_floor = _aligned_safe_pixel_floor(vp, limit)
+        current_size = vp.size
+        longest = _size_get(current_size, "longest_edge")
+        shortest = _size_get(current_size, "shortest_edge")
+        updates = {}
+        if longest is not None and longest > limit:
+            updates["longest_edge"] = limit
+        if shortest is not None and shortest > aligned_safe_floor:
+            updates["shortest_edge"] = aligned_safe_floor
+        if updates:
+            vp.size = _update_size(current_size, **updates)
+        max_pixels = getattr(vp, "max_pixels", None)
+        if max_pixels is not None and max_pixels > limit:
+            vp.max_pixels = limit
+        min_pixels = getattr(vp, "min_pixels", None)
+        if min_pixels is not None and min_pixels > aligned_safe_floor:
+            vp.min_pixels = aligned_safe_floor
 
     def _clamp_dynamic_video_call_kwargs(self, kwargs: dict) -> None:
-        """Leave dynamic video resize overrides untouched."""
-        del kwargs
+        """Cap video resize overrides so dynamic frames stay within the MXQ limit."""
+        vp = self.video_processor
+        if vp is None:
+            return
+        # ``videos_kwargs.size`` is consumed by the same per-frame resizer.
+        limit = self.max_vision_tokens * int(vp.patch_size) ** 2
+        for scope in self._call_kwargs_scopes(kwargs, "videos_kwargs"):
+            self._reject_do_resize_false(scope, "video")
+            self._cap_pixel_kwargs(scope, limit, "video")
+            self._cap_size_edges(scope, limit, "video")
+
+    @staticmethod
+    def _validate_video_grid_budget(grid_thw: torch.Tensor, max_tokens: int) -> None:
+        """Reject a video grid whose per-frame spatial grid exceeds the MXQ limit."""
+        grid_thw = torch.as_tensor(grid_thw)
+        if grid_thw.numel() == 0:
+            return
+        tokens_per_frame = grid_thw.to(dtype=torch.long)[..., 1:].prod(dim=-1)
+        if bool((tokens_per_frame > max_tokens).any()):
+            raise ValueError(
+                "Qwen3-VL dynamic video preprocessing produced a per-frame spatial grid above "
+                f"the {max_tokens}-token vision MXQ limit: {tokens_per_frame.tolist()}. "
+                "Reduce the video spatial resolution."
+            )
 
     @staticmethod
     def _call_kwargs_scopes(kwargs: dict, nested_key: str) -> list:
@@ -683,15 +780,22 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         into an image-scoped ``size`` override so 5.x still honors the ceiling
         while keeping 4.x's smaller-wins semantics.
         """
+        processor = self.image_processor if kind == "image" else self.video_processor
+        aligned_safe_floor = _aligned_safe_pixel_floor(processor, limit)
         for field in ("max_pixels", "min_pixels"):
             value = scope.get(field)
-            if value is None or value <= limit:
+            cap = limit if field == "max_pixels" else aligned_safe_floor
+            if value is None or value <= cap:
                 continue
             logger.info(
                 "[dynamic-vision] capped call-time %s %s %d -> %d (<= %d vision tokens)",
-                kind, field, value, limit, self.max_vision_tokens,
+                kind,
+                field,
+                value,
+                cap,
+                self.max_vision_tokens,
             )
-            scope[field] = limit
+            scope[field] = cap
 
     def _mirror_pixel_caps_to_image_size(self, kwargs: dict, limit: int) -> None:
         """Mirror ``max_pixels`` / ``min_pixels`` into image-scoped ``size``.
@@ -733,7 +837,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         # budget therefore overshoots on both square and high-aspect-ratio
         # inputs — Codex's follow-up example: 28×2800 with ``min_pixels
         # == 379456`` upscales to ~62×6160, ceil-aligns to 84×6160
-        # (2640 pre-merge patches, above the 2048-token ceiling and into
+        # (2640 pre-merge patches, above the 4096-token ceiling and into
         # the documented NPU hang path).
         #
         # Bound the mirrored floor by solving for the largest area whose
@@ -746,17 +850,7 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         # substitute ``MAX_RATIO`` for r and solve the quadratic in
         # ``sqrt(M)`` for the tightest safe floor. Falls back to zero when
         # ``limit`` is smaller than the alignment overhead itself.
-        merge_size = int(getattr(self.image_processor, "merge_size", 2) or 2)
-        alignment_factor = int(self.image_processor.patch_size) * merge_size
-        max_ratio = 200
-        k_factor = max_ratio ** 0.5 + max_ratio ** -0.5
-        f_k = alignment_factor * k_factor
-        discriminant = f_k * f_k + 4 * (limit - alignment_factor * alignment_factor)
-        if discriminant < 0:
-            aligned_safe_floor = 0
-        else:
-            u_max = (-f_k + discriminant ** 0.5) / 2
-            aligned_safe_floor = max(0, int(u_max * u_max))
+        aligned_safe_floor = _aligned_safe_pixel_floor(self.image_processor, limit)
 
         # Same key-presence precedence as ``_pick``: an explicit nested
         # ``images_kwargs={"size": None}`` must survive as ``None`` (which we
@@ -841,13 +935,28 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         size = scope.get("size")
         if size is None:
             return
+        processor = self.image_processor if kind == "image" else self.video_processor
+        aligned_safe_floor = _aligned_safe_pixel_floor(processor, limit)
+        if isinstance(size, int) and not isinstance(size, bool):
+            # Hugging Face's integer shorthand means ``shortest_edge``. Keep
+            # the processor's existing longest-edge ceiling, but materialize
+            # it because call-time ``size`` replaces rather than merges with
+            # the processor's configured mapping on some Transformers lines.
+            default_longest = _size_get(processor.size, "longest_edge")
+            if default_longest is None:
+                default_longest = limit
+            scope["size"] = {
+                "longest_edge": min(default_longest, limit),
+                "shortest_edge": min(size, aligned_safe_floor),
+            }
+            return
         longest = _size_get(size, "longest_edge")
         shortest = _size_get(size, "shortest_edge")
         updates: dict = {}
         if longest is not None and longest > limit:
             updates["longest_edge"] = limit
-        if shortest is not None and shortest > limit:
-            updates["shortest_edge"] = limit
+        if shortest is not None and shortest > aligned_safe_floor:
+            updates["shortest_edge"] = aligned_safe_floor
         if not updates:
             return
         logger.info(
@@ -980,6 +1089,11 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             return _VIDEO_OUTER_WRAP_RE.sub("<|video_pad|>", text)
         if isinstance(text, list):
             return [MobilintQwen3VLProcessor._strip_video_outer_wrap(item) for item in text]
+        if isinstance(text, dict):
+            return {key: MobilintQwen3VLProcessor._strip_video_outer_wrap(value) for key, value in text.items()}
+        messages = getattr(text, "messages", None)
+        if isinstance(messages, list):
+            text.messages = MobilintQwen3VLProcessor._strip_video_outer_wrap(messages)
         return text
 
     def __call__(
@@ -1057,6 +1171,8 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
             text = self._strip_video_outer_wrap(text)
 
         result = super().__call__(images, text, videos, **kwargs)
+        if videos is not None and self.dynamic_vision and "video_grid_thw" in result:
+            self._validate_video_grid_budget(result["video_grid_thw"], self.max_vision_tokens)
         # Only apply the tf 5.4 tensor-restack workaround when the caller
         # actually asked for PyTorch tensors — omitting ``return_tensors``
         # (or explicitly passing ``None`` / a non-``"pt"`` value) is a

@@ -28,8 +28,10 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  
     MobilintQwen3VLVisionModel,
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
+    _NPU_MAX_VISION_TOKENS,
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
+    _aligned_safe_pixel_floor,
 )
 
 
@@ -108,6 +110,35 @@ def test_top_level_config_dynamic_vision_round_trip() -> None:
 
     restored = MobilintQwen3VLConfig.from_dict(payload)
     assert restored.dynamic_vision is True
+
+
+def test_top_level_config_is_dynamic_round_trip() -> None:
+    """Accept the current Hub ``is_dynamic`` field and preserve its alias."""
+    config = MobilintQwen3VLConfig(is_dynamic=True)
+    assert config.is_dynamic is True
+    assert config.dynamic_vision is True
+
+    payload = config.to_dict()
+    assert payload["is_dynamic"] is True
+
+    restored = MobilintQwen3VLConfig.from_dict(payload)
+    assert restored.is_dynamic is True
+    assert restored.dynamic_vision is True
+
+
+def test_top_level_config_dynamic_alias_stays_synchronized() -> None:
+    """Updating either release-level field must not serialize conflicting values."""
+    config = MobilintQwen3VLConfig(is_dynamic=False)
+
+    config.dynamic_vision = True
+    assert config.is_dynamic is True
+    assert config.to_dict()["is_dynamic"] is True
+    assert config.to_dict()["dynamic_vision"] is True
+
+    config.is_dynamic = False
+    assert config.dynamic_vision is False
+    assert config.to_dict()["is_dynamic"] is False
+    assert config.to_dict()["dynamic_vision"] is False
 
 
 def test_vision_config_has_no_dynamic_vision_attribute() -> None:
@@ -460,6 +491,39 @@ def test_strip_video_outer_wrap_batched_list() -> None:
     assert stripped == ["<|video_pad|>A", "no wrap here"]
 
 
+def test_strip_video_outer_wrap_recurses_through_chat_messages() -> None:
+    """Normalize video wrappers inside the message dictionaries used by pipelines."""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "video", "video": "video.mp4"},
+                {"type": "text", "text": "<|vision_start|><|video_pad|><|vision_end|>Describe"},
+            ],
+        }
+    ]
+
+    stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(messages)
+
+    assert stripped[0]["content"][1]["text"] == "<|video_pad|>Describe"
+
+
+def test_strip_video_outer_wrap_recurses_through_pipeline_chat_object() -> None:
+    """Normalize the ``Chat.messages`` wrapper used by Transformers pipelines."""
+    chat = type("ChatStub", (), {})()
+    chat.messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "<|vision_start|><|video_pad|><|vision_end|>Describe"}],
+        }
+    ]
+
+    stripped = MobilintQwen3VLProcessor._strip_video_outer_wrap(chat)
+
+    assert stripped is chat
+    assert chat.messages[0]["content"][0]["text"] == "<|video_pad|>Describe"
+
+
 def test_strip_video_outer_wrap_noop_on_bare_video_pad() -> None:
     """Bare ``<|video_pad|>`` (already normalized / vLLM-style input) is left alone."""
     text = "prefix <|video_pad|> suffix"
@@ -500,40 +564,45 @@ class _ImageProcessorStub:
 def _make_processor_with_image_processor(size) -> MobilintQwen3VLProcessor:
     proc = object.__new__(MobilintQwen3VLProcessor)
     proc.image_processor = _ImageProcessorStub(size=size, patch_size=14)
+    proc.max_vision_tokens = _NPU_MAX_VISION_TOKENS
     return proc
 
 
-def test_clamp_dynamic_image_size_plain_dict_preserves_resolution() -> None:
-    """Dynamic image resolution is not capped by Model Zoo."""
-    limit = 2048 * 14**2
+def test_clamp_dynamic_image_size_plain_dict_caps_longest_edge() -> None:
+    """tf 4.x path: ``size`` is a plain dict and gets replaced in-place."""
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
     proc = _make_processor_with_image_processor({"longest_edge": limit * 4, "shortest_edge": limit * 2})
     proc._clamp_dynamic_image_size()
-    assert proc.image_processor.size["longest_edge"] == limit * 4
-    assert proc.image_processor.size["shortest_edge"] == limit * 2
+    assert isinstance(proc.image_processor.size, dict)
+    assert proc.image_processor.size["longest_edge"] == limit
+    assert proc.image_processor.size["shortest_edge"] == _aligned_safe_pixel_floor(proc.image_processor, limit)
 
 
 def test_clamp_dynamic_image_size_plain_dict_preserves_small_shortest_edge() -> None:
-    """Resolution below or above the former limit is passed through unchanged."""
-    limit = 2048 * 14**2
+    """``shortest_edge`` below the limit must not be inflated."""
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
     proc = _make_processor_with_image_processor({"longest_edge": limit * 4, "shortest_edge": 3136})
     proc._clamp_dynamic_image_size()
-    assert proc.image_processor.size["longest_edge"] == limit * 4
     assert proc.image_processor.size["shortest_edge"] == 3136
 
 
-def test_clamp_dynamic_image_size_size_dict_preserves_resolution() -> None:
-    """A frozen processor size is left unchanged."""
-    limit = 2048 * 14**2
+def test_clamp_dynamic_image_size_size_dict_caps_longest_edge() -> None:
+    """tf 5.x path: ``size`` is a frozen ``SizeDict``; clamp must not raise
+    ``TypeError`` from ``**size`` unpacking and must yield a new instance."""
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
     original = _SizeDictLike(longest_edge=limit * 4, shortest_edge=limit * 2)
     proc = _make_processor_with_image_processor(original)
     proc._clamp_dynamic_image_size()
     new_size = proc.image_processor.size
-    assert new_size is original
+    assert isinstance(new_size, _SizeDictLike)
+    assert new_size is not original  # dataclasses.replace returns a fresh instance
+    assert new_size.longest_edge == limit
+    assert new_size.shortest_edge == _aligned_safe_pixel_floor(proc.image_processor, limit)
 
 
 def test_clamp_dynamic_image_size_noop_when_already_within_limit() -> None:
     """Neither the dict nor the SizeDict path mutates when already under budget."""
-    limit = 2048 * 14**2
+    limit = _NPU_MAX_VISION_TOKENS * 14**2
     small_dict = {"longest_edge": limit // 2, "shortest_edge": limit // 4}
     proc_dict = _make_processor_with_image_processor(small_dict)
     proc_dict._clamp_dynamic_image_size()

@@ -26,6 +26,9 @@ pip install -e .[transformers]
 - NPU execution (`MobilintCache`, `MobilintLayer`, and all Mobilint LLM/VLM backends) requires
   `transformers>=4.54.0`, which introduced `transformers.cache_utils.CacheLayerMixin` — the class
   `MobilintLayer` subclasses.
+- The supported package range is currently `transformers>=4.54.0,<5.18.0`; Transformers 5.17 is
+  the latest release line covered by the compatibility matrix. Newer releases require an explicit
+  compatibility validation before they are added to the package range.
 - GPU-only benchmark workflows (for example
   `benchmark/transformers/benchmark_text_generation_models.py sweep --original-models --device cuda:0`)
   can run against `transformers>=4.53,<4.54` via a compat shim in
@@ -177,18 +180,19 @@ Further usage examples can be found in the [tests](../../tests/transformers) dir
 
 Qwen3-VL ships on Mobilint as one release per Hugging Face branch: the vision `*.mxq`, the text
 `*.mxq`, `MobilintQwen3VLProcessor`, and `MobilintQwen3VLConfig` are compiled and calibrated
-together. The release-level flag is `dynamic_vision`, exposed as a top-level attribute on
-`MobilintQwen3VLConfig`:
+together. The release-level field in current artifacts is `is_dynamic`, exposed as a top-level
+attribute on `MobilintQwen3VLConfig`. The compatibility alias `dynamic_vision` remains available
+for older artifacts and callers:
 
-- `dynamic_vision=True` (dynamic-vision release): variable-resolution vision + per-image 2D RoPE
+- `is_dynamic=True` (dynamic-vision release): variable-resolution vision + per-image 2D RoPE
   in the text decoder. Supports single-image, per-prompt multi-image, and video inputs.
-- `dynamic_vision=False` (static-vision release): fixed vision-token count baked into the text
+- `is_dynamic=False` (static-vision release): fixed vision-token count baked into the text
   decoder. Supports one image per prompt only. Batched single-image prompts (`[[img_1], [img_2], ...]`)
   are always allowed; video and per-prompt multi-image inputs are rejected.
 
-`AutoProcessor.from_pretrained` reads `config.dynamic_vision` from the shipped `config.json` and
-mirrors it onto `MobilintQwen3VLProcessor` and its video processor, so a caller does not normally
-have to touch the flag directly.
+`AutoProcessor.from_pretrained` reads `config.is_dynamic` from the shipped `config.json` and
+mirrors it onto `MobilintQwen3VLProcessor` and its video processor. Older configs that only carry
+`dynamic_vision` are accepted, so a caller does not normally have to touch either flag directly.
 
 Passing a video input or more than one image per prompt to a static-vision release raises
 `NotImplementedError` from `MobilintQwen3VLProcessor.__call__` with a message pointing at a

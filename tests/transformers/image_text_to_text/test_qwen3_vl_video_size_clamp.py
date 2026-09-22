@@ -1,7 +1,10 @@
-"""Regression tests: dynamic-vision Qwen3-VL preserves video resolution.
+"""Regression tests: dynamic-vision Qwen3-VL clamps video frames to the NPU token budget.
 
-Model Zoo does not impose an image or video token budget. High-resolution video
-frames therefore retain the resolution requested by the processor or caller.
+The dynamic vision MXQ hangs (watchdog timeout -> ``Model_NotAlive``) rather than
+erroring cleanly when a frame produces more than ``max_vision_tokens`` pre-merge
+patch tokens. The image path handles this via ``_clamp_dynamic_image_size``. These
+tests pin down the analogous clamp for the video path so a high-resolution video
+frame cannot silently overshoot the budget and hang the NPU.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor  #
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
+    _aligned_safe_pixel_floor,
     _update_size,
 )
 
@@ -29,26 +33,25 @@ def _make_processor(dynamic_vision: bool) -> MobilintQwen3VLProcessor:
     proc = object.__new__(MobilintQwen3VLProcessor)
     proc.video_processor = MobilintQwen3VLVideoProcessor()
     proc.dynamic_vision = dynamic_vision
-    proc.video_processor.dynamic_vision = dynamic_vision
     return proc
 
 
 def _expected_video_limit(proc: MobilintQwen3VLProcessor) -> int:
-    """The clamp target: `t_bar * h_bar * w_bar <= max_pixels` and `t_bar >= temporal_patch_size`."""
+    """The per-frame spatial pixel ceiling used by the video resizer."""
     vp = proc.video_processor
-    return 2048 * vp.patch_size**2 * vp.temporal_patch_size
+    return proc.max_vision_tokens * vp.patch_size**2
 
 
-def test_dynamic_video_size_preserves_oversized_longest_edge() -> None:
-    """Video processor resolution above the former limit is preserved."""
+def test_clamp_reduces_oversized_video_longest_edge() -> None:
+    """Video processor `longest_edge` above the safe limit is capped in place."""
     proc = _make_processor(dynamic_vision=True)
     limit = _expected_video_limit(proc)
     proc.video_processor.size = _update_size(proc.video_processor.size, longest_edge=limit * 8)
-    proc.video_processor.max_pixels = limit * 8 * limit * 8
 
     proc._clamp_dynamic_video_size()
 
-    assert proc.video_processor.size["longest_edge"] == limit * 8
+    assert proc.video_processor.size["longest_edge"] == limit
+    assert proc.video_processor.size["shortest_edge"] <= limit
 
 
 def test_clamp_leaves_safe_video_longest_edge_untouched() -> None:
@@ -62,10 +65,10 @@ def test_clamp_leaves_safe_video_longest_edge_untouched() -> None:
     assert proc.video_processor.size["shortest_edge"] == original["shortest_edge"]
 
 
-def test_dynamic_vision_call_preserves_video_size_before_super_dispatch(
+def test_dynamic_vision_call_clamps_video_size_before_super_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`__call__` must preserve video resolution before entering `super().__call__`."""
+    """`__call__` must clamp the video processor size before entering `super().__call__`."""
     proc = _make_processor(dynamic_vision=True)
     limit = _expected_video_limit(proc)
     proc.video_processor.size = _update_size(proc.video_processor.size, longest_edge=limit * 8)
@@ -80,14 +83,64 @@ def test_dynamic_vision_call_preserves_video_size_before_super_dispatch(
 
     proc(images=None, text="describe <|video_pad|>", videos=[object()])
 
-    assert captured["longest_edge"] == limit * 8
+    assert captured["longest_edge"] == limit
 
 
-def test_preprocessed_4k_video_grid_can_exceed_former_token_budget() -> None:
-    """A 4K synthetic video is not reduced to the former token budget.
+def test_dynamic_vision_call_integer_video_size_preserves_longest_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integer video size shorthand must include the processor's longest-edge ceiling."""
+    proc = _make_processor(dynamic_vision=True)
+    size = 100_000
+    captured: dict[str, object] = {}
 
-    Exercises the actual preprocessing path and verifies that the produced grid
-    can exceed the former 2048-token bound.
+    def _capture_super(self, images, text, videos, **forwarded):
+        captured["kwargs"] = forwarded
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super)
+
+    proc(images=None, text="describe <|video_pad|>", videos=[object()], videos_kwargs={"size": size})
+
+    clamped = captured["kwargs"]["videos_kwargs"]["size"]
+    assert clamped["longest_edge"] == proc.video_processor.size["longest_edge"]
+    assert clamped["shortest_edge"] == size
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("field", ["min_pixels", "max_pixels"])
+def test_dynamic_vision_call_clamps_video_pixel_overrides(
+    monkeypatch: pytest.MonkeyPatch, nested: bool, field: str
+) -> None:
+    """Scalar video pixel overrides are capped in both supported kwarg scopes."""
+    proc = _make_processor(dynamic_vision=True)
+    limit = _expected_video_limit(proc)
+    safe_floor = _aligned_safe_pixel_floor(proc.video_processor, limit)
+    oversized = safe_floor + 1 if field == "min_pixels" else limit * 8
+    kwargs = {field: oversized}
+    if nested:
+        kwargs = {"videos_kwargs": kwargs}
+
+    captured: dict[str, object] = {}
+
+    def _capture_super(self, images, text, videos, **forwarded):
+        captured["kwargs"] = forwarded
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super)
+
+    proc(images=None, text="describe <|video_pad|>", videos=[object()], **kwargs)
+
+    scope = captured["kwargs"].get("videos_kwargs", captured["kwargs"])
+    expected = limit if field == "max_pixels" else _aligned_safe_pixel_floor(proc.video_processor, limit)
+    assert scope[field] == expected
+
+
+def test_preprocessed_4k_video_grid_stays_within_token_budget() -> None:
+    """A 4K synthetic video preprocessed after the clamp keeps per-frame `grid_h * grid_w` <= budget.
+
+    Exercises the actual preprocessing path — the upstream ``smart_resize`` runs on the clamped
+    ``longest_edge``, so the produced ``video_grid_thw`` must satisfy the per-frame token bound.
     """
     proc = _make_processor(dynamic_vision=True)
     limit = _expected_video_limit(proc)
@@ -102,4 +155,6 @@ def test_preprocessed_4k_video_grid_can_exceed_former_token_budget() -> None:
     assert grid_thw.ndim == 2 and grid_thw.shape[1] == 3
     per_frame_tokens = grid_thw[:, 1] * grid_thw[:, 2]
     assert torch.all(per_frame_tokens > 0)
-    assert torch.all(per_frame_tokens > 2048)
+    assert torch.all(per_frame_tokens <= proc.max_vision_tokens), (
+        f"per-frame grid exceeded budget: {per_frame_tokens.tolist()} > {proc.max_vision_tokens}"
+    )
