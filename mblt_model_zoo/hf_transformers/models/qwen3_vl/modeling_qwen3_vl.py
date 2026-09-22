@@ -77,8 +77,11 @@ class _MobilintVisionRotaryEmbedding(nn.Module):
 
     def forward(self, sequence_length_or_positions: int | torch.Tensor) -> torch.Tensor:
         """Support both legacy length and Transformers 5.17 position-id calls."""
-        if self.inv_freq.device.type == "meta":
-            self._reset_inv_freq()
+        # ``Module.to_empty()`` materializes this non-persistent buffer as an
+        # uninitialized tensor on the destination device. Rebuild it on every
+        # use so a meta-device load cannot leave stale or uninitialized values
+        # behind after materialization.
+        self._reset_inv_freq()
         if torch.is_tensor(sequence_length_or_positions):
             positions = sequence_length_or_positions.to(device=self.inv_freq.device)
             return positions.unsqueeze(-1) * self.inv_freq
