@@ -1729,6 +1729,21 @@ class MobilintQwen3VLModel(PretrainedOnlyMixin, MobilintQwen3VLPreTrainedModel, 
             and video_grid_thw.ndim == input_ids.ndim
             and video_grid_thw.shape == input_ids.shape
         )
+        mixed_legacy_call = (
+            mm_token_type_ids is not None
+            and image_grid_thw is None
+            and video_grid_thw is not None
+            and video_grid_thw.ndim == 2
+            and video_grid_thw.shape[-1] == 3
+            and attention_mask is not None
+        )
+        if not uses_mm_token_type_ids and mixed_legacy_call:
+            # A 4.x caller may pass the image grid positionally while naming
+            # the video grid and mask. Those named values are already bound to
+            # the correct parameters; only move the positional image grid.
+            image_grid_thw = mm_token_type_ids
+            mm_token_type_ids = None
+            legacy_positional_call = False
         if not uses_mm_token_type_ids and legacy_positional_call:
             # The legacy fourth positional argument is ``attention_mask``;
             # with this wrapper's 5.x signature it always lands in
