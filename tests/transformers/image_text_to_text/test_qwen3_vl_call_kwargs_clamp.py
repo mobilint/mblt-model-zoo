@@ -18,6 +18,7 @@ message that points at the ceiling.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 
@@ -106,6 +107,14 @@ def test_video_grid_budget_includes_temporal_axis() -> None:
         proc._validate_video_grid_budget(grid_thw, max_tokens=4096)
 
     proc._validate_video_grid_budget(torch.tensor([[4, 32, 32]], dtype=torch.long), max_tokens=4096)
+
+
+def test_video_grid_budget_accepts_numpy_arrays() -> None:
+    """NumPy processor outputs use the same validation as torch outputs."""
+    proc = _make_processor()
+    grid_thw = np.array([[1, 32, 32]], dtype="int64")
+
+    proc._validate_video_grid_budget(grid_thw, max_tokens=4096)
 
 
 def test_image_call_kwargs_nested_images_kwargs_max_pixels_capped() -> None:

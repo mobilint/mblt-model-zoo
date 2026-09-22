@@ -50,6 +50,15 @@ class MobilintQwen3VLConfig(MobilintVisionTextConfigMixin, Qwen3VLConfig):
     model_type = "mobilint-qwen3_vl"
     sub_configs = {"vision_config": MobilintQwen3VLVisionConfig, "text_config": MobilintQwen3VLTextConfig}
 
+    def __setattr__(self, name, value):
+        """Keep the current release field and its legacy alias synchronized."""
+        if name in {"is_dynamic", "dynamic_vision"}:
+            value = bool(value)
+            object.__setattr__(self, name, value)
+            object.__setattr__(self, "dynamic_vision" if name == "is_dynamic" else "is_dynamic", value)
+            return
+        super().__setattr__(name, value)
+
     def __init__(self, is_dynamic: Optional[bool] = None, dynamic_vision: Optional[bool] = None, **kwargs):
         # ``is_dynamic`` is the release-level field shipped in Qwen3-VL
         # ``config.json``. It pairs the vision MXQ, text MXQ, image processor,

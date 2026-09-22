@@ -29,9 +29,9 @@ from mblt_model_zoo.hf_transformers.models.qwen3_vl.modeling_qwen3_vl import (  
 )
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     _NPU_MAX_VISION_TOKENS,
-    _aligned_safe_pixel_floor,
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
+    _aligned_safe_pixel_floor,
 )
 
 
@@ -124,6 +124,21 @@ def test_top_level_config_is_dynamic_round_trip() -> None:
     restored = MobilintQwen3VLConfig.from_dict(payload)
     assert restored.is_dynamic is True
     assert restored.dynamic_vision is True
+
+
+def test_top_level_config_dynamic_alias_stays_synchronized() -> None:
+    """Updating either release-level field must not serialize conflicting values."""
+    config = MobilintQwen3VLConfig(is_dynamic=False)
+
+    config.dynamic_vision = True
+    assert config.is_dynamic is True
+    assert config.to_dict()["is_dynamic"] is True
+    assert config.to_dict()["dynamic_vision"] is True
+
+    config.is_dynamic = False
+    assert config.dynamic_vision is False
+    assert config.to_dict()["is_dynamic"] is False
+    assert config.to_dict()["dynamic_vision"] is False
 
 
 def test_vision_config_has_no_dynamic_vision_attribute() -> None:
