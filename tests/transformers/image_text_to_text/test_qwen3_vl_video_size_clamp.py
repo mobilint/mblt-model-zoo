@@ -86,6 +86,27 @@ def test_dynamic_vision_call_clamps_video_size_before_super_dispatch(
     assert captured["longest_edge"] == limit
 
 
+def test_dynamic_vision_call_integer_video_size_preserves_longest_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integer video size shorthand must include the processor's longest-edge ceiling."""
+    proc = _make_processor(dynamic_vision=True)
+    size = 100_000
+    captured: dict[str, object] = {}
+
+    def _capture_super(self, images, text, videos, **forwarded):
+        captured["kwargs"] = forwarded
+        return "sentinel-batch-feature"
+
+    monkeypatch.setattr(Qwen3VLProcessor, "__call__", _capture_super)
+
+    proc(images=None, text="describe <|video_pad|>", videos=[object()], videos_kwargs={"size": size})
+
+    clamped = captured["kwargs"]["videos_kwargs"]["size"]
+    assert clamped["longest_edge"] == proc.video_processor.size["longest_edge"]
+    assert clamped["shortest_edge"] == size
+
+
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("field", ["min_pixels", "max_pixels"])
 def test_dynamic_vision_call_clamps_video_pixel_overrides(
