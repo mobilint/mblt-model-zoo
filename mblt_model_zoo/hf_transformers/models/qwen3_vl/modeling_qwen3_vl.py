@@ -66,10 +66,19 @@ class _MobilintVisionRotaryEmbedding(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
         self.register_buffer("inv_freq", torch.empty(dim // 2), persistent=False)
-        self.inv_freq.copy_(1.0 / (10000.0 ** (torch.arange(0, dim, 2) / dim)))
+        self._dim = dim
+        self._reset_inv_freq()
+
+    def _reset_inv_freq(self) -> None:
+        """Materialize the runtime-only frequency buffer off the meta device."""
+        device = torch.device("cpu") if self.inv_freq.device.type == "meta" else self.inv_freq.device
+        inv_freq = 1.0 / (10000.0 ** (torch.arange(0, self._dim, 2, dtype=torch.float32, device=device) / self._dim))
+        self.inv_freq = inv_freq
 
     def forward(self, sequence_length_or_positions: int | torch.Tensor) -> torch.Tensor:
         """Support both legacy length and Transformers 5.17 position-id calls."""
+        if self.inv_freq.device.type == "meta":
+            self._reset_inv_freq()
         if torch.is_tensor(sequence_length_or_positions):
             positions = sequence_length_or_positions.to(device=self.inv_freq.device)
             return positions.unsqueeze(-1) * self.inv_freq

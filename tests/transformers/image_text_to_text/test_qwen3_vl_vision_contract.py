@@ -468,6 +468,19 @@ def test_qwen3_vl_rotary_fallback_accepts_position_ids() -> None:
     assert output.shape == (4, 32)
 
 
+def test_qwen3_vl_rotary_fallback_rebuilds_meta_frequency_buffer() -> None:
+    """Meta-device loading must not leave the runtime-only frequencies uninitialized."""
+    rotary = modeling_qwen3_vl._MobilintVisionRotaryEmbedding(64)
+    rotary.inv_freq = torch.empty_like(rotary.inv_freq, device="meta")
+
+    output = rotary(torch.arange(4, dtype=torch.long))
+
+    expected_inv_freq = 1.0 / (10000.0 ** (torch.arange(0, 64, 2, dtype=torch.float32) / 64))
+    assert rotary.inv_freq.device.type != "meta"
+    assert torch.allclose(rotary.inv_freq, expected_inv_freq)
+    assert torch.allclose(output[1], expected_inv_freq)
+
+
 @pytest.mark.parametrize("core_mode", ["single", "global4", "global8"])
 def test_qwen3_vl_visual_forward_loops_batched_images_for_non_multi_core_modes(
     monkeypatch: pytest.MonkeyPatch,
