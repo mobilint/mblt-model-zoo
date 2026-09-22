@@ -67,7 +67,7 @@ def _expected_image_limit(proc: MobilintQwen3VLProcessor) -> int:
 
 def _expected_video_limit(proc: MobilintQwen3VLProcessor) -> int:
     vp = proc.video_processor
-    return proc.max_vision_tokens * vp.patch_size**2 * vp.temporal_patch_size
+    return proc.max_vision_tokens * vp.patch_size**2
 
 
 # ---------------------------------------------------------------------------
@@ -384,9 +384,7 @@ def test_call_forwards_clamped_video_kwargs_to_super(
     assert result == "sentinel"
     forwarded = captured["kwargs"]
     assert forwarded["videos_kwargs"]["size"]["longest_edge"] == limit
-    assert forwarded["videos_kwargs"]["size"]["shortest_edge"] == _aligned_safe_pixel_floor(
-        proc.video_processor, limit
-    )
+    assert forwarded["videos_kwargs"]["size"]["shortest_edge"] == _aligned_safe_pixel_floor(proc.video_processor, limit)
 
 
 def test_video_do_resize_false_bypass_hard_fails_before_super_dispatch(

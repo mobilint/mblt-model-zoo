@@ -35,6 +35,7 @@ from transformers.models.qwen3_vl.processing_qwen3_vl import Qwen3VLProcessor  #
 from mblt_model_zoo.hf_transformers.models.qwen3_vl.processing_qwen3_vl import (  # noqa: E402
     MobilintQwen3VLProcessor,
     MobilintQwen3VLVideoProcessor,
+    _aligned_safe_pixel_floor,
 )
 
 # Transformers 5.x removed the scalar ``max_pixels`` / ``min_pixels`` attributes
@@ -106,7 +107,7 @@ def test_clamp_caps_oversized_min_pixels_on_real_image_processor() -> None:
 
     proc._clamp_dynamic_image_size()
 
-    assert ip.min_pixels == limit
+    assert ip.min_pixels == _aligned_safe_pixel_floor(ip, limit)
 
 
 def test_clamp_survives_image_processor_without_scalar_attribute() -> None:

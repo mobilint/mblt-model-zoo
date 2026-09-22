@@ -36,9 +36,9 @@ def _make_processor(dynamic_vision: bool) -> MobilintQwen3VLProcessor:
 
 
 def _expected_video_limit(proc: MobilintQwen3VLProcessor) -> int:
-    """The clamp target: `t_bar * h_bar * w_bar <= max_pixels` and `t_bar >= temporal_patch_size`."""
+    """The per-frame spatial pixel ceiling used by the video resizer."""
     vp = proc.video_processor
-    return proc.max_vision_tokens * vp.patch_size**2 * vp.temporal_patch_size
+    return proc.max_vision_tokens * vp.patch_size**2
 
 
 def test_clamp_reduces_oversized_video_longest_edge() -> None:

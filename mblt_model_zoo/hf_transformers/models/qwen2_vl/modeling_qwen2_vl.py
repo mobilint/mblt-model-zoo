@@ -19,7 +19,7 @@ from transformers.models.qwen2_vl.modeling_qwen2_vl import (
 try:
     from transformers.models.qwen2_vl.modeling_qwen2_vl import VisionRotaryEmbedding
 except ImportError:
-    class VisionRotaryEmbedding(nn.Module):
+    class _LegacyVisionRotaryEmbedding(nn.Module):
         """Preserve the pre-5.17 Qwen2-VL vision RoPE table contract."""
 
         def __init__(self, dim: int):
@@ -33,7 +33,10 @@ except ImportError:
 
         def forward(self, sequence_length: int) -> torch.Tensor:
             positions = torch.arange(sequence_length, device=self.inv_freq.device)
-            return torch.outer(positions, self.inv_freq)
+            frequencies = torch.outer(positions, self.inv_freq)
+            return torch.cat((frequencies, frequencies), dim=-1)
+
+    VisionRotaryEmbedding = _LegacyVisionRotaryEmbedding
 from transformers.processing_utils import Unpack
 from transformers.utils.generic import TransformersKwargs, can_return_tuple, logging
 

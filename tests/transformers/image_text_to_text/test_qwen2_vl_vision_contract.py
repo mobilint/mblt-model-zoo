@@ -12,6 +12,17 @@ from mblt_model_zoo.hf_transformers.models.qwen2_vl.modeling_qwen2_vl import (
 )
 
 
+def test_legacy_qwen2_rotary_fallback_keeps_packed_table_width() -> None:
+    """The pre-5.17 fallback must return the duplicated frequency table."""
+    fallback = getattr(modeling_qwen2_vl, "_LegacyVisionRotaryEmbedding", None)
+    if fallback is None:
+        pytest.skip("installed Transformers provides VisionRotaryEmbedding")
+
+    table = fallback(64)(4)
+
+    assert table.shape == (4, 64)
+
+
 class DummyQwen2Vision:
     """Stub vision tower exposing the methods used by the Mobilint wrapper."""
 

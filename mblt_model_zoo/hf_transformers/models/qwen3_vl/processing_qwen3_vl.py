@@ -588,7 +588,9 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         vp = self.video_processor
         if vp is None:
             return
-        limit = self.max_vision_tokens * int(vp.patch_size) ** 2 * int(vp.temporal_patch_size)
+        # Video resizing applies this spatial budget independently to each
+        # frame before folding the temporal axis into the model input.
+        limit = self.max_vision_tokens * int(vp.patch_size) ** 2
         aligned_safe_floor = _aligned_safe_pixel_floor(vp, limit)
         current_size = vp.size
         longest = _size_get(current_size, "longest_edge")
@@ -612,7 +614,8 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         vp = self.video_processor
         if vp is None:
             return
-        limit = self.max_vision_tokens * int(vp.patch_size) ** 2 * int(vp.temporal_patch_size)
+        # ``videos_kwargs.size`` is consumed by the same per-frame resizer.
+        limit = self.max_vision_tokens * int(vp.patch_size) ** 2
         for scope in self._call_kwargs_scopes(kwargs, "videos_kwargs"):
             self._reject_do_resize_false(scope, "video")
             self._cap_size_edges(scope, limit, "video")
