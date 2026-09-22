@@ -155,8 +155,18 @@ def test_image_call_kwargs_integer_size_is_normalized_and_capped() -> None:
     proc._clamp_dynamic_image_call_kwargs(kwargs)
 
     clamped = kwargs["images_kwargs"]["size"]
-    assert clamped["longest_edge"] == limit
-    assert clamped["shortest_edge"] == _aligned_safe_pixel_floor(proc.image_processor, limit)
+    assert clamped == {"shortest_edge": _aligned_safe_pixel_floor(proc.image_processor, limit)}
+
+
+def test_image_call_kwargs_safe_integer_size_preserves_shortest_edge_semantics() -> None:
+    """A safe integer shorthand must not replace the processor's longest-edge ceiling."""
+    proc = _make_processor()
+    size = 100_000
+    kwargs: dict = {"images_kwargs": {"size": size}}
+
+    proc._clamp_dynamic_image_call_kwargs(kwargs)
+
+    assert kwargs["images_kwargs"]["size"] == {"shortest_edge": size}
 
 
 def test_image_call_kwargs_size_preserves_small_shortest_edge() -> None:

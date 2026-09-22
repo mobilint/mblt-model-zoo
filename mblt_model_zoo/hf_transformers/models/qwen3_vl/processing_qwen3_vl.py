@@ -938,10 +938,10 @@ class MobilintQwen3VLProcessor(Qwen3VLProcessor):
         processor = self.image_processor if kind == "image" else self.video_processor
         aligned_safe_floor = _aligned_safe_pixel_floor(processor, limit)
         if isinstance(size, int) and not isinstance(size, bool):
-            scope["size"] = {
-                "longest_edge": min(size, limit),
-                "shortest_edge": min(size, aligned_safe_floor),
-            }
+            # Hugging Face's integer shorthand means ``shortest_edge``. Keep
+            # the processor's existing longest-edge ceiling instead of
+            # changing the caller's requested scale for safe values.
+            scope["size"] = {"shortest_edge": min(size, aligned_safe_floor)}
             return
         longest = _size_get(size, "longest_edge")
         shortest = _size_get(size, "shortest_edge")
