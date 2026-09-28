@@ -773,10 +773,6 @@ def main() -> int:
     register_mobilint_models(registration_args, transformers)
 
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=trust_remote_code)
-    if args.eagle3_tree_depth is not None:
-        config.eagle3_tree_depth = int(args.eagle3_tree_depth)
-    if args.eagle3_tree_top_k is not None:
-        config.eagle3_tree_top_k = int(args.eagle3_tree_top_k)
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
@@ -789,8 +785,15 @@ def main() -> int:
     _TOKENIZER = tokenizer
     _INCLUDE_PARENT_TOPK = bool(args.show_parent_topk)
 
-    if args.num_assistant_tokens is not None:
-        model.generation_config.num_assistant_tokens = int(args.num_assistant_tokens)
+    # generate() resolves the tree from generation_config first (config.json is only a legacy
+    # fallback), so the overrides must land there or a release's generation_config.json wins.
+    for field, value in (
+        ("eagle3_tree_depth", args.eagle3_tree_depth),
+        ("eagle3_tree_top_k", args.eagle3_tree_top_k),
+        ("num_assistant_tokens", args.num_assistant_tokens),
+    ):
+        if value is not None:
+            setattr(model.generation_config, field, int(value))
 
     enable_thinking = bool(args.enable_thinking)
     if getattr(tokenizer, "chat_template", None):
