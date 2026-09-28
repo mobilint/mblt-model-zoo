@@ -110,6 +110,12 @@ description: >-
   acceptance recovers. Override by editing the shipped `generation_config.json`, by setting
   `model.generation_config.num_assistant_tokens = ...` before `generate`, or by passing
   `num_assistant_tokens=<value>` directly to `generate(...)` for a per-call override.
+- The tree shape lives in `generation_config.json` too: `eagle3_tree_depth` (expansion steps) and
+  `eagle3_tree_top_k` (fan-out per level), resolved per `generate` call with the same override
+  paths. The same-named `config.json` fields are a legacy fallback for older releases. Tune all
+  three per target body and core mode with `mblt-model-zoo tps measure --eagle3-tree-depth
+  --eagle3-tree-top-k --num-assistant-tokens`; NPU verify cost grows with the verified token
+  count, so the NPU optimum is a much smaller tree than GPU EAGLE-3 defaults.
 - Mobilint EAGLE-3 releases train base and draft at a matched hidden size by policy; the
   `draft_emb.shape == target_emb.shape` assert in `scripts/build_eagle3_safetensors.py` enforces
   it. The `MobilintEagle3DraftModelMixin` `hidden_states.shape[-1] != inputs_embeds.shape[-1]`

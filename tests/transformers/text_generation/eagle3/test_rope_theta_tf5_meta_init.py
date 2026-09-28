@@ -275,7 +275,7 @@ def _make_qwen2_eagle3_config(*, tf5_style: bool, rope_theta: float | None) -> M
         fc_mxq_path="fc.mxq",
         eagle3_tree_depth=2,
         eagle3_tree_top_k=4,
-        eagle3_npu_chunk_size=64,
+        npu_prefill_chunk_size=64,
         draft_config=draft_kwargs,
         name_or_path="mobilint/test-qwen2-eagle3-tf5",
     )
@@ -318,7 +318,7 @@ def _make_qwen3_eagle3_config(*, tf5_style: bool, rope_theta: float | None) -> M
         fc_mxq_path="fc.mxq",
         eagle3_tree_depth=2,
         eagle3_tree_top_k=4,
-        eagle3_npu_chunk_size=64,
+        npu_prefill_chunk_size=64,
         draft_config=draft_kwargs,
         name_or_path="mobilint/test-qwen3-eagle3-tf5",
     )
@@ -359,7 +359,7 @@ def _make_llama_eagle3_config(*, tf5_style: bool, rope_theta: float | None) -> M
         fc_mxq_path="fc.mxq",
         eagle3_tree_depth=2,
         eagle3_tree_top_k=4,
-        eagle3_npu_chunk_size=64,
+        npu_prefill_chunk_size=64,
         draft_config=draft_kwargs,
         name_or_path="mobilint/test-llama-eagle3-tf5",
     )

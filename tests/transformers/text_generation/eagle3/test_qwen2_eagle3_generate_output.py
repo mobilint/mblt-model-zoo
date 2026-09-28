@@ -1289,7 +1289,7 @@ def test_qwen2_eagle3_generate_ignored_args_emit_stable_warning_messages(monkeyp
     assert "attention_mask is not supported and will be ignored." in joined
     assert "min_new_tokens is not supported and will be ignored." in joined
     assert "pad_token_id is not supported and will be ignored." in joined
-    assert "npu_prefill_chunk_size is not supported by EAGLE-3 generate and will be ignored." in joined
+    assert "npu_prefill_chunk_size" not in joined
     assert "cache_position is not supported and will be ignored." in joined
 
 

@@ -14,7 +14,6 @@ import pytest
 
 from mblt_model_zoo.cli import tps as tps_cli
 
-
 _NON_MOBILINT_MODEL = "someorg/some-model"
 
 
@@ -77,8 +76,9 @@ def test_base_mxq_path_alone_still_triggers_npu_defaults() -> None:
     assert args.device_backend == "npu"
 
 
-def test_no_mxq_path_on_non_mobilint_model_keeps_gpu_defaults() -> None:
+def test_no_mxq_path_on_non_mobilint_model_keeps_gpu_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without any MXQ artifact, a non-mobilint model should default to cuda/gpu."""
+    monkeypatch.setattr(tps_cli, "_is_mobilint_model_target", lambda *args, **kwargs: False)
     args = _base_args()
 
     tps_cli._normalize_runtime_defaults(args)
@@ -133,3 +133,43 @@ def test_mobilint_model_id_still_wins_without_any_mxq_path() -> None:
 
     assert args.device == "cpu"
     assert args.device_backend == "npu"
+
+
+def test_local_path_with_mobilint_config_defaults_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-``mobilint/`` id whose config is a Mobilint mixin (e.g. a local snapshot) picks CPU/NPU."""
+    probed: list[str] = []
+
+    def _fake_probe(model: str, **kwargs: object) -> bool:
+        probed.append(model)
+        return True
+
+    monkeypatch.setattr(tps_cli, "_is_mobilint_model_target", _fake_probe)
+    args = _base_args(model="/models/EAGLE3-Qwen3-8B")
+
+    tps_cli._normalize_runtime_defaults(args)
+
+    assert probed == ["/models/EAGLE3-Qwen3-8B"]
+    assert args.device == "cpu"
+    assert args.device_backend == "npu"
+
+
+def test_mobilint_config_probe_preserves_explicit_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the unset half is defaulted when the config probe detects a Mobilint model."""
+    monkeypatch.setattr(tps_cli, "_is_mobilint_model_target", lambda *args, **kwargs: True)
+    args = _base_args(model="/models/EAGLE3-Qwen3-8B", device="cuda:1")
+
+    tps_cli._normalize_runtime_defaults(args)
+
+    assert args.device == "cuda:1"
+    assert args.device_backend == "npu"
+
+
+def test_explicit_device_and_backend_skip_mobilint_config_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No config download is needed when both device and backend are explicit."""
+    monkeypatch.setattr(tps_cli, "_is_mobilint_model_target", lambda *args, **kwargs: pytest.fail("probe must not run"))
+    args = _base_args(device="cpu", device_backend="gpu")
+
+    tps_cli._normalize_runtime_defaults(args)
+
+    assert args.device == "cpu"
+    assert args.device_backend == "gpu"

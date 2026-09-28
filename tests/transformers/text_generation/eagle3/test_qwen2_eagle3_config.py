@@ -23,7 +23,7 @@ def test_qwen2_eagle3_config_roundtrip_preserves_nested_draft_and_backend_fields
         fc_mxq_path="fc.mxq",
         eagle3_tree_depth=6,
         eagle3_tree_top_k=4,
-        eagle3_npu_chunk_size=128,
+        npu_prefill_chunk_size={"single": 128, "global4": 256},
         draft_config={
             "vocab_size": 10,
             "hidden_size": 8,
@@ -42,7 +42,8 @@ def test_qwen2_eagle3_config_roundtrip_preserves_nested_draft_and_backend_fields
     assert restored.fc_mxq_path == "fc.mxq"
     assert restored.eagle3_tree_depth == 6
     assert restored.eagle3_tree_top_k == 4
-    assert restored.eagle3_npu_chunk_size == 128
+    assert restored.npu_prefill_chunk_size == {"single": 128, "global4": 256}
+    assert not hasattr(restored, "eagle3_npu_chunk_size")
     assert restored.draft_config.vocab_size == 10
 
 

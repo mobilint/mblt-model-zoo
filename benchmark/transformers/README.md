@@ -203,6 +203,21 @@ mblt-model-zoo tps sweep \
   --csv benchmark/transformers/results/chunk512_sweep.csv
 ```
 
+### Tune the EAGLE-3 Draft Tree
+
+EAGLE-3 releases accept `--eagle3-tree-depth`, `--eagle3-tree-top-k` and `--num-assistant-tokens`, which
+override the same-named `generation_config.json` fields (each round verifies `num_assistant_tokens` tokens on
+the base model). They are rejected for non-EAGLE-3 models.
+
+```bash
+mblt-model-zoo tps measure \
+  --model mobilint/EAGLE3-Qwen3-8B \
+  --eagle3-tree-depth 6 \
+  --eagle3-tree-top-k 3 \
+  --num-assistant-tokens 10 \
+  --decode 200
+```
+
 ### Measure an Original HF Model on GPU
 
 For a non-Mobilint original Hugging Face model, use a CUDA device and the GPU tracker.

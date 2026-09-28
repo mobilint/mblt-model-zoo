@@ -116,7 +116,7 @@ def _make_qwen2_config() -> MobilintQwen2Eagle3Config:
         fc_mxq_path="fc.mxq",
         eagle3_tree_depth=2,
         eagle3_tree_top_k=4,
-        eagle3_npu_chunk_size=64,
+        npu_prefill_chunk_size=64,
         draft_config=dict(_QWEN2_DRAFT_CONFIG),
         name_or_path="mobilint/test-qwen2-eagle3-fixture",
     )
@@ -137,7 +137,7 @@ def _make_qwen3_config() -> MobilintQwen3Eagle3Config:
         fc_mxq_path="fc.mxq",
         eagle3_tree_depth=2,
         eagle3_tree_top_k=4,
-        eagle3_npu_chunk_size=64,
+        npu_prefill_chunk_size=64,
         draft_config=dict(_QWEN3_DRAFT_CONFIG),
         name_or_path="mobilint/test-qwen3-eagle3-fixture",
     )
@@ -295,7 +295,7 @@ def test_draft_rope_theta_flows_through_to_cached_rope_base(stub_npu_backend: No
         fc_mxq_path="fc.mxq",
         eagle3_tree_depth=2,
         eagle3_tree_top_k=4,
-        eagle3_npu_chunk_size=64,
+        npu_prefill_chunk_size=64,
         draft_config=draft_kwargs,
         name_or_path="mobilint/test-qwen2-eagle3-rope-theta",
     )

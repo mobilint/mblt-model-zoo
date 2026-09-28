@@ -167,6 +167,14 @@ class Eagle3PipelineOptions:
     base_dev_no: int | list[int] | None = None
     draft_dev_no: int | list[int] | None = None
     fc_dev_no: int | list[int] | None = None
+    tree_depth: int | None = None
+    tree_top_k: int | None = None
+    num_assistant_tokens: int | None = None
+
+    @property
+    def tree_options_requested(self) -> bool:
+        """Return whether any EAGLE-3 tree/speculation override was supplied."""
+        return any(value is not None for value in (self.tree_depth, self.tree_top_k, self.num_assistant_tokens))
 
 
 @dataclass(frozen=True)
@@ -284,6 +292,20 @@ def _parse_int_list(spec: str) -> list[int]:
 
 def _parse_positive_int(spec: str) -> int:
     return _parse_positive_int_common(spec)
+
+
+def _parse_num_assistant_tokens(spec: str) -> int:
+    """Parse ``--num-assistant-tokens``, which must leave room for at least one draft node.
+
+    EAGLE-3 verifies ``num_assistant_tokens`` tokens per round (root + draft nodes), and
+    ``generate`` rejects values below ``2``; failing here avoids loading the model first.
+    """
+    value = _parse_positive_int_common(spec)
+    if value < 2:
+        raise argparse.ArgumentTypeError(
+            "--num-assistant-tokens must be >= 2 (the root token plus at least one draft token)"
+        )
+    return value
 
 
 def _parse_positive_int_optional(spec: Union[str, None]) -> Union[int, None]:
@@ -1625,6 +1647,28 @@ def _configure_asr_pipeline_num_beams(task: str, pipeline: Any) -> Any:
     return pipeline
 
 
+def _apply_eagle3_generation_overrides(pipeline: Any, eagle3_options: Eagle3PipelineOptions) -> None:
+    """Write EAGLE-3 tree overrides onto the loaded model's generation config.
+
+    ``MobilintEagle3GenerationMixin.generate`` resolves ``num_assistant_tokens``,
+    ``eagle3_tree_depth`` and ``eagle3_tree_top_k`` from ``generation_config`` on every
+    call, so writing them once here applies to every warmup and measured run.
+    """
+    overrides = {
+        "num_assistant_tokens": eagle3_options.num_assistant_tokens,
+        "eagle3_tree_depth": eagle3_options.tree_depth,
+        "eagle3_tree_top_k": eagle3_options.tree_top_k,
+    }
+    overrides = {key: int(value) for key, value in overrides.items() if value is not None}
+    if not overrides:
+        return
+    generation_config = getattr(getattr(pipeline, "model", None), "generation_config", None)
+    if generation_config is None:
+        raise SystemExit("tps: EAGLE-3 tree overrides require a model with a generation_config.")
+    for key, value in overrides.items():
+        setattr(generation_config, key, value)
+
+
 def _build_pipeline(
     *,
     task: str,
@@ -1696,8 +1740,20 @@ def _build_pipeline(
             eagle3_options.base_dev_no,
             eagle3_options.draft_dev_no,
             eagle3_options.fc_dev_no,
+            eagle3_options.tree_depth,
+            eagle3_options.tree_top_k,
+            eagle3_options.num_assistant_tokens,
         )
     )
+    if eagle3_options.tree_options_requested:
+        # Tree overrides are EAGLE-3 generation_config fields; on any other model they would silently no-op.
+        if _is_vlm_task(task) or not _detect_eagle3_model(
+            model, trust_remote_code=trust_remote_code, revision=revision
+        ):
+            raise SystemExit(
+                "tps: --eagle3-tree-depth / --eagle3-tree-top-k / --num-assistant-tokens apply only to "
+                f"EAGLE-3 releases (model={model!r}); drop them or use an EAGLE-3 model."
+            )
     # MobilintEagle3ConfigMixin only exposes base_/draft_/fc_-prefixed dev_no and max_batch_size
     # setters, so a bare `--dev-no` or `--batch-size` on an EAGLE-3 release would otherwise be
     # silently dropped. Detect the release once and broadcast either global into the prefixed
@@ -1904,6 +1960,11 @@ def _build_pipeline(
     if model_kwargs:
         pipeline_kwargs["model_kwargs"] = model_kwargs
 
+    def _finalize_pipeline(built: Any) -> Any:
+        built = _configure_asr_pipeline_num_beams(task, built)
+        _apply_eagle3_generation_overrides(built, eagle3_options)
+        return built
+
     def _raise_cuda_nvml_hint(exc: Exception) -> None:
         msg = str(exc)
         if "nvmlInit_v2" in msg or "Can't initialize NVML" in msg:
@@ -1919,19 +1980,19 @@ def _build_pipeline(
     if dtype:
         try:
             pipeline_kwargs["dtype"] = dtype
-            return _configure_asr_pipeline_num_beams(task, hf_pipeline(**pipeline_kwargs))
+            return _finalize_pipeline(hf_pipeline(**pipeline_kwargs))
         except TypeError:
             pipeline_kwargs.pop("dtype", None)
             pipeline_kwargs["torch_dtype"] = dtype
             try:
-                return _configure_asr_pipeline_num_beams(task, hf_pipeline(**pipeline_kwargs))
+                return _finalize_pipeline(hf_pipeline(**pipeline_kwargs))
             except Exception as e:
                 _raise_cuda_nvml_hint(e)
         except Exception as e:
             _raise_cuda_nvml_hint(e)
 
     try:
-        return _configure_asr_pipeline_num_beams(task, hf_pipeline(**pipeline_kwargs))
+        return _finalize_pipeline(hf_pipeline(**pipeline_kwargs))
     except Exception as e:
         _raise_cuda_nvml_hint(e)
 
@@ -1972,6 +2033,9 @@ def _extract_eagle3_pipeline_kwargs(args: argparse.Namespace) -> Eagle3PipelineO
         base_dev_no=getattr(args, "base_dev_no", None),
         draft_dev_no=getattr(args, "draft_dev_no", None),
         fc_dev_no=getattr(args, "fc_dev_no", None),
+        tree_depth=getattr(args, "eagle3_tree_depth", None),
+        tree_top_k=getattr(args, "eagle3_tree_top_k", None),
+        num_assistant_tokens=getattr(args, "num_assistant_tokens", None),
     )
 
 
@@ -2316,6 +2380,23 @@ def _effective_mxq_path_for_defaults(args: argparse.Namespace) -> str | None:
 
 def _normalize_runtime_defaults(args: argparse.Namespace) -> None:
     effective_mxq_path = _effective_mxq_path_for_defaults(args)
+    if (
+        (args.device is None or args.device_backend is None)
+        and not effective_mxq_path
+        and _is_mobilint_model_target(
+            args.model,
+            trust_remote_code=getattr(args, "trust_remote_code", True),
+            revision=getattr(args, "revision", None),
+        )
+    ):
+        # ``mobilint/`` repo ids match by prefix; other ids (local snapshot dirs, mirrors)
+        # match when their config is a Mobilint mixin. Either way the host-side pipeline
+        # stays on CPU and device metrics come from the NPU, never CUDA.
+        if args.device is None:
+            args.device = "cpu"
+        if args.device_backend is None:
+            args.device_backend = "npu"
+        return
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=args.device is not None,
@@ -5025,6 +5106,27 @@ def add_tps_parser(
             type=_parse_positive_int_optional,
             default=None,
             help="optional npu_prefill_chunk_size forwarded to model.generate/model.forward",
+        )
+        p.add_argument(
+            "--eagle3-tree-depth",
+            type=_parse_positive_int,
+            default=None,
+            help="EAGLE-3 only: override generation_config eagle3_tree_depth (draft expansion steps per round)",
+        )
+        p.add_argument(
+            "--eagle3-tree-top-k",
+            type=_parse_positive_int,
+            default=None,
+            help="EAGLE-3 only: override generation_config eagle3_tree_top_k (candidates kept per tree level)",
+        )
+        p.add_argument(
+            "--num-assistant-tokens",
+            type=_parse_num_assistant_tokens,
+            default=None,
+            help=(
+                "EAGLE-3 only: override generation_config num_assistant_tokens (>= 2); each round verifies "
+                "num_assistant_tokens tokens (root + num_assistant_tokens - 1 tree nodes) on the base model"
+            ),
         )
         p.add_argument(
             "--batch-size",

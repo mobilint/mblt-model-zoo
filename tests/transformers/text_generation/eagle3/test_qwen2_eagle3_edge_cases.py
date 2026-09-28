@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -339,7 +340,7 @@ def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None
 
     class _DummyDraftModel(MobilintEagle3DraftModelMixin):
         def __init__(self) -> None:
-            self.config = SimpleNamespace(eagle3_npu_chunk_size=2)
+            self.config = SimpleNamespace(npu_prefill_chunk_size=2)
             self._mxq = _DummyMxqModel()
             self.embed_tokens = lambda ids: torch.zeros(
                 (ids.shape[0], ids.shape[1], 4),
@@ -351,8 +352,8 @@ def test_draft_forward_concatenates_chunk_logits_on_sequence_dimension() -> None
                 dtype=np.float32,
             )
 
-        def resolve_npu_prefill_chunk_size(self, chunk_size: int) -> int:
-            return chunk_size
+        def resolve_npu_prefill_chunk_size(self, chunk_size: Optional[int]) -> int:
+            return chunk_size if chunk_size is not None else self.config.npu_prefill_chunk_size
 
         def get_mxq_model(self):
             return self._mxq

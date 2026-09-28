@@ -461,6 +461,20 @@ To make it easier to test custom compiled models, we support overriding the inpu
   `auto` entry reuse the tuned `single` value; an explicit `auto` entry takes precedence. If the config
   is missing or invalid, it falls back to `128`.
 
+  EAGLE-3 models use the same field and the same resolution; the base and draft backends each look it
+  up with their own `core_mode`, so one per-core-mode mapping can serve a `global4` base and a `single`
+  draft. The former `eagle3_npu_chunk_size` field is no longer read.
+
+#### EAGLE-3 tree settings
+
+- `num_assistant_tokens`, `eagle3_tree_depth`, `eagle3_tree_top_k` (`int`)
+
+  Draft-tree budget (tokens verified per round, root included; must be `>= 2`), expansion depth, and
+  per-level fan-out (both `>= 1`); out-of-range values raise `ValueError`.
+  Each `generate` call takes the explicit keyword argument first, then the same-named
+  `generation_config.json` field. `eagle3_tree_depth` / `eagle3_tree_top_k` additionally fall back to
+  the legacy `config.json` fields of older releases.
+
 ### EAGLE-3 generate compatibility policy
 
 For Mobilint EAGLE-3 models, the draft backend is intentionally lightweight and
@@ -472,7 +486,7 @@ generation options.
 
 |Category|Arguments|Behavior|
 |---|---|---|
-|Ignored with warning|`attention_mask`, `min_new_tokens`, `pad_token_id`, `npu_prefill_chunk_size`, `cache_position`, unknown `**kwargs`|The call continues and emits a warning message for each argument.|
+|Ignored with warning|`attention_mask`, `min_new_tokens`, `pad_token_id`, `cache_position`, unknown `**kwargs`|The call continues and emits a warning message for each argument.|
 |Hard error (`NotImplementedError`)|`num_beams != 1`, `assistant_model`, `use_cache=False`, custom `logits_processor`, `negative_prompt_ids`, `negative_prompt_attention_mask`|The call fails immediately to prevent ambiguous runtime behavior.|
 
 Examples:
