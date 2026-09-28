@@ -611,7 +611,7 @@ class MobilintEagle3BaseModelMixin:
 
         hidden_states_chunks: list[torch.Tensor] = []
         logits_chunks: list[torch.Tensor] = []
-        chunk_size = self.resolve_npu_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
+        chunk_size = self.resolve_npu_prefill_chunk_size(getattr(self, "npu_prefill_chunk_size_override", None))
         timing_phase = "prefill" if past_key_values_length == 0 else "decode"
         for chunk_index in range(math.ceil(seq_length / chunk_size)):
             seq_start = chunk_index * chunk_size
@@ -663,9 +663,11 @@ class MobilintEagle3DraftModelMixin:
     - Return tree metadata consumed by posterior evaluation.
 
     Families that need a different rotary class can override
-    :meth:`_build_draft_rotary_emb`. Note that ``max_draft_tokens`` set here
-    is a bootstrap value; :class:`MobilintEagle3GenerationMixin.generate`
-    resolves the final value from ``GenerationConfig.num_assistant_tokens``.
+    :meth:`_build_draft_rotary_emb`. Note that ``max_draft_tokens``, ``depth``
+    and ``top_k`` set here are bootstrap values;
+    :class:`MobilintEagle3GenerationMixin.generate` resolves the final values
+    from ``GenerationConfig`` (``num_assistant_tokens``, ``eagle3_tree_depth``,
+    ``eagle3_tree_top_k``) on every call.
     """
 
     def __init__(self, config, draft_config, fc_projector, *args, **kwargs) -> None:
@@ -674,18 +676,15 @@ class MobilintEagle3DraftModelMixin:
         self.fc_projector = fc_projector
         self.embed_tokens = nn.Embedding(draft_config.vocab_size, draft_config.hidden_size, draft_config.pad_token_id)
         self.rotary_emb = self._build_draft_rotary_emb(draft_config)
-        self.top_k = int(config.eagle3_tree_top_k)
-        # Bootstrap value; generate() overrides this from
-        # ``GenerationConfig.num_assistant_tokens`` (default 64) before use.
+        # Bootstrap values; generate() overrides them from ``GenerationConfig``
+        # (``num_assistant_tokens`` default 64, ``eagle3_tree_depth``, ``eagle3_tree_top_k``) before use.
         self.max_draft_tokens = int(getattr(config, "num_assistant_tokens", 64)) - 1
-        self.depth = int(config.eagle3_tree_depth)
+        self.set_tree_shape(depth=int(config.eagle3_tree_depth), top_k=int(config.eagle3_tree_top_k))
         self.hidden_size = draft_config.hidden_size
         self.logsoftmax = nn.LogSoftmax(dim=-1)
         draft_vocab_size = int(getattr(draft_config, "draft_vocab_size", draft_config.vocab_size))
         self.register_buffer("d2t", torch.zeros(draft_vocab_size, dtype=torch.long, device="cpu"))
         self.register_buffer("t2d", torch.zeros(draft_config.vocab_size, dtype=torch.bool, device="cpu"))
-        self.tree_mask_init = torch.eye(self.top_k, dtype=torch.float32, device="cpu")[None, None]
-        self.position_ids = torch.zeros(self.top_k, dtype=torch.long, device="cpu")
         # Reusable draft attention-mask buffer. Lazily allocated on the first
         # ``_prepare_decoder_attention_mask`` call at worst-case shape
         # ``(1, 1, tgt, kv)`` and grown on demand. Past-KV columns stay zero;
@@ -702,6 +701,21 @@ class MobilintEagle3DraftModelMixin:
         self._draft_mask_prev_span: Optional[tuple[int, int, int]] = None
         for param in self.embed_tokens.parameters():
             param.requires_grad = False
+
+    def set_tree_shape(self, *, depth: int, top_k: int) -> None:
+        """Set the draft tree expansion depth and per-level fan-out.
+
+        ``tree_mask_init`` and ``position_ids`` are sized by ``top_k``, so they are
+        rebuilt whenever ``top_k`` changes. Safe to call between ``generate()`` calls.
+        """
+        depth, top_k = int(depth), int(top_k)
+        if depth <= 0 or top_k <= 0:
+            raise ValueError(f"EAGLE-3 tree depth and top_k must be positive, got depth={depth}, top_k={top_k}.")
+        self.depth = depth
+        if getattr(self, "top_k", None) != top_k or getattr(self, "tree_mask_init", None) is None:
+            self.top_k = top_k
+            self.tree_mask_init = torch.eye(top_k, dtype=torch.float32, device="cpu")[None, None]
+            self.position_ids = torch.zeros(top_k, dtype=torch.long, device="cpu")
 
     def reset_draft_mask_state(self) -> None:
         """Reset per-generate draft-mask buffer state.
@@ -933,7 +947,7 @@ class MobilintEagle3DraftModelMixin:
             if hidden_states_numpy.ndim == 3:
                 hidden_states_numpy = np.expand_dims(hidden_states_numpy, 1)
 
-        chunk_size = self.resolve_npu_prefill_chunk_size(self.config.eagle3_npu_chunk_size)
+        chunk_size = self.resolve_npu_prefill_chunk_size(getattr(self, "npu_prefill_chunk_size_override", None))
         hidden_chunks: list[torch.Tensor] = []
         logits_chunks: list[torch.Tensor] = []
         base_cache_position = cache.get_draft_seq_length() + add_cache_position

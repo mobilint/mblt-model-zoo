@@ -27,7 +27,6 @@ _EAGLE3_GENERATE_IGNORED_ARGS_MSG = {
     "attention_mask": "attention_mask is not supported and will be ignored.",
     "min_new_tokens": "min_new_tokens is not supported and will be ignored.",
     "pad_token_id": "pad_token_id is not supported and will be ignored.",
-    "npu_prefill_chunk_size": "npu_prefill_chunk_size is not supported by EAGLE-3 generate and will be ignored.",
     "cache_position": "cache_position is not supported and will be ignored.",
 }
 
@@ -743,6 +742,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         top_p: Optional[float],
         top_k: Optional[int],
         num_assistant_tokens: Optional[int] = None,
+        eagle3_tree_depth: Optional[int] = None,
+        eagle3_tree_top_k: Optional[int] = None,
     ) -> tuple[GenerationConfig, int, Optional[float], Optional[float], int]:
         """Resolve generation config values used by the EAGLE-3 loop."""
         generation_config = self.generation_config if generation_config is None else generation_config
@@ -790,7 +791,40 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             raw_num_assistant_tokens = getattr(generation_config, "num_assistant_tokens", None)
             resolved_num_assistant_tokens = int(raw_num_assistant_tokens) if raw_num_assistant_tokens is not None else 64
         self.eagle3_draft_model.max_draft_tokens = max(1, resolved_num_assistant_tokens - 1)
+        self._apply_eagle3_tree_shape(generation_config, depth=eagle3_tree_depth, top_k=eagle3_tree_top_k)
         return generation_config, resolved_max_new_tokens, resolved_temperature, resolved_top_p, resolved_top_k
+
+    def _apply_eagle3_tree_shape(
+        self,
+        generation_config: GenerationConfig,
+        *,
+        depth: Optional[int],
+        top_k: Optional[int],
+    ) -> None:
+        """Resolve the draft tree depth / top_k for this call and apply them to the draft model.
+
+        Precedence per field: explicit ``generate`` kwarg, then ``generation_config``, then the
+        legacy ``config.json`` field (releases published before the tree settings moved to
+        ``generation_config.json``), then the draft model's current value.
+        """
+        draft = self.eagle3_draft_model
+        set_tree_shape = getattr(draft, "set_tree_shape", None)
+        if set_tree_shape is None:
+            return
+        resolved: dict[str, Optional[int]] = {}
+        for name, explicit, current in (
+            ("eagle3_tree_depth", depth, getattr(draft, "depth", None)),
+            ("eagle3_tree_top_k", top_k, getattr(draft, "top_k", None)),
+        ):
+            value = explicit
+            if value is None:
+                value = getattr(generation_config, name, None)
+            if value is None:
+                value = getattr(self.config, name, None)
+            resolved[name] = current if value is None else int(value)
+        if resolved["eagle3_tree_depth"] is None or resolved["eagle3_tree_top_k"] is None:
+            return
+        set_tree_shape(depth=resolved["eagle3_tree_depth"], top_k=resolved["eagle3_tree_top_k"])
 
     def _prepare_eagle3_cache(self, past_key_values: Optional[MobilintEagle3Cache]) -> MobilintEagle3Cache:
         """Resolve and normalize the EAGLE-3 cache for a generation call."""
@@ -870,6 +904,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         stopping_criteria: Optional[StoppingCriteriaList | list[Any]],
         eos_token_id: Optional[int | list[int]],
         num_assistant_tokens: Optional[int] = None,
+        eagle3_tree_depth: Optional[int] = None,
+        eagle3_tree_top_k: Optional[int] = None,
     ) -> tuple[GenerationConfig, int, Any, MobilintEagle3Cache, torch.LongTensor, Optional[int | list[int]], StoppingCriteriaList]:
         """Prepare shared state used by the EAGLE-3 decoding loop."""
         from ..utils.eagle3.decoding import prepare_logits_processor
@@ -885,6 +921,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                 top_p=top_p,
                 top_k=top_k,
                 num_assistant_tokens=num_assistant_tokens,
+                eagle3_tree_depth=eagle3_tree_depth,
+                eagle3_tree_top_k=eagle3_tree_top_k,
             )
         )
         cache = self._prepare_eagle3_cache(past_key_values)
@@ -1022,6 +1060,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         "count_npu_time",
         "npu_prefill_chunk_size",
         "num_assistant_tokens",
+        "eagle3_tree_depth",
+        "eagle3_tree_top_k",
     )
     def generate(
         self,
@@ -1052,19 +1092,27 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         count_npu_time: bool = False,
         npu_prefill_chunk_size: Optional[int] = None,
         num_assistant_tokens: Optional[int] = None,
+        eagle3_tree_depth: Optional[int] = None,
+        eagle3_tree_top_k: Optional[int] = None,
         **kwargs: Any,
     ) -> torch.Tensor | GenerateDecoderOnlyOutput:
         """Generate tokens with the Mobilint EAGLE-3 decoding loop.
 
         Compatibility policy:
         - Ignored-with-warning: ``attention_mask``, ``min_new_tokens``,
-          ``pad_token_id``, ``npu_prefill_chunk_size``, ``cache_position``,
-          unknown kwargs.
+          ``pad_token_id``, ``cache_position``, unknown kwargs.
         - Hard error: beam search, ``assistant_model``, ``use_cache=False``,
           custom ``logits_processor``, negative prompts.
         - ``num_assistant_tokens`` overrides ``generation_config.num_assistant_tokens``
           for this call; it drives the draft's per-step ``max_draft_tokens``
           (``= num_assistant_tokens - 1``).
+        - ``eagle3_tree_depth`` / ``eagle3_tree_top_k`` override the same-named
+          ``generation_config`` fields for this call (falling back to the legacy
+          ``config.json`` fields); they set the draft tree's expansion depth and
+          per-level fan-out.
+        - ``npu_prefill_chunk_size`` overrides ``config.npu_prefill_chunk_size``
+          (an int or a per-core-mode dict, as for other Mobilint LLMs) for this
+          call; base and draft each resolve it against their own core mode.
         """
         if attention_mask is not None:
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["attention_mask"])
@@ -1072,8 +1120,6 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["min_new_tokens"])
         if pad_token_id is not None:
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["pad_token_id"])
-        if npu_prefill_chunk_size is not None:
-            logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["npu_prefill_chunk_size"])
         if cache_position is not None:
             logger.warning(_EAGLE3_GENERATE_IGNORED_ARGS_MSG["cache_position"])
 
@@ -1101,6 +1147,70 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         if input_ids.ndim != 2 or input_ids.shape[0] != 1:
             raise NotImplementedError("EAGLE-3 models only support batch size 1.")
 
+        previous_chunk_overrides = self._set_eagle3_npu_prefill_chunk_size_override(npu_prefill_chunk_size)
+        try:
+            return self._generate_eagle3(
+                input_ids=input_ids,
+                generation_config=generation_config,
+                max_new_tokens=max_new_tokens,
+                max_length=max_length,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                past_key_values=past_key_values,
+                stopping_criteria=stopping_criteria,
+                eos_token_id=eos_token_id,
+                num_assistant_tokens=num_assistant_tokens,
+                eagle3_tree_depth=eagle3_tree_depth,
+                eagle3_tree_top_k=eagle3_tree_top_k,
+                streamer=streamer,
+                count_npu_time=count_npu_time,
+                return_dict_in_generate=return_dict_in_generate,
+            )
+        finally:
+            self._restore_eagle3_npu_prefill_chunk_size_override(previous_chunk_overrides)
+
+    def _set_eagle3_npu_prefill_chunk_size_override(self, value: Optional[int]) -> list[tuple[Any, Any]]:
+        """Install a per-call ``npu_prefill_chunk_size`` on the base and draft backends.
+
+        The chunked MXQ loops run deep inside the tree-decoding helpers, so the per-call value
+        is staged on the modules instead of being threaded through every call. Returns the
+        previous values for :meth:`_restore_eagle3_npu_prefill_chunk_size_override`.
+        """
+        previous = []
+        for module in (self.eagle3_base_model, self.eagle3_draft_model):
+            previous.append((module, getattr(module, "npu_prefill_chunk_size_override", None)))
+            setattr(module, "npu_prefill_chunk_size_override", value)
+        return previous
+
+    @staticmethod
+    def _restore_eagle3_npu_prefill_chunk_size_override(previous: list[tuple[Any, Any]]) -> None:
+        for module, value in previous:
+            setattr(module, "npu_prefill_chunk_size_override", value)
+
+    def _generate_eagle3(
+        self,
+        *,
+        input_ids: torch.Tensor,
+        generation_config: Optional[GenerationConfig],
+        max_new_tokens: Optional[int],
+        max_length: Optional[int],
+        do_sample: Optional[bool],
+        temperature: Optional[float],
+        top_p: Optional[float],
+        top_k: Optional[int],
+        past_key_values: Optional[MobilintEagle3Cache],
+        stopping_criteria: Optional[StoppingCriteriaList | list[Any]],
+        eos_token_id: Optional[int | list[int]],
+        num_assistant_tokens: Optional[int],
+        eagle3_tree_depth: Optional[int],
+        eagle3_tree_top_k: Optional[int],
+        streamer: Optional[Any],
+        count_npu_time: bool,
+        return_dict_in_generate: bool,
+    ) -> torch.Tensor | GenerateDecoderOnlyOutput:
+        """Run the EAGLE-3 prefill + decode loop for a validated request."""
         generation_config, max_tokens, logits_processor, cache, generated, eos_token_id, stopping_criteria_list = (
             self._prepare_eagle3_generate_context(
                 input_ids=input_ids,
@@ -1115,6 +1225,8 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
                 stopping_criteria=stopping_criteria,
                 eos_token_id=eos_token_id,
                 num_assistant_tokens=num_assistant_tokens,
+                eagle3_tree_depth=eagle3_tree_depth,
+                eagle3_tree_top_k=eagle3_tree_top_k,
             )
         )
         if streamer is not None:

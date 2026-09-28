@@ -965,10 +965,12 @@ class MobilintEagle3ConfigMixin(PretrainedConfig):
         "revision",
         "commit_hash",
     )
+    # ``eagle3_tree_depth`` / ``eagle3_tree_top_k`` here are the legacy location: ``generate`` prefers the
+    # same-named ``generation_config`` fields and only falls back to these for older releases. The NPU chunk
+    # size uses the shared ``npu_prefill_chunk_size`` field (int or per-core-mode dict), like other LLMs.
     _EAGLE3_RUNTIME_FIELDS = (
         ("eagle3_tree_depth", 5, int),
         ("eagle3_tree_top_k", 8, int),
-        ("eagle3_npu_chunk_size", 192, int),
     )
 
     @classmethod

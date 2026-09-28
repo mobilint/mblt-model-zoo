@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- EAGLE-3 `generate` accepts `eagle3_tree_depth` / `eagle3_tree_top_k` per call and honors
+  `npu_prefill_chunk_size` (previously ignored with a warning).
+
+### Changed
+
+- EAGLE-3 tree depth and top-k are read from `generation_config.json` first; the `config.json`
+  fields remain a fallback for older releases.
+- EAGLE-3 NPU chunking uses the shared `npu_prefill_chunk_size` config field (int or per-core-mode
+  mapping) instead of `eagle3_npu_chunk_size`, which is no longer read. Releases that only set
+  `eagle3_npu_chunk_size` now fall back to the shared default of `128`.
+
 ## 2.9.0
 
 ### Added
