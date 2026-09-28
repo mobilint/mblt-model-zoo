@@ -4,6 +4,8 @@
 
 ### Added
 
+- `mblt-model-zoo tps` accepts `--eagle3-tree-depth`, `--eagle3-tree-top-k` and
+  `--num-assistant-tokens` for EAGLE-3 releases.
 - EAGLE-3 `generate` accepts `eagle3_tree_depth` / `eagle3_tree_top_k` per call and honors
   `npu_prefill_chunk_size` (previously ignored with a warning).
 

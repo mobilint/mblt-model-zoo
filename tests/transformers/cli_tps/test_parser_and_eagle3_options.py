@@ -2084,3 +2084,98 @@ def test_is_eagle3_config_detects_model_type_marker() -> None:
     assert tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3_eagle3"))
     assert tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3", architectures=["Qwen3ForCausalLMEagle3"]))
     assert not tps_cli._is_eagle3_config(SimpleNamespace(model_type="qwen3", architectures=["Qwen3ForCausalLM"]))
+
+
+def test_cli_tps_measure_eagle3_tree_flags_default_none() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/EAGLE3-Qwen3-8B"])
+
+    options = tps_cli._extract_eagle3_pipeline_kwargs(args)
+    assert options.tree_depth is None
+    assert options.tree_top_k is None
+    assert options.num_assistant_tokens is None
+    assert options.tree_options_requested is False
+
+
+def test_cli_tps_measure_eagle3_tree_flags_parse() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "tps",
+            "measure",
+            "--model",
+            "mobilint/EAGLE3-Qwen3-8B",
+            "--eagle3-tree-depth",
+            "6",
+            "--eagle3-tree-top-k",
+            "3",
+            "--num-assistant-tokens",
+            "10",
+        ]
+    )
+
+    options = tps_cli._extract_eagle3_pipeline_kwargs(args)
+    assert (options.tree_depth, options.tree_top_k, options.num_assistant_tokens) == (6, 3, 10)
+
+
+@pytest.mark.parametrize("flag", ["--eagle3-tree-depth", "--eagle3-tree-top-k", "--num-assistant-tokens"])
+def test_cli_tps_measure_eagle3_tree_flags_reject_non_positive(flag: str) -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["tps", "measure", "--model", "mobilint/EAGLE3-Qwen3-8B", flag, "0"])
+
+
+def _build_eagle3_tree_pipeline(eagle3_options, *, model: str = "mobilint/EAGLE3-Qwen3-8B"):
+    return tps_cli._build_pipeline(
+        task="text-generation",
+        model=model,
+        tokenizer=None,
+        device="cpu",
+        trust_remote_code=True,
+        dtype=None,
+        device_map=None,
+        revision=None,
+        embedding_weight=None,
+        eagle3_options=eagle3_options,
+        mxq_path=None,
+        core_mode=None,
+        target_cores=None,
+        target_clusters=None,
+    )
+
+
+def test_build_pipeline_applies_eagle3_tree_overrides(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    generation_config = SimpleNamespace(num_assistant_tokens=26)
+
+    def _fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(model=SimpleNamespace(generation_config=generation_config))
+
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(tps_cli, "_detect_eagle3_model", lambda *args, **kwargs: True)
+    monkeypatch.setattr(importlib.import_module("transformers"), "pipeline", _fake_pipeline)
+
+    _build_eagle3_tree_pipeline(tps_cli.Eagle3PipelineOptions(tree_depth=6, tree_top_k=3, num_assistant_tokens=10))
+
+    model_kwargs = captured.get("model_kwargs", {})
+    assert not {"eagle3_tree_depth", "eagle3_tree_top_k", "num_assistant_tokens"} & set(model_kwargs)
+    assert generation_config.eagle3_tree_depth == 6
+    assert generation_config.eagle3_tree_top_k == 3
+    assert generation_config.num_assistant_tokens == 10
+
+
+def test_build_pipeline_rejects_eagle3_tree_overrides_on_non_eagle3_model(monkeypatch) -> None:
+    monkeypatch.setattr(tps_cli, "_require_transformers_deps", lambda: None)
+    monkeypatch.setattr(tps_cli, "_detect_eagle3_model", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        importlib.import_module("transformers"),
+        "pipeline",
+        lambda **kwargs: pytest.fail("pipeline must not be constructed"),
+    )
+
+    with pytest.raises(SystemExit, match="apply only to EAGLE-3 releases"):
+        _build_eagle3_tree_pipeline(
+            tps_cli.Eagle3PipelineOptions(num_assistant_tokens=10),
+            model="mobilint/Qwen3-8B",
+        )
