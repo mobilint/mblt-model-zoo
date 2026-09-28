@@ -790,7 +790,14 @@ class MobilintEagle3GenerationMixin(ABC, GenerationMixin):
         else:
             raw_num_assistant_tokens = getattr(generation_config, "num_assistant_tokens", None)
             resolved_num_assistant_tokens = int(raw_num_assistant_tokens) if raw_num_assistant_tokens is not None else 64
-        self.eagle3_draft_model.max_draft_tokens = max(1, resolved_num_assistant_tokens - 1)
+        if resolved_num_assistant_tokens < 2:
+            # Each round verifies the root token plus the draft nodes, so fewer than one draft node
+            # cannot be expressed; reject instead of silently running a two-token round.
+            raise ValueError(
+                "EAGLE-3 num_assistant_tokens must be >= 2 (the root token plus at least one draft token), "
+                f"got {resolved_num_assistant_tokens}."
+            )
+        self.eagle3_draft_model.max_draft_tokens = resolved_num_assistant_tokens - 1
         self._apply_eagle3_tree_shape(generation_config, depth=eagle3_tree_depth, top_k=eagle3_tree_top_k)
         return generation_config, resolved_max_new_tokens, resolved_temperature, resolved_top_p, resolved_top_k
 

@@ -469,7 +469,8 @@ To make it easier to test custom compiled models, we support overriding the inpu
 
 - `num_assistant_tokens`, `eagle3_tree_depth`, `eagle3_tree_top_k` (`int`)
 
-  Draft-tree budget (tokens verified per round, root included), expansion depth, and per-level fan-out.
+  Draft-tree budget (tokens verified per round, root included; must be `>= 2`), expansion depth, and
+  per-level fan-out (both `>= 1`); out-of-range values raise `ValueError`.
   Each `generate` call takes the explicit keyword argument first, then the same-named
   `generation_config.json` field. `eagle3_tree_depth` / `eagle3_tree_top_k` additionally fall back to
   the legacy `config.json` fields of older releases.

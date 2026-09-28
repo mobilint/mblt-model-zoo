@@ -2125,6 +2125,16 @@ def test_cli_tps_measure_eagle3_tree_flags_reject_non_positive(flag: str) -> Non
         parser.parse_args(["tps", "measure", "--model", "mobilint/EAGLE3-Qwen3-8B", flag, "0"])
 
 
+def test_cli_tps_measure_num_assistant_tokens_requires_a_draft_token() -> None:
+    """``1`` would be clamped to a two-token round by generate, so the parser rejects it."""
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["tps", "measure", "--model", "mobilint/EAGLE3-Qwen3-8B", "--num-assistant-tokens", "1"])
+
+    args = parser.parse_args(["tps", "measure", "--model", "mobilint/EAGLE3-Qwen3-8B", "--num-assistant-tokens", "2"])
+    assert tps_cli._extract_eagle3_pipeline_kwargs(args).num_assistant_tokens == 2
+
+
 def _build_eagle3_tree_pipeline(eagle3_options, *, model: str = "mobilint/EAGLE3-Qwen3-8B"):
     return tps_cli._build_pipeline(
         task="text-generation",

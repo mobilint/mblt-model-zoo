@@ -294,6 +294,20 @@ def _parse_positive_int(spec: str) -> int:
     return _parse_positive_int_common(spec)
 
 
+def _parse_num_assistant_tokens(spec: str) -> int:
+    """Parse ``--num-assistant-tokens``, which must leave room for at least one draft node.
+
+    EAGLE-3 verifies ``num_assistant_tokens`` tokens per round (root + draft nodes), and
+    ``generate`` rejects values below ``2``; failing here avoids loading the model first.
+    """
+    value = _parse_positive_int_common(spec)
+    if value < 2:
+        raise argparse.ArgumentTypeError(
+            "--num-assistant-tokens must be >= 2 (the root token plus at least one draft token)"
+        )
+    return value
+
+
 def _parse_positive_int_optional(spec: Union[str, None]) -> Union[int, None]:
     return _parse_positive_int_optional_common(spec)
 
@@ -5107,10 +5121,10 @@ def add_tps_parser(
         )
         p.add_argument(
             "--num-assistant-tokens",
-            type=_parse_positive_int,
+            type=_parse_num_assistant_tokens,
             default=None,
             help=(
-                "EAGLE-3 only: override generation_config num_assistant_tokens; each round verifies "
+                "EAGLE-3 only: override generation_config num_assistant_tokens (>= 2); each round verifies "
                 "num_assistant_tokens tokens (root + num_assistant_tokens - 1 tree nodes) on the base model"
             ),
         )

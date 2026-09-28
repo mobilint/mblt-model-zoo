@@ -194,3 +194,30 @@ def test_generate_restores_npu_prefill_chunk_size_override_on_error(monkeypatch)
 
     assert draft.npu_prefill_chunk_size_override is None
     assert model.eagle3_base_model.npu_prefill_chunk_size_override is None
+
+
+@pytest.mark.parametrize("source", ["kwarg", "generation_config"])
+@pytest.mark.parametrize("value", [1, 0])
+def test_num_assistant_tokens_below_two_is_rejected(source: str, value: int) -> None:
+    """A round needs the root plus at least one draft token; generate must not silently use 2."""
+    draft = _make_draft()
+    generation_config = _generation_config()
+    kwargs = {}
+    if source == "kwarg":
+        kwargs["num_assistant_tokens"] = value
+    else:
+        generation_config.num_assistant_tokens = value
+    model = _make_model(config=SimpleNamespace(vocab_size=16), generation_config=generation_config, draft=draft)
+
+    with pytest.raises(ValueError, match="num_assistant_tokens must be >= 2"):
+        _resolve(model, **kwargs)
+    assert draft.max_draft_tokens is None
+
+
+def test_num_assistant_tokens_two_maps_to_one_draft_token() -> None:
+    draft = _make_draft()
+    model = _make_model(config=SimpleNamespace(vocab_size=16), generation_config=_generation_config(), draft=draft)
+
+    _resolve(model, num_assistant_tokens=2)
+
+    assert draft.max_draft_tokens == 1
