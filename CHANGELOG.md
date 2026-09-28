@@ -16,6 +16,8 @@
 - EAGLE-3 NPU chunking uses the shared `npu_prefill_chunk_size` config field (int or per-core-mode
   mapping) instead of `eagle3_npu_chunk_size`, which is no longer read. Releases that only set
   `eagle3_npu_chunk_size` now fall back to the shared default of `128`.
+- `mblt-model-zoo tps` defaults to the CPU pipeline device and NPU metrics for local paths whose
+  config is a Mobilint model, not only for `mobilint/` repo ids.
 
 ## 2.9.0
 

@@ -2366,6 +2366,23 @@ def _effective_mxq_path_for_defaults(args: argparse.Namespace) -> str | None:
 
 def _normalize_runtime_defaults(args: argparse.Namespace) -> None:
     effective_mxq_path = _effective_mxq_path_for_defaults(args)
+    if (
+        (args.device is None or args.device_backend is None)
+        and not effective_mxq_path
+        and _is_mobilint_model_target(
+            args.model,
+            trust_remote_code=getattr(args, "trust_remote_code", True),
+            revision=getattr(args, "revision", None),
+        )
+    ):
+        # ``mobilint/`` repo ids match by prefix; other ids (local snapshot dirs, mirrors)
+        # match when their config is a Mobilint mixin. Either way the host-side pipeline
+        # stays on CPU and device metrics come from the NPU, never CUDA.
+        if args.device is None:
+            args.device = "cpu"
+        if args.device_backend is None:
+            args.device_backend = "npu"
+        return
     args.device = _resolve_default_device_common(
         device=args.device,
         device_explicit=args.device is not None,
