@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.10.0
+
 ### Added
 
 - `mblt-model-zoo tps` accepts `--eagle3-tree-depth`, `--eagle3-tree-top-k` and
@@ -16,6 +18,8 @@
 - EAGLE-3 NPU chunking uses the shared `npu_prefill_chunk_size` config field (int or per-core-mode
   mapping) instead of `eagle3_npu_chunk_size`, which is no longer read. Releases that only set
   `eagle3_npu_chunk_size` now fall back to the shared default of `128`.
+- EAGLE-3 `generate` rejects `num_assistant_tokens` below `2` with `ValueError` instead of silently
+  running a two-token round.
 - `mblt-model-zoo tps` defaults to the CPU pipeline device and NPU metrics for local paths whose
   config is a Mobilint model, not only for `mobilint/` repo ids.
 
