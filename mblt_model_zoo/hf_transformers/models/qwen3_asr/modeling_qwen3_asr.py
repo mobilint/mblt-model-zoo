@@ -687,6 +687,21 @@ class MobilintQwen3ASRForConditionalGeneration(
     def get_cache_mxq_model(self):
         return self.thinker.get_cache_mxq_model()
 
+    def get_input_embeddings(self) -> nn.Module:
+        return self.thinker.get_input_embeddings()
+
+    def get_audio_features(
+        self,
+        input_features: torch.FloatTensor,
+        feature_attention_mask: Optional[torch.LongTensor] = None,
+        audio_feature_lengths: Optional[torch.LongTensor] = None,
+    ):
+        return self.thinker.get_audio_features(
+            input_features=input_features,
+            feature_attention_mask=feature_attention_mask,
+            audio_feature_lengths=audio_feature_lengths,
+        )
+
     @torch.no_grad()
     def generate(
         self,

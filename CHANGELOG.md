@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Qwen3-ASR's outer model now exposes `get_input_embeddings()` and `get_audio_features()`,
+  delegating to its thinker. `get_input_embeddings()` previously raised `NotImplementedError`.
+
 ## 2.10.0
 
 ### Added
