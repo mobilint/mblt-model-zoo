@@ -26,3 +26,6 @@ else:
         parser.set_defaults(_handler=lambda args: exit_missing_dependency())
 
     __all__ = ["add_tps_parser"]
+
+    if __name__ == "__main__":
+        raise SystemExit(exit_missing_dependency())

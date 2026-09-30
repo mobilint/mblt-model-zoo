@@ -140,7 +140,9 @@
   should publish the new order in the release's `config.json`. `MBLT_VISION_OUTPUT_ORDER=3,0,1,2`
   overrides the config field for local recompile iteration. Malformed env or config value raises
   `ValueError` at the first vision inference so a typo or packaging bug cannot silently degrade
-  accuracy. See `mblt_model_zoo/hf_transformers/README.md` "Vision output order".
+  accuracy. See "Vision output order" in the transformers-mblt API reference
+  ([`transformers_mblt/README.md`](https://github.com/mobilint/transformers-mblt/blob/main/transformers_mblt/README.md#vision-output-order); formerly
+  `mblt_model_zoo/hf_transformers/README.md`).
 
 ## 2.5.0
 
@@ -281,7 +283,8 @@
 - The transformers benchmark comparison script was renamed from
   `benchmark/transformers/plot_compare_benchmark_results.py` to
   `benchmark/transformers/compare_benchmark_results.py`. The old transformers wrapper is no longer
-  shipped.
+  shipped. (The Transformers benchmarks now live in
+  [transformers-mblt](https://github.com/mobilint/transformers-mblt/tree/main/benchmark/transformers).)
 - Transformers benchmark and CLI tokens-per-joule energy-efficiency fields were renamed to TPS/W.
   Result keys and plot filenames such as `prefill_tok_per_j`, `decode_tokens_per_j`, and
   `*_tokens_per_j.png` now use `prefill_tps_per_w`, `decode_tps_per_w`, and `*_tps_per_w.png`.
@@ -320,6 +323,7 @@
 - Replace transformers compare-script invocations such as
   `python benchmark/transformers/plot_compare_benchmark_results.py ...` with
   `python benchmark/transformers/compare_benchmark_results.py ...` or
-  `python -m benchmark.transformers.compare_benchmark_results ...`.
+  `python -m benchmark.transformers.compare_benchmark_results ...`. These scripts are now maintained in
+  transformers-mblt; run them from a transformers-mblt checkout.
 - Replace automatic speech recognition benchmark invocations that use `--model-id` or
   `--all-revisions` with `--model` and `--all`.

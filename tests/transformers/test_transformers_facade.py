@@ -133,6 +133,27 @@ _WITHOUT_TRANSFORMERS_MBLT = textwrap.dedent(
     else:
         raise AssertionError("facade imported without transformers-mblt")
 
+    import runpy
+
+    bridges = ("tps", "tps_table", "chat", "transformers_compat")
+    for bridge in bridges:
+        module = importlib.import_module(f"mblt_model_zoo.cli.{bridge}")  # must import without transformers-mblt
+        assert not hasattr(module, "__path__")  # dunder lookups stay AttributeError-safe
+    for bridge, name in (("chat", "register_mobilint_models"), ("tps_table", "TPS_TABLE_ROWS")):
+        try:
+            exec(f"from mblt_model_zoo.cli.{bridge} import {name}")
+        except ModuleNotFoundError as exc:
+            assert "mblt-model-zoo[transformers]" in str(exc), exc
+        else:
+            raise AssertionError(f"{bridge}.{name} resolved without transformers-mblt")
+    for bridge in bridges:
+        try:
+            runpy.run_module(f"mblt_model_zoo.cli.{bridge}", run_name="__main__")
+        except SystemExit as exc:
+            assert exc.code == 2, (bridge, exc.code)
+        else:
+            raise AssertionError(f"running {bridge} did not exit")
+
     cli_main = importlib.import_module("mblt_model_zoo.cli.main")  # the package re-exports the main() function
 
     for argv in (["mblt-model-zoo", "tps", "measure", "--model", "x"], ["mblt-model-zoo", "chat", "x"]):

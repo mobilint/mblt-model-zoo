@@ -1,10 +1,18 @@
-"""Compatibility alias for :mod:`transformers_mblt.cli.tps_table` (requires mblt-model-zoo[transformers])."""
+"""Compatibility bridge for :mod:`transformers_mblt.cli.tps_table` (requires mblt-model-zoo[transformers]).
+
+When transformers-mblt is installed this module *is* ``transformers_mblt.cli.tps_table``. Otherwise it stays importable,
+using any of its names raises ``ModuleNotFoundError`` with the install hint, and running it exits with status 2.
+"""
 
 import sys
 
-from ._transformers import INSTALL_HINT, load_standalone
+from ._transformers import exit_missing_dependency, load_standalone, missing_dependency_getattr
 
 _standalone = load_standalone("cli.tps_table")
-if _standalone is None:
-    raise ModuleNotFoundError(INSTALL_HINT, name="transformers_mblt")
-sys.modules[__name__] = _standalone
+
+if _standalone is not None:
+    sys.modules[__name__] = _standalone
+else:
+    __getattr__ = missing_dependency_getattr(__name__)
+    if __name__ == "__main__":
+        raise SystemExit(exit_missing_dependency())

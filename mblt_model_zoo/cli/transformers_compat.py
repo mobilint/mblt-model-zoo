@@ -42,3 +42,6 @@ else:
         return exit_missing_dependency()
 
     __all__ = ["TRANSFORMERS_CLI_COMMANDS", "dispatch_transformers_cli", "is_transformers_cli_command"]
+
+    if __name__ == "__main__":
+        raise SystemExit(exit_missing_dependency())
