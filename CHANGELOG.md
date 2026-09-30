@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+- **The Hugging Face Transformers integration moved to
+  [transformers-mblt](https://github.com/mobilint/transformers-mblt).** `mblt_model_zoo.hf_transformers`
+  is now a forwarding-only compatibility facade. Every `mblt_model_zoo.hf_transformers.<path>` import
+  resolves to the same module object as `transformers_mblt.<path>`, so existing imports and the
+  Mobilint Hub `proxy_*.py` remote code keep working, with the same classes and Auto registrations.
+  New code should import from `transformers_mblt`.
+- The `transformers` extra now installs `transformers-mblt`, which pins the supported
+  `transformers[serving]` range. `qwen-asr` installs `transformers-mblt[qwen-asr]`, and `MeloTTS`
+  installs `transformers-mblt` for its Mobilint BERT. The base package, Vision APIs, and
+  non-Transformers CLI commands still work without these extras.
+- `mblt-model-zoo tps`, `chat`, `serve`, `download`, `env`, `run`, `version`, and the other delegated
+  Transformers commands run the transformers-mblt implementation. Without the `transformers` extra
+  they print the install command and exit with status 2 instead of failing at import.
+  `mblt_model_zoo.cli.tps`, `tps_table`, `chat`, and `transformers_compat` alias their
+  `transformers_mblt.cli` modules.
+- Transformers tests, benchmark scripts (`benchmark/transformers`, `benchmark/common`), and development
+  scripts (`scripts/`) are no longer shipped in this repository; they are maintained in transformers-mblt.
+  `tests/transformers` keeps only facade and CLI-bridge compatibility tests.
+
+### Changed
+
+- `MobilintNPUBackend.dispatcher` (via `mblt_model_zoo.utils.npu_backend`) builds the transformers-mblt
+  `MultiSlotDispatcher`.
+- The `mblt-transformers` agent skill was removed. Transformers guidance lives in the transformers-mblt
+  `AGENTS.md` and `transformers-mblt` skill.
+
 ## 2.10.0
 
 ### Added

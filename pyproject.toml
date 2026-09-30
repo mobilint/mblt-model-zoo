@@ -64,15 +64,14 @@ mblt-model-zoo = "mblt_model_zoo.cli:main"
 mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 
 [project.optional-dependencies]
+# The Hugging Face Transformers integration is maintained in transformers-mblt; it pins the supported
+# `transformers[serving]` range and its own runtime requirements.
 transformers = [
-    "transformers[serving]>=4.54.0,<5.18.0",
-    "datasets>=3.2.0,<=3.6.0",
-    "sentencepiece",
-    "torchvision",
-    "torchcodec",
+    "transformers-mblt>=0.0.0",
 ]
 MeloTTS = [
-    "transformers>=4.54.0,<5.18.0",
+    # MeloTTS loads its Mobilint BERT through the transformers-mblt integration.
+    "transformers-mblt>=0.0.0",
     "g2p_en>=2.1.0",
     "anyascii>=0.3.2",
     "jamo>=0.4.1",
@@ -92,7 +91,7 @@ onnxruntime-gpu = [
     "onnxruntime-gpu; sys_platform != 'darwin'",
 ]
 qwen-asr = [
-    "qwen-asr",
+    "transformers-mblt[qwen-asr]>=0.0.0",
 ]
 qbcompiler = [
     "qbcompiler>=1.3.0",
@@ -116,15 +115,12 @@ version = { attr = "mblt_model_zoo.__version__" }
 dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
-    "jiwer>=3.0.0",
     "librosa>=0.11.0, <=0.11.0",
     "numba>=0.60.0, <=0.60.0",
     "hf_xet",
     "build",
     "ruff",
-    "torchvision",
     "soundfile",
-    "rich",
 ]
 
 [tool.pytest.ini_options]
@@ -132,17 +128,12 @@ markers = [
     "full_matrix: additional transformer model/core matrix cases enabled by --full-matrix.",
     "requires_network: test downloads models, datasets, or other remote artifacts.",
     "requires_npu: test requires a configured Mobilint NPU runtime and device.",
-    "upstream_contract: pins invariants of upstream HF transformers classes that our wrappers depend on; deselect with '-m \"not upstream_contract\"' in fast CI.",
-]
-filterwarnings = [
-    "ignore:Keep-all or multi-position `logits_to_keep` on a last-only MXQ:UserWarning",
 ]
 
 [tool.ruff]
 line-length = 120
 target-version = "py310"
 exclude = [
-    "mblt_model_zoo/hf_transformers",
     "mblt_model_zoo/MeloTTS",
 ]
 

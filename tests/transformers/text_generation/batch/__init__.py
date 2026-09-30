@@ -1,1 +1,0 @@
-"""Batch text-generation tests."""
