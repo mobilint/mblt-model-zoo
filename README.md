@@ -49,6 +49,21 @@ Model Zoo retains compatibility bridges for the Vision CLI and compilation.
 Vision benchmarks and dataset-management workflows are maintained in
 [mblt-vision-python](https://github.com/mobilint/mblt-vision-python/tree/main/benchmark).
 
+## Transformers
+
+Hugging Face Transformers integrations for Mobilint NPUs are maintained in
+[transformers-mblt](https://github.com/mobilint/transformers-mblt). That package covers LLMs, VLMs, speech recognition, image captioning,
+masked language models, EAGLE-3 speculative decoding, the TPS benchmark, and benchmark scripts.
+Install it through the `transformers` extra and import from `transformers_mblt` for new applications.
+`mblt_model_zoo.hf_transformers` remains available as a forwarding-only compatibility facade:
+every `mblt_model_zoo.hf_transformers.<path>` import is the same module object as
+`transformers_mblt.<path>`. Existing code that imports the legacy path keeps working, and so do Hub
+revisions pinned to a commit published before the proxy update. The current Mobilint Hub `proxy_*.py`
+files import `transformers_mblt` directly.
+
+The `mblt-model-zoo tps` command and the delegated Transformers commands described below run the
+transformers-mblt implementation.
+
 ## Optional Extras
 
 When working with tasks other than vision, extra dependencies may be required. Those options can be installed via `pip install mblt-model-zoo[NAME]` or `pip install -e .[NAME]`.
@@ -57,7 +72,7 @@ Currently, these optional functions are only available on environment equipped w
 
 |Name|Use|Details|
 |-------|------|------|
-|transformers|For using Hugging Face Transformers related models|[README.md](mblt_model_zoo/hf_transformers/README.md)|
+|transformers|For using Hugging Face Transformers related models (installs [transformers-mblt](https://github.com/mobilint/transformers-mblt))|[README.md](https://github.com/mobilint/transformers-mblt/blob/main/transformers_mblt/README.md)|
 |MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
 |qbcompiler|For generating mxq files with custom setting|[README.md](compile/README.md)|
 
@@ -66,10 +81,10 @@ when `compile_vision_model()` or `mblt-model-zoo compile` actually starts compil
 package, vision APIs, compilation module import, and non-compile CLI commands continue to work
 without qbcompiler installed; only a compilation request reports the installation error.
 
-For the `transformers` extra, the repository also includes:
-
-- functional test instructions in [tests/transformers/TEST.md](tests/transformers/TEST.md)
-- benchmark script usage in [benchmark/transformers/README.md](benchmark/transformers/README.md)
+For the `transformers` extra, functional tests and benchmark scripts are maintained in
+transformers-mblt ([test guide](https://github.com/mobilint/transformers-mblt/blob/main/tests/TEST.md),
+[benchmark guide](https://github.com/mobilint/transformers-mblt/blob/main/benchmark/transformers/README.md)). The `qwen-asr` extra installs
+`transformers-mblt[qwen-asr]`, and the `MeloTTS` extra installs transformers-mblt for its Mobilint BERT.
 
 > Note: The `MeloTTS` extra includes `unidic`, which requires an additional dictionary download step. Python packaging (PEP 517/518) does not support running arbitrary post-install commands automatically, so run `mblt-unidic-download` (or `python -m unidic download`) after installing the extra when needed.
 
@@ -214,7 +229,8 @@ devices without listing every core by hand.
 ### TPS Benchmark Helpers
 
 The `tps` command measures token-per-second performance for Transformers-based text-generation and
-image-text-to-text pipelines. It requires the `transformers` extra.
+image-text-to-text pipelines. It is the `transformers-mblt tps` implementation and requires the
+`transformers` extra; without it, `mblt-model-zoo tps` prints the install command.
 
 ```bash
 pip install "mblt-model-zoo[transformers]"
@@ -222,62 +238,11 @@ mblt-model-zoo tps measure --help
 mblt-model-zoo tps sweep --help
 ```
 
-`tps measure` accepts `--temperature FLOAT` (default `0.0`) to sample instead of greedy-decoding.
-A value of `0.0` keeps the current greedy behavior; any value greater than zero enables
-`do_sample=True` with that temperature. `tps sweep` remains greedy so its numbers stay comparable.
-
-On VLM (`--task image-text-to-text`) pipelines whose language model uses the fake-prefill decode
-path, `tps measure` decode TPS is measured with a greedy `torch.argmax` and the CLI rejects
-`--temperature > 0` with a clear error. Use `--temperature 0` (default) for VLM decode TPS.
-
-`--decode N` forces exactly `N` new tokens on non-speculative models. For EAGLE-3 speculative
-decode, `N` is an upper bound: generation stops at the configured EOS and reported TPS is
-computed over the tokens actually produced.
-
-`--batch-size B` sets the aggregate batch capacity. `B` maps to the model's `max_batch_size`,
-which the runtime resolves to `N` `qbruntime.Model` slots so that `N * K >= B`, where `K` is the
-compiled MXQ batch axis. A non-batch MXQ (`K == 1`) with `B > 1` therefore fans out into `N = B`
-Model slots that dispatch in parallel across the target device set (see `--dev-no`,
-`--target-cores`, `--target-clusters`); a batched MXQ (`K > 1`) reuses hardware batching until
-`N * K >= B`. Beam search paths remain `N = 1`. Legacy configs that store the older 2-part
-`target_cores` / bare-int `target_clusters` are silently upgraded to the canonical form on load,
-so no explicit migration step is required.
-
-Batched MXQ execution (`K > 1`) supports `--core-mode single` and, for per-layer scheduled MXQs,
-`--core-mode auto`; other fixed core modes
-are rejected at runtime. The text-generation and VLM benchmark scripts enforce this by exiting
-with `SystemExit("batch benchmark only supports --core-mode single or auto")` when a batch run is paired
-with any other explicit or config-derived fixed multi-core mode. When the batch model config omits
-the mode, the test suite and benchmark fall back to `auto` (see
-[`mblt_model_zoo/hf_transformers/README.md`](mblt_model_zoo/hf_transformers/README.md)).
-(In batch mode the benchmark scripts also skip their non-batch default `--target-cores 0:0`
-injection, so batched runs rely on the config's default `target_cores` or an explicit
-`--target-cores`.)
-
-The text-generation benchmark script also accepts `--batch-size` and `--dev-no` on both `measure`
-and `sweep`. `--batch-size N` overrides `config.max_batch_size` for the effective input batch
-dim, and, on Mobilint targets only, forwards the same value as the backend `max_batch_size`
-kwarg; on upstream/original Hugging Face targets it stays a measurement-only override. Passing
-`--batch --original-models --batch-size N` with `N > 1` therefore admits an upstream target whose
-config reports `max_batch_size == 1`. `--dev-no` on non-Mobilint targets is a silent no-op, so a
-mixed Mobilint-vs-GPU sweep can share one CLI. See
-[`benchmark/transformers/README.md`](benchmark/transformers/README.md) for the full example.
-
-`tps measure --print-output` is a diagnostic flag that decodes and prints the tokens actually
-generated by the last measured run in two versions (special tokens preserved, then cleaned). Use it
-to visually confirm whether an EOS token terminated decoding before the `--decode` budget. The
-trailing footer separates the TTFT sample from decode tokens using the same convention as
-`decode_tps`: it reports `X decode tokens (+ 1 TTFT sample = Y emitted; --decode N max)` so the
-count matches the measured throughput.
-
-For thinking-capable models (e.g., Qwen3), `tps measure` exposes the mutually exclusive
-`--enable-thinking` and `--disable-thinking` flags to override the `enable_thinking` argument
-passed to `tokenizer.apply_chat_template`. When neither is set the tokenizer default is used, so
-existing runs are unaffected. Use `--disable-thinking` to prevent a small `--decode` budget from
-being consumed entirely by the `<think>` block; use `--enable-thinking` to force the block on.
-
-Detailed TPS benchmark examples are available in
-[benchmark/transformers/README.md](benchmark/transformers/README.md).
+The option reference is in the transformers-mblt
+[TPS Benchmark CLI](https://github.com/mobilint/transformers-mblt/blob/main/transformers_mblt/README.md#tps-benchmark-cli) documentation. It covers
+batching (`--batch-size`, `--dev-no`), core modes, EAGLE-3 tree flags, sampling, thinking toggles, and
+`--print-output`. Benchmark scripts are documented in the transformers-mblt
+[benchmark guide](https://github.com/mobilint/transformers-mblt/blob/main/benchmark/transformers/README.md).
 
 ### MeloTTS Helpers
 
@@ -297,8 +262,9 @@ mblt-model-zoo melo-ui --help
 
 When the first argument is one of `add-fast-image-processor`, `add-new-model-like`, `chat`,
 `convert`, `download`, `env`, `run`, `serve`, or `version`, `mblt-model-zoo` delegates execution to
-the installed Transformers CLI. For `chat` and `serve`, the CLI installs Mobilint model registration
-hooks when the delegated Transformers backend loads models through the local serve command path.
+the installed Transformers CLI through transformers-mblt, which requires the `transformers` extra. For
+`chat` and `serve`, the CLI registers the Mobilint models before the delegated Transformers backend loads
+them through the local serve command path.
 
 ## Verbose Option
 

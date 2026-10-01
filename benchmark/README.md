@@ -1,31 +1,13 @@
 # Benchmark Guide
 
-The `benchmark/` directory contains reproducible performance tools for the
-Transformers integrations in this repository. Vision benchmarks, dataset
-organizers, and result comparison tools are maintained by
-[mblt-vision-python](https://github.com/mobilint/mblt-vision-python/tree/main/benchmark).
+Benchmark tooling now lives in the standalone packages that own each model family:
 
-## Directory Layout
-
-- [`transformers/`](transformers/README.md): Throughput, latency, device-metric, and result
-  comparison tools for Transformers-based models.
-- `common/`: Shared utilities for argument parsing, dataset handling, runtime setup, summaries,
-  charts, and file I/O.
-
-## Running Benchmarks
-
-Run benchmark commands from the repository root so local imports and the documented relative paths
-resolve consistently. Install the project and the extras required by the benchmark family before
-running a command:
-
-```bash
-pip install -e . --group dev
-```
-
-The target model, dataset, and hardware runtime determine any additional requirements. Use the
-family-specific guide for setup, supported commands, and examples:
-
-- [Transformers benchmarks](transformers/README.md)
+- Transformers throughput, latency, device-metric, ASR accuracy, and result-comparison tools are maintained by
+  [transformers-mblt](https://github.com/mobilint/transformers-mblt/tree/main/benchmark/transformers). The
+  `mblt-model-zoo tps` command runs the same `transformers-mblt tps` implementation and requires
+  `pip install 'mblt-model-zoo[transformers]'`.
+- Vision benchmarks, dataset organizers, and result comparison tools are maintained by
+  [mblt-vision-python](https://github.com/mobilint/mblt-vision-python/tree/main/benchmark).
 
 ## Quick Vision CLI Validation
 

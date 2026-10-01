@@ -32,7 +32,7 @@ jobs:
           rm -rf build dist *.egg-info
           python -m build
 
-      - name: Verify Vision facade wheel contents
+      - name: Verify Vision and Transformers facade wheel contents
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -44,6 +44,8 @@ jobs:
               "mblt_model_zoo/vision/utils/evaluation/",
               "mblt_model_zoo/vision/utils/postprocess/",
               "mblt_model_zoo/vision/utils/preprocess/",
+              "mblt_model_zoo/hf_transformers/models/",
+              "mblt_model_zoo/hf_transformers/utils/",
           )
           wheel = next(Path("dist").glob("*.whl"))
           with ZipFile(wheel) as archive:
@@ -54,7 +56,7 @@ jobs:
               ]
           if forbidden:
               raise SystemExit(
-                  "Wheel contains legacy Vision implementation files:\n"
+                  "Wheel contains legacy Vision or Transformers implementation files:\n"
                   + "\n".join(forbidden)
               )
           PY

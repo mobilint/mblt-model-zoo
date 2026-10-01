@@ -1,40 +1,18 @@
-from argparse import Namespace
+"""Compatibility bridge for :mod:`transformers_mblt.cli.chat` (requires mblt-model-zoo[transformers]).
 
+When transformers-mblt is installed this module *is* ``transformers_mblt.cli.chat``. Otherwise it stays importable,
+using any of its names raises ``ModuleNotFoundError`` with the install hint, and running it exits with status 2.
+"""
 
-def register_mobilint_models(args: Namespace, transformers):
-    """Register Mobilint model classes using the active CLI trust and revision settings."""
-    revision = getattr(args, "model_revision", None)
-    trust_remote_code = getattr(args, "trust_remote_code", False)
-    config = transformers.AutoConfig.from_pretrained(
-        args.model_name_or_path_or_address,
-        revision=revision,
-        trust_remote_code=trust_remote_code,
-    )
+import sys
 
-    model_type = getattr(config, "model_type", "")
-    arch_name = config.architectures[0] if getattr(config, "architectures", None) else ""
+from ._transformers import exit_missing_dependency, load_standalone, missing_dependency_getattr
 
-    if model_type.startswith("mobilint-") or arch_name.startswith("Mobilint"):
-        original_model_type = model_type[len("mobilint-") :] if model_type.startswith("mobilint-") else model_type
-        module_model_type = original_model_type.replace("-", "_")
+_standalone = load_standalone("cli.chat")
 
-        import importlib
-
-        module = importlib.import_module(
-            f"mblt_model_zoo.hf_transformers.models.{module_model_type}.modeling_{module_model_type}"
-        )
-        setattr(
-            transformers,
-            config.architectures[0],
-            module.__dict__[config.architectures[0]],
-        )
-
-        MODEL_FOR_CAUSAL_LM_MAPPING_NAMES = transformers.models.auto.modeling_auto.MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
-        MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES = (
-            transformers.models.auto.modeling_auto.MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES
-        )
-
-        if arch_name.endswith("CausalLM"):
-            MODEL_FOR_CAUSAL_LM_MAPPING_NAMES[model_type] = arch_name
-        elif arch_name.endswith("ConditionalGeneration"):
-            MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES[model_type] = arch_name
+if _standalone is not None:
+    sys.modules[__name__] = _standalone
+else:
+    __getattr__ = missing_dependency_getattr(__name__)
+    if __name__ == "__main__":
+        raise SystemExit(exit_missing_dependency())

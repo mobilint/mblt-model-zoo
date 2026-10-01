@@ -17,10 +17,14 @@ from mblt_npu import (
 
 
 def _get_transformers_dispatcher(backend: MobilintNPUBackend):
-    """Attach Model Zoo's transformer dispatcher without coupling the NPU wheel to transformers."""
+    """Attach the transformers-mblt multi-slot dispatcher without coupling the NPU wheel to transformers.
+
+    transformers-mblt installs the same property (under the same attribute name) when it is imported first; this
+    fallback keeps the historical backend surface for Model Zoo callers. It requires mblt-model-zoo[transformers].
+    """
     dispatcher = getattr(backend, "_mblt_model_zoo_dispatcher", None)
     if dispatcher is None:
-        from ..hf_transformers.utils.multi_slot_dispatch import MultiSlotDispatcher
+        from transformers_mblt.utils.multi_slot_dispatch import MultiSlotDispatcher
 
         dispatcher = MultiSlotDispatcher(backend)
         backend._mblt_model_zoo_dispatcher = dispatcher

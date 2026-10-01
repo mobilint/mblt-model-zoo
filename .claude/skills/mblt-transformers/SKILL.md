@@ -1,1 +1,0 @@
-../../../.agents/skills/mblt-transformers/SKILL.md

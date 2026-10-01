@@ -8,28 +8,37 @@ paths:
 
 ## Scope
 
-`mblt-model-zoo` owns its package integration, Model Zoo CLI, Transformers integrations, and
-MeloTTS. `mblt-vision-python` owns all Vision implementation: models, preprocessing,
-postprocessing, datasets, evaluation, benchmarks, compilation, Vision tests, and the `mblt-vision`
-CLI. Model Zoo retains only a compatibility facade and CLI bridges for its legacy Vision API.
+`mblt-model-zoo` owns its package integration, Model Zoo CLI, and MeloTTS. `mblt-vision-python`
+owns all Vision implementation: models, preprocessing, postprocessing, datasets, evaluation,
+benchmarks, compilation, Vision tests, and the `mblt-vision` CLI. `transformers-mblt` owns all
+Hugging Face Transformers implementation: models, caches, generation, EAGLE-3, the Hub proxies, the
+TPS and upstream-passthrough CLI, benchmarks, scripts, and Transformers tests. Model Zoo retains
+only compatibility facades and CLI bridges for its legacy Vision and Transformers APIs.
 
-`CLAUDE.md` imports this guide. The Claude entry points at
-`.claude/skills/mblt-model-zoo/SKILL.md` and `.claude/skills/mblt-transformers/SKILL.md` are
-symlinks to their `.agents/skills/...` counterparts, so editing the `.agents` copy is enough.
+`CLAUDE.md` imports this guide. The Claude entry point at `.claude/skills/mblt-model-zoo/SKILL.md`
+is a symlink to its `.agents/skills/...` counterpart, so editing the `.agents` copy is enough.
 Follow a more-specific `AGENTS.md` when one exists. User and system instructions take precedence.
 
 Before editing, run `git status --short` and preserve unrelated work.
 
 ## Repository Map
 
-- `mblt_model_zoo/cli`: Model Zoo CLI; Vision command handlers are imported from `mblt_vision.cli`.
+- `mblt_model_zoo/cli`: Model Zoo CLI. Vision command handlers are imported from `mblt_vision.cli`;
+  `tps.py`, `tps_table.py`, `chat.py`, and `transformers_compat.py` are aliases of their
+  `transformers_mblt.cli` modules, with install-hint fallbacks in `_transformers.py` when the
+  `transformers` extra is missing.
 - `mblt_model_zoo/vision`: compatibility imports and re-exports only. Every compatibility module
   must forward to `mblt_vision`; do not restore copied Vision implementation, model YAMLs, or
   dataset YAMLs here. Task submodules (`mblt_model_zoo.vision.<task>`) are registered dynamically
   in `vision/__init__.py` from `mblt_vision.list_tasks()`; do not add a physical per-task stub
   package here — a new mblt_vision task becomes importable with no Model Zoo change.
 - `mblt_model_zoo/compile`: compatibility exports for Vision compilation plus Model Zoo APIs.
-- `mblt_model_zoo/hf_transformers`: Hugging Face integrations and benchmark utilities.
+- `mblt_model_zoo/hf_transformers`: forwarding-only facade. Its `__init__.py` installs a meta-path
+  alias so every `mblt_model_zoo.hf_transformers.<path>` import is the same module object as
+  `transformers_mblt.<path>`. Existing user code and Hub revisions pinned before the proxy update
+  (whose `proxy_*.py` imports only the legacy path) depend on this; current Hub proxies import
+  `transformers_mblt` first. Do not add copied Transformers implementation, per-module stub files,
+  tests, or benchmarks here.
 - `mblt_model_zoo/MeloTTS`: MeloTTS integration and text normalization.
 - `tests`: Model Zoo tests and shared NPU option helpers.
 
@@ -41,8 +50,7 @@ Before editing, run `git status --short` and preserve unrelated work.
   lines. Let Ruff organize imports.
 - Catch specific exceptions and provide recovery-oriented errors. Do not catch `Exception` unless
   immediately re-raising or deliberately adding context.
-- Preserve local style in `hf_transformers` and `MeloTTS`; they are excluded from repository-wide
-  Ruff checks.
+- Preserve local style in `MeloTTS`; it is excluded from repository-wide Ruff checks.
 - Keep `mblt-model-zoo` CLI help and README examples synchronized. Its Vision subcommands must
   delegate to `mblt_vision.cli`; implement new Vision CLI behavior in `mblt-vision-python` first.
 - Pass board selection through to the standalone Vision/NPU packages with normalized
@@ -50,11 +58,9 @@ Before editing, run `git status --short` and preserve unrelated work.
   code in Model Zoo.
 - Supported target-device identifiers are `aries-rb`, `regulus-ra`, `regulus-rb`,
   `regulus-ra-usb`, and `regulus-rb-usb`; require `mblt-npu-python>=0.1.0` (which pulls
-  `mobilint-qb-runtime>=1.4.0`). Every board setter — the top-level `target_device` on
-  `MobilintConfigMixin` and its prefixed variants (`encoder_`, `decoder_`, `base_`, `draft_`,
-  `fc_` on the multi-backend mixins, plus the Qwen3-ASR facade) — must route through
-  `_rebuild_backend_for_target_device` so a cross-board `from_pretrained` kwarg actually
-  switches the destination class rather than leaving a stale board with an updated string.
+  `mobilint-qb-runtime>=1.4.0`). The Transformers board-setter contract (every `*target_device`
+  setter on `MobilintConfigMixin` and the multi-backend mixins routes through
+  `_rebuild_backend_for_target_device`) is implemented and tested in transformers-mblt.
 - `core_mode="auto"` is the default fallback when a model config does not specify a mode. It is
   supported for MXQs compiled with `qbcompiler>=1.3.0` and requires `mobilint-qb-runtime>=1.4.0`;
   Batch LLM artifacts may select `single`, `global4`, or `global8` per layer at runtime.
@@ -65,29 +71,25 @@ Before editing, run `git status --short` and preserve unrelated work.
 - Build release artifacts from a clean tree and inspect the wheel contents. Model Zoo distributions
   must not contain legacy Vision `models/`, `utils/preprocess/`, `utils/postprocess/`,
   `utils/datasets/`, or `utils/evaluation/` paths; those belong exclusively to
-  `mblt-vision-python`.
+  `mblt-vision-python`. `mblt_model_zoo/hf_transformers/` must contain only the facade
+  `__init__.py`; Transformers `models/` and `utils/` belong exclusively to `transformers-mblt`.
 - Use `obb` when a Model Zoo compatibility configuration must name the Vision task.
 
 ## Transformers and MeloTTS
 
-- Install the matching optional extra before integration tests.
-- Keep `mblt-model-zoo tps` table labels, JSON keys, units, and extraction behavior centralized in
-  `mblt_model_zoo/cli/tps_table.py`; update its schema and focused tests together.
-- Keep non-batch VLM tests under `tests/transformers/image_text_to_text/non_batch`. Run batch
-  text-generation and image-text-to-text suites through `scripts/test_transformers_matrix.py`.
-- Qwen3-VL: the current `is_dynamic` (with `dynamic_vision` compatibility alias) dynamic vs.
-  static release contract, `sync_dynamic_vision_from_model()`, and the
-  per-artifact `vision_output_order` config live in `mblt_model_zoo/hf_transformers/README.md`
-  and the code docstrings under `mblt_model_zoo/hf_transformers/models/qwen3_vl/`. A recompile
-  that permutes the four same-shape vision outputs must publish the new order in `config.json`.
-- Qwen3-VL 8B (regular and Batch16) is currently **unsupported**. Do not re-add
-  `mobilint/Qwen3-VL-8B-Instruct(-Batch16)` to `MODEL_PATHS` or the batch/multi-image/video
-  test modules until the model repo ships an MXQ compatible with the current runtime. See
-  `CHANGELOG.md` 2.5.0 for the failure mode; lift the withdrawal in the same change that
-  restores the test coverage.
-- Follow `.agents/skills/mblt-transformers/SKILL.md` for EAGLE-3 speculative-decoding contracts:
-  preserve Hugging Face sampling semantics, keep TPS metrics centralized in `tps_table.py`, and
-  use same-process repeats when measuring MXQ backends.
+- Implement Transformers behavior (models, caches, generation, EAGLE-3, TPS schema, CLI options, Hub
+  proxies) in `transformers-mblt` first; Model Zoo picks it up through the facade and CLI bridges.
+  Its `AGENTS.md` and `transformers-mblt` skill hold the NPU backend, cache, Qwen3-VL, and EAGLE-3
+  contracts.
+- The `transformers` extra installs `transformers-mblt`; `qwen-asr` installs `transformers-mblt[qwen-asr]`;
+  `MeloTTS` installs `transformers-mblt` because its Mobilint BERT loads through the facade. The base
+  package must keep importing and its non-Transformers CLI commands must keep working without them.
+- Keep `tests/transformers` limited to facade and bridge compatibility tests
+  (`test_transformers_facade.py`); functional, contract, and NPU Transformers tests belong in
+  transformers-mblt.
+- `utils/npu_backend.py` keeps the historical `MobilintNPUBackend.dispatcher` property for Model Zoo
+  callers and builds the transformers-mblt `MultiSlotDispatcher` (shared `_mblt_model_zoo_dispatcher`
+  attribute), so both packages can install it without clobbering each other.
 
 ## Validation and Git Safety
 
