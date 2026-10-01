@@ -7,8 +7,9 @@
 - **The Hugging Face Transformers integration moved to
   [transformers-mblt](https://github.com/mobilint/transformers-mblt).** `mblt_model_zoo.hf_transformers`
   is now a forwarding-only compatibility facade. Every `mblt_model_zoo.hf_transformers.<path>` import
-  resolves to the same module object as `transformers_mblt.<path>`, so existing imports and the
-  Mobilint Hub `proxy_*.py` remote code keep working, with the same classes and Auto registrations.
+  resolves to the same module object as `transformers_mblt.<path>`, with the same classes and Auto
+  registrations. Existing imports keep working, and so does Hub remote code at revisions pinned before
+  the proxy update. The current Mobilint Hub `proxy_*.py` files import `transformers_mblt` directly.
   New code should import from `transformers_mblt`.
 - The `transformers` extra now installs `transformers-mblt`, which pins the supported
   `transformers[serving]` range. `qwen-asr` installs `transformers-mblt[qwen-asr]`, and `MeloTTS`

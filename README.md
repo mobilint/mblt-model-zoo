@@ -57,8 +57,9 @@ masked language models, EAGLE-3 speculative decoding, the TPS benchmark, and ben
 Install it through the `transformers` extra and import from `transformers_mblt` for new applications.
 `mblt_model_zoo.hf_transformers` remains available as a forwarding-only compatibility facade:
 every `mblt_model_zoo.hf_transformers.<path>` import is the same module object as
-`transformers_mblt.<path>`. Mobilint Hub repositories whose remote code imports the legacy path
-therefore keep loading through Model Zoo.
+`transformers_mblt.<path>`. Existing code that imports the legacy path keeps working, and so do Hub
+revisions pinned to a commit published before the proxy update. The current Mobilint Hub `proxy_*.py`
+files import `transformers_mblt` directly.
 
 The `mblt-model-zoo tps` command and the delegated Transformers commands described below run the
 transformers-mblt implementation.

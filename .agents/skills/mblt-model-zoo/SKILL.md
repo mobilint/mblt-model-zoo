@@ -28,7 +28,8 @@ description: >-
    artifacts choose `single`, `global4`, or `global8` per layer.
 5. Keep `mblt_model_zoo.hf_transformers` a forwarding-only facade: its meta-path alias makes every
    `mblt_model_zoo.hf_transformers.<path>` import the same module object as `transformers_mblt.<path>`,
-   which Hub `proxy_*.py` files rely on. `cli/tps.py`, `tps_table.py`, `chat.py`, and
+   which existing user code and Hub revisions pinned before the proxy update rely on (current Hub
+   proxies import `transformers_mblt` first). `cli/tps.py`, `tps_table.py`, `chat.py`, and
    `transformers_compat.py` alias `transformers_mblt.cli`; keep their install-hint fallbacks so the
    base package and non-Transformers commands work without the `transformers` extra. Implement
    Transformers models, TPS schema, EAGLE-3, and Qwen3-VL contracts in transformers-mblt (its

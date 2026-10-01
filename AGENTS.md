@@ -35,8 +35,10 @@ Before editing, run `git status --short` and preserve unrelated work.
 - `mblt_model_zoo/compile`: compatibility exports for Vision compilation plus Model Zoo APIs.
 - `mblt_model_zoo/hf_transformers`: forwarding-only facade. Its `__init__.py` installs a meta-path
   alias so every `mblt_model_zoo.hf_transformers.<path>` import is the same module object as
-  `transformers_mblt.<path>`; Hub `proxy_*.py` files that import the legacy path depend on this. Do not
-  add copied Transformers implementation, per-module stub files, tests, or benchmarks here.
+  `transformers_mblt.<path>`. Existing user code and Hub revisions pinned before the proxy update
+  (whose `proxy_*.py` imports only the legacy path) depend on this; current Hub proxies import
+  `transformers_mblt` first. Do not add copied Transformers implementation, per-module stub files,
+  tests, or benchmarks here.
 - `mblt_model_zoo/MeloTTS`: MeloTTS integration and text normalization.
 - `tests`: Model Zoo tests and shared NPU option helpers.
 
