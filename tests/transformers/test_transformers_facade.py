@@ -139,7 +139,12 @@ _WITHOUT_TRANSFORMERS_MBLT = textwrap.dedent(
     for bridge in bridges:
         module = importlib.import_module(f"mblt_model_zoo.cli.{bridge}")  # must import without transformers-mblt
         assert not hasattr(module, "__path__")  # dunder lookups stay AttributeError-safe
-    for bridge, name in (("chat", "register_mobilint_models"), ("tps_table", "TPS_TABLE_ROWS")):
+    for bridge, name in (
+        ("chat", "register_mobilint_models"),
+        ("tps_table", "TPS_TABLE_ROWS"),
+        ("tps", "Eagle3PipelineOptions"),
+        ("transformers_compat", "_prepare_transformers_cli"),
+    ):
         try:
             exec(f"from mblt_model_zoo.cli.{bridge} import {name}")
         except ModuleNotFoundError as exc:
@@ -153,6 +158,11 @@ _WITHOUT_TRANSFORMERS_MBLT = textwrap.dedent(
             assert exc.code == 2, (bridge, exc.code)
         else:
             raise AssertionError(f"running {bridge} did not exit")
+
+    # The placeholders cli.main relies on stay real attributes rather than going through the fallback.
+    assert callable(importlib.import_module("mblt_model_zoo.cli.tps").add_tps_parser)
+    compat = importlib.import_module("mblt_model_zoo.cli.transformers_compat")
+    assert compat.is_transformers_cli_command(["mblt-model-zoo", "chat"])
 
     cli_main = importlib.import_module("mblt_model_zoo.cli.main")  # the package re-exports the main() function
 

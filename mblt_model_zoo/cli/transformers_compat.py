@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from typing import Sequence
 
-from ._transformers import exit_missing_dependency, load_standalone
+from ._transformers import exit_missing_dependency, load_standalone, missing_dependency_getattr
 
 _standalone = load_standalone("cli.transformers_compat")
 
@@ -42,6 +42,8 @@ else:
         return exit_missing_dependency()
 
     __all__ = ["TRANSFORMERS_CLI_COMMANDS", "dispatch_transformers_cli", "is_transformers_cli_command"]
+    # Any other legacy name reports the missing transformers-mblt dependency instead of a bare ImportError.
+    __getattr__ = missing_dependency_getattr(__name__)
 
     if __name__ == "__main__":
         raise SystemExit(exit_missing_dependency())

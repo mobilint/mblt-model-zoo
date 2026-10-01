@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ._transformers import exit_missing_dependency, load_standalone
+from ._transformers import exit_missing_dependency, load_standalone, missing_dependency_getattr
 
 _standalone = load_standalone("cli.tps")
 
@@ -26,6 +26,8 @@ else:
         parser.set_defaults(_handler=lambda args: exit_missing_dependency())
 
     __all__ = ["add_tps_parser"]
+    # Any other legacy name reports the missing transformers-mblt dependency instead of a bare ImportError.
+    __getattr__ = missing_dependency_getattr(__name__)
 
     if __name__ == "__main__":
         raise SystemExit(exit_missing_dependency())
