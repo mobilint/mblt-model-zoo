@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import subprocess
 import sys
 import textwrap
 
 import pytest
-import transformers_mblt
+
+transformers_mblt = pytest.importorskip("transformers_mblt")
 
 LEGACY = "mblt_model_zoo.hf_transformers"
 
@@ -37,6 +39,17 @@ def test_legacy_module_paths_are_standalone_module_objects(path: str) -> None:
         assert legacy.__name__ == LEGACY
         return
     assert legacy is importlib.import_module("transformers_mblt" + path)
+
+
+@pytest.mark.parametrize("path", [".models.llama", ".models.llama.modeling_llama", ".utils.eagle3"])
+def test_legacy_import_keeps_standalone_module_spec(path: str) -> None:
+    """A legacy import must not replace the standalone module's ``__spec__`` with the alias spec."""
+    standalone = importlib.import_module("transformers_mblt" + path)
+    is_package = hasattr(standalone, "__path__")
+    importlib.import_module(LEGACY + path)
+    assert standalone.__spec__.name == "transformers_mblt" + path
+    assert (standalone.__spec__.submodule_search_locations is not None) is is_package
+    assert importlib.util.find_spec("transformers_mblt" + path).name == "transformers_mblt" + path
 
 
 def test_legacy_names_are_standalone_objects() -> None:

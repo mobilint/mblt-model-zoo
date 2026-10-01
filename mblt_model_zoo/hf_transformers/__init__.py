@@ -37,12 +37,20 @@ class _AliasLoader(importlib.abc.Loader):
 
     def __init__(self, target: str) -> None:
         self._target = target
+        self._target_spec: importlib.machinery.ModuleSpec | None = None
 
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> ModuleType:
-        return importlib.import_module(self._target)
+        module = importlib.import_module(self._target)
+        self._target_spec = module.__spec__
+        return module
 
     def exec_module(self, module: ModuleType) -> None:
-        """The target module is fully initialized by its own import; nothing to execute."""
+        """Restore the target's own ``__spec__``, which the import system overwrote with the alias spec.
+
+        The target module is fully initialized by its own import, so nothing is executed. Keeping its original
+        spec preserves ``importlib.resources``, ``importlib.reload`` and relative imports in ``transformers_mblt``.
+        """
+        module.__spec__ = self._target_spec
 
 
 class _AliasFinder(importlib.abc.MetaPathFinder):
