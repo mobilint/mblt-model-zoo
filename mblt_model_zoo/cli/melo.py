@@ -1,44 +1,34 @@
+"""Compatibility bridge for ``mblt-model-zoo melo`` / ``melotts``: runs ``melotts-mblt tts``."""
+
 from __future__ import annotations
 
 import argparse
-import sys
+from typing import Sequence
+
+from ._melotts import exit_missing_dependency, load_standalone
 
 
-def _require_melotts_deps() -> None:
-    try:
-        import click  # noqa: F401
-    except Exception as e:
-        print(
-            "Missing optional dependencies for MeloTTS CLI.\n"
-            "Install with: pip install 'mblt-model-zoo[MeloTTS]'\n"
-            f"Original error: {e}",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
+def run_melo(args: Sequence[str], prog_name: str) -> int:
+    """Run the standalone MeloTTS CLI, or report how to install it."""
+    tts = load_standalone("cli.tts")
+    if tts is None:
+        return exit_missing_dependency()
+    return tts.run_tts(args, prog_name=prog_name)
 
 
 def _cmd_melo(args: argparse.Namespace) -> int:
-    _require_melotts_deps()
-
-    from mblt_model_zoo.MeloTTS import main as melo_main
-
-    try:
-        melo_main.main(standalone_mode=False, args=list(args.melo_args))
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 0
-    return 0
+    return run_melo(args.melo_args, prog_name="mblt-model-zoo melo")
 
 
 def add_melo_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    # Forward all args to the Click-based MeloTTS CLI so `mblt-model-zoo melo --help`
-    # shows Click help (not argparse help).
+    """Register ``melo`` (alias ``melotts``); ``main()`` dispatches it before argparse so Click owns ``--help``."""
     parser = subparsers.add_parser(
         "melo",
         aliases=["melotts"],
         add_help=False,
-        help="MeloTTS CLI (alias: melotts)",
+        help="MeloTTS CLI (alias: melotts; requires mblt-model-zoo[MeloTTS])",
     )
     parser.add_argument("melo_args", nargs=argparse.REMAINDER)
     parser.set_defaults(_handler=_cmd_melo)

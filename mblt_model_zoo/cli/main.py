@@ -41,20 +41,9 @@ def main():
         return dispatch_transformers_cli(sys.argv)
 
     if len(sys.argv) > 1 and sys.argv[1] in {"melo", "melotts"}:
-        from .melo import _require_melotts_deps
+        from .melo import run_melo
 
-        _require_melotts_deps()
-        from mblt_model_zoo.MeloTTS import main as melo_main
-
-        try:
-            melo_main.main(
-                standalone_mode=False,
-                prog_name=f"{sys.argv[0]} {sys.argv[1]}",
-                args=sys.argv[2:],
-            )
-        except SystemExit as e:
-            exit(int(e.code) if e.code is not None else 0)
-        exit(0)
+        return run_melo(sys.argv[2:], prog_name=f"{sys.argv[0]} {sys.argv[1]}")
 
     parser = build_parser()
     args = parser.parse_args()

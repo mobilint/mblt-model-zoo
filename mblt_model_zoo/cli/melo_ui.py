@@ -1,46 +1,24 @@
+"""Compatibility bridge for ``mblt-model-zoo melo-ui``: runs ``melotts-mblt ui``."""
+
 from __future__ import annotations
 
 import argparse
-import sys
 
-
-def _require_melotts_deps() -> None:
-    try:
-        import gradio  # noqa: F401
-    except Exception as e:
-        print(
-            "Missing optional dependencies for MeloTTS WebUI.\n"
-            "Install with: pip install 'mblt-model-zoo[MeloTTS]'\n"
-            f"Original error: {e}",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
+from ._melotts import exit_missing_dependency, load_standalone
 
 
 def _cmd_melo_ui(args: argparse.Namespace) -> int:
-    _require_melotts_deps()
-
-    from mblt_model_zoo.MeloTTS import app as melo_app
-
-    click_args: list[str] = []
-    if args.share:
-        click_args.append("--share")
-    if args.host is not None:
-        click_args.extend(["--host", args.host])
-    if args.port is not None:
-        click_args.extend(["--port", str(args.port)])
-
-    try:
-        melo_app.main(standalone_mode=False, args=click_args)
-    except SystemExit as e:
-        return int(e.code) if e.code is not None else 0
-    return 0
+    ui = load_standalone("cli.ui")
+    if ui is None:
+        return exit_missing_dependency()
+    return ui.run_ui(share=args.share, host=args.host, port=args.port)
 
 
 def add_melo_ui_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    parser = subparsers.add_parser("melo-ui", help="Launch MeloTTS WebUI (Gradio)")
+    """Register ``melo-ui`` with the same options as ``melotts-mblt ui``."""
+    parser = subparsers.add_parser("melo-ui", help="Launch MeloTTS WebUI (Gradio; requires mblt-model-zoo[MeloTTS])")
     parser.add_argument(
         "--share",
         "-s",
@@ -48,15 +26,6 @@ def add_melo_ui_parser(
         default=False,
         help="Expose a publicly-accessible shared Gradio link.",
     )
-    parser.add_argument(
-        "--host",
-        default=None,
-        help="Server host / bind address (e.g., 0.0.0.0)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="Server port (e.g., 7860)",
-    )
+    parser.add_argument("--host", default=None, help="Server host / bind address (e.g., 0.0.0.0)")
+    parser.add_argument("--port", "-p", type=int, default=None, help="Server port (e.g., 7860)")
     parser.set_defaults(_handler=_cmd_melo_ui)

@@ -69,18 +69,9 @@ mblt-melotts-download = "mblt_model_zoo.utils.melotts_download:main"
 transformers = [
     "transformers-mblt>=0.0.0",
 ]
+# MeloTTS is maintained in melotts-mblt, which pins its text-processing, UI, and transformers-mblt requirements.
 MeloTTS = [
-    # MeloTTS loads its Mobilint BERT through the transformers-mblt integration.
-    "transformers-mblt>=0.0.0",
-    "g2p_en>=2.1.0",
-    "anyascii>=0.3.2",
-    "jamo>=0.4.1",
-    "g2pkk>=0.1.1",
-    "unidic>=1.1.0",
-    "python-mecab-ko>=1.3.7",
-    "soundfile",
-    "gradio",
-    "click",
+    "melotts-mblt>=0.0.0",
 ]
 onnxruntime = [
     "onnx",
@@ -105,22 +96,14 @@ packages = { find = { where = ["."], include = ["mblt_model_zoo","mblt_model_zoo
 [tool.setuptools.dynamic]
 version = { attr = "mblt_model_zoo.__version__" }
 
-[tool.setuptools.package-data]
-"mblt_model_zoo" = [
-    "MeloTTS/text/cmudict.rep",
-    "MeloTTS/text/cmudict_cache.pickle",
-]
 
 [dependency-groups]
 dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
-    "librosa>=0.11.0, <=0.11.0",
-    "numba>=0.60.0, <=0.60.0",
     "hf_xet",
     "build",
     "ruff",
-    "soundfile",
 ]
 
 [tool.pytest.ini_options]
@@ -133,9 +116,6 @@ markers = [
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-exclude = [
-    "mblt_model_zoo/MeloTTS",
-]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
