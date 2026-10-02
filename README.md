@@ -248,7 +248,7 @@ batching (`--batch-size`, `--dev-no`), core modes, EAGLE-3 tree flags, sampling,
 
 MeloTTS is maintained in [melotts-mblt](https://github.com/mobilint/MeloTTS-mblt). The `melo` command, also available as `melotts`, runs
 `melotts-mblt tts`, and `melo-ui` runs `melotts-mblt ui`. These commands require the `MeloTTS` extra; without it they
-print the install command and exit with status 2. `melo-ui` accepts `--share`, `--host`, and `--port`; use
+print the install command and exit with status 2. `melo-ui` accepts `--share` (`-s`), `--host`, and `--port` (`-p`); use
 `melo --help` to see the MeloTTS text, language, speaker, speed, device, and local-file options.
 `mblt_model_zoo.MeloTTS` remains available as a forwarding-only compatibility facade, so
 `from mblt_model_zoo.MeloTTS.api import TTS` returns the same class as `from melotts_mblt import TTS`.

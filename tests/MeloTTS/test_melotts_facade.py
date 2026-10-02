@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.resources
-import subprocess
 import sys
-import textwrap
 
-import melotts_mblt
 import pytest
+
+melotts_mblt = pytest.importorskip("melotts_mblt")
 
 LEGACY = "mblt_model_zoo.MeloTTS"
 
@@ -69,65 +68,19 @@ def test_melo_ui_forwards_to_standalone_ui(monkeypatch: pytest.MonkeyPatch) -> N
     assert calls == [{"share": True, "host": "0.0.0.0", "port": 7860}]
 
 
+def test_melo_ui_short_flags_match_standalone_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``-s`` / ``-p`` work as in ``melotts-mblt ui`` (and the upstream ``melo-ui`` Click command)."""
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr("melotts_mblt.cli.ui.run_ui", lambda **kwargs: calls.append(kwargs) or 0)
+    main = importlib.import_module("mblt_model_zoo.cli.main")
+    monkeypatch.setattr(sys, "argv", ["mblt-model-zoo", "melo-ui", "-s", "-p", "7861"])
+
+    assert main.main() == 0
+    assert calls == [{"share": True, "host": None, "port": 7861}]
+
+
 def test_melotts_download_script_forwards_to_standalone(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("melotts_mblt.cli.download.run_download", lambda: 0)
     from mblt_model_zoo.utils import melotts_download
 
     assert melotts_download.main() == 0
-
-
-_WITHOUT_MELOTTS_MBLT = textwrap.dedent(
-    """
-    import importlib
-    import importlib.abc
-    import sys
-
-
-    class _Block(importlib.abc.MetaPathFinder):
-        def find_spec(self, fullname, path=None, target=None):
-            if fullname == "melotts_mblt" or fullname.startswith("melotts_mblt."):
-                raise ModuleNotFoundError(f"No module named {fullname!r}", name="melotts_mblt")
-            return None
-
-
-    sys.meta_path.insert(0, _Block())
-
-    import mblt_model_zoo
-
-    assert "MeloTTS" not in mblt_model_zoo.__all__, mblt_model_zoo.__all__
-    try:
-        import mblt_model_zoo.MeloTTS  # noqa: F401
-    except ModuleNotFoundError as exc:
-        assert "mblt-model-zoo[MeloTTS]" in str(exc), exc
-    else:
-        raise AssertionError("facade imported without melotts-mblt")
-
-    from mblt_model_zoo.utils import melotts_download
-
-    assert melotts_download.main() == 2
-    cli_main = importlib.import_module("mblt_model_zoo.cli.main")
-    commands = (
-        ["mblt-model-zoo", "melo", "x", "y.wav"],
-        ["mblt-model-zoo", "melotts", "--help"],
-        ["mblt-model-zoo", "melo-ui"],
-    )
-    for argv in commands:
-        sys.argv = argv
-        try:
-            code = cli_main.main()
-        except SystemExit as exc:
-            code = exc.code
-        assert code == 2, (argv, code)
-    print("ok")
-    """
-)
-
-
-def test_model_zoo_degrades_gracefully_without_melotts_mblt() -> None:
-    """Without the extra, Model Zoo imports and its MeloTTS commands report how to install melotts-mblt."""
-    result = subprocess.run(
-        [sys.executable, "-c", _WITHOUT_MELOTTS_MBLT], capture_output=True, text=True, check=False, timeout=300
-    )
-    assert result.returncode == 0, result.stderr[-4000:]
-    assert result.stdout.strip().splitlines()[-1] == "ok"
-    assert "mblt-model-zoo[MeloTTS]" in result.stderr

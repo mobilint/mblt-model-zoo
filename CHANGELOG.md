@@ -11,6 +11,7 @@
 - The `MeloTTS` extra now installs `melotts-mblt`, which pins the text-processing, UI, and transformers-mblt
   requirements. `mblt-model-zoo melo` / `melotts`, `melo-ui`, and `mblt-melotts-download` run the melotts-mblt
   `tts`, `ui`, and `download` commands; without the extra they print the install command and exit with status 2.
+  `melo-ui` also accepts `-p` for `--port`, matching `melotts-mblt ui` and the upstream `melo-ui` Click command.
 - The MeloTTS implementation, its `cmudict` package data, its tests, and `tests/pipe_teardown.py` are no longer shipped
   in this repository. `tests/MeloTTS` keeps only facade and CLI-bridge compatibility tests. The `librosa`, `numba`,
   and `soundfile` dev dependencies, used only by those tests, are removed.

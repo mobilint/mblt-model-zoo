@@ -87,13 +87,13 @@ Before editing, run `git status --short` and preserve unrelated work.
   `MeloTTS` installs `melotts-mblt`. The base package must keep importing, and its other CLI commands must keep
   working, without these extras.
 - Keep `tests/transformers` limited to facade and bridge compatibility tests
-  (`test_transformers_facade.py`); functional, contract, and NPU Transformers tests belong in
-  transformers-mblt.
+  (`test_transformers_facade.py`, skipped without the extra; `test_transformers_missing.py`, which always runs);
+  functional, contract, and NPU Transformers tests belong in transformers-mblt.
 - Implement MeloTTS behavior (TTS API, synthesizer, text processing, CLI options) in `melotts-mblt` first; its
   `AGENTS.md` and `melotts-mblt` skill hold the contracts. `cli/melo.py`, `cli/melo_ui.py`, and
   `utils/melotts_download.py` bridge to `melotts_mblt.cli` (`run_tts`, `run_ui`, `run_download`) with
   install-hint fallbacks in `cli/_melotts.py`. Keep `tests/MeloTTS` limited to facade and bridge compatibility tests
-  (`test_melotts_facade.py`).
+  (`test_melotts_facade.py`, skipped without the extra; `test_melotts_missing.py`, which always runs).
 - `utils/npu_backend.py` keeps the historical `MobilintNPUBackend.dispatcher` property for Model Zoo
   callers and builds the transformers-mblt `MultiSlotDispatcher` (shared `_mblt_model_zoo_dispatcher`
   attribute), so both packages can install it without clobbering each other.

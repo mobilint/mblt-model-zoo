@@ -27,5 +27,5 @@ def add_melo_ui_parser(
         help="Expose a publicly-accessible shared Gradio link.",
     )
     parser.add_argument("--host", default=None, help="Server host / bind address (e.g., 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=None, help="Server port (e.g., 7860)")
+    parser.add_argument("--port", "-p", type=int, default=None, help="Server port (e.g., 7860)")
     parser.set_defaults(_handler=_cmd_melo_ui)
