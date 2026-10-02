@@ -73,7 +73,7 @@ Currently, these optional functions are only available on environment equipped w
 |Name|Use|Details|
 |-------|------|------|
 |transformers|For using Hugging Face Transformers related models (installs [transformers-mblt](https://github.com/mobilint/transformers-mblt))|[README.md](https://github.com/mobilint/transformers-mblt/blob/main/transformers_mblt/README.md)|
-|MeloTTS|For using MeloTTS models|[README.md](mblt_model_zoo/MeloTTS/README.md)|
+|MeloTTS|For using MeloTTS models (installs [melotts-mblt](https://github.com/mobilint/MeloTTS-mblt))|[README.md](https://github.com/mobilint/MeloTTS-mblt/blob/main/melotts_mblt/README.md)|
 |qbcompiler|For generating mxq files with custom setting|[README.md](compile/README.md)|
 
 The `qbcompiler` extra is strictly isolated from ordinary package use. qbcompiler is loaded only
@@ -84,9 +84,9 @@ without qbcompiler installed; only a compilation request reports the installatio
 For the `transformers` extra, functional tests and benchmark scripts are maintained in
 transformers-mblt ([test guide](https://github.com/mobilint/transformers-mblt/blob/main/tests/TEST.md),
 [benchmark guide](https://github.com/mobilint/transformers-mblt/blob/main/benchmark/transformers/README.md)). The `qwen-asr` extra installs
-`transformers-mblt[qwen-asr]`, and the `MeloTTS` extra installs transformers-mblt for its Mobilint BERT.
+`transformers-mblt[qwen-asr]`, and the `MeloTTS` extra installs melotts-mblt.
 
-> Note: The `MeloTTS` extra includes `unidic`, which requires an additional dictionary download step. Python packaging (PEP 517/518) does not support running arbitrary post-install commands automatically, so run `mblt-unidic-download` (or `python -m unidic download`) after installing the extra when needed.
+> Note: MeloTTS needs a one-time download of the NLTK tagger and the UniDic dictionary. Python packaging (PEP 517/518) does not support running arbitrary post-install commands automatically, so run `mblt-melotts-download` (equivalent to `melotts-mblt download`) after installing the `MeloTTS` extra.
 
 ## Command Line Interface
 
@@ -106,8 +106,8 @@ The built-in command surface shown by `mblt-model-zoo -h` is:
 - `val` — validate a vision model on its benchmark dataset.
 - `compile` — compile a configured vision ONNX model to MXQ.
 - `tps measure` and `tps sweep` — run Transformers token-per-second benchmarks.
-- `melo` — run the MeloTTS CLI; `melotts` is an alias.
-- `melo-ui` — launch the MeloTTS Gradio WebUI.
+- `melo` — run the MeloTTS CLI (`melotts-mblt tts`); `melotts` is an alias.
+- `melo-ui` — launch the MeloTTS Gradio WebUI (`melotts-mblt ui`).
 
 Run `mblt-model-zoo <command> -h` for argparse-based commands. `melo` and `melotts` are
 Click-based and use `--help`.
@@ -246,13 +246,16 @@ batching (`--batch-size`, `--dev-no`), core modes, EAGLE-3 tree flags, sampling,
 
 ### MeloTTS Helpers
 
-The `melo` command, also available as `melotts`, forwards arguments to the MeloTTS Click CLI. The
-`melo-ui` command launches the MeloTTS Gradio WebUI. These commands require the `MeloTTS` extra.
-`melo-ui` accepts `--share`, `--host`, and `--port`; use `melo --help` to see the MeloTTS text,
-language, speaker, speed, device, and local-file options.
+MeloTTS is maintained in [melotts-mblt](https://github.com/mobilint/MeloTTS-mblt). The `melo` command, also available as `melotts`, runs
+`melotts-mblt tts`, and `melo-ui` runs `melotts-mblt ui`. These commands require the `MeloTTS` extra; without it they
+print the install command and exit with status 2. `melo-ui` accepts `--share`, `--host`, and `--port`; use
+`melo --help` to see the MeloTTS text, language, speaker, speed, device, and local-file options.
+`mblt_model_zoo.MeloTTS` remains available as a forwarding-only compatibility facade, so
+`from mblt_model_zoo.MeloTTS.api import TTS` returns the same class as `from melotts_mblt import TTS`.
 
 ```bash
 pip install "mblt-model-zoo[MeloTTS]"
+mblt-melotts-download
 mblt-model-zoo melo --help
 mblt-model-zoo melotts --help
 mblt-model-zoo melo-ui --help

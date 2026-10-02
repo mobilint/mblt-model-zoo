@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+
+- **MeloTTS moved to [melotts-mblt](https://github.com/mobilint/MeloTTS-mblt).** `mblt_model_zoo.MeloTTS` is now a
+  forwarding-only compatibility facade. Every `mblt_model_zoo.MeloTTS.<path>` import resolves to the same module
+  object as `melotts_mblt.<path>`, so `from mblt_model_zoo.MeloTTS.api import TTS` keeps working. New code should use
+  `from melotts_mblt import TTS`.
+- The `MeloTTS` extra now installs `melotts-mblt`, which pins the text-processing, UI, and transformers-mblt
+  requirements. `mblt-model-zoo melo` / `melotts`, `melo-ui`, and `mblt-melotts-download` run the melotts-mblt
+  `tts`, `ui`, and `download` commands; without the extra they print the install command and exit with status 2.
+- The MeloTTS implementation, its `cmudict` package data, its tests, and `tests/pipe_teardown.py` are no longer shipped
+  in this repository. `tests/MeloTTS` keeps only facade and CLI-bridge compatibility tests. The `librosa`, `numba`,
+  and `soundfile` dev dependencies, used only by those tests, are removed.
+
+### Changed
+
+- `mblt_model_zoo.hf_transformers` and `mblt_model_zoo.MeloTTS` share one import-alias helper,
+  `mblt_model_zoo/_standalone_alias.py`. Behavior is unchanged.
+
 ## 2.11.0
 
 ### Breaking Changes

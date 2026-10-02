@@ -1,9 +1,10 @@
 ---
 name: mblt-model-zoo
 description: >-
-  Work on the Mobilint Model Zoo package, its legacy Vision and Transformers compatibility facades,
-  CLI integration, MeloTTS, and repository documentation. Use for Model Zoo changes; implement
-  Vision features in mblt-vision-python and Transformers features in transformers-mblt instead.
+  Work on the Mobilint Model Zoo package, its legacy Vision, Transformers, and MeloTTS compatibility
+  facades, CLI integration, and repository documentation. Use for Model Zoo changes; implement Vision
+  features in mblt-vision-python, Transformers features in transformers-mblt, and MeloTTS features in
+  melotts-mblt instead.
 ---
 
 # Mobilint Model Zoo
@@ -34,7 +35,9 @@ description: >-
    base package and non-Transformers commands work without the `transformers` extra. Implement
    Transformers models, TPS schema, EAGLE-3, and Qwen3-VL contracts in transformers-mblt (its
    `transformers-mblt` skill), and keep `tests/transformers` to facade/bridge compatibility tests.
-   Preserve local conventions in `MeloTTS`.
+   Keep `mblt_model_zoo.MeloTTS` a forwarding-only facade over `melotts_mblt` through the same
+   `_standalone_alias.install_alias`; `cli/melo.py`, `cli/melo_ui.py`, and `utils/melotts_download.py` bridge to
+   `melotts_mblt.cli` with install-hint fallbacks, and `tests/MeloTTS` holds only facade/bridge tests.
 6. Start with focused tests. Report unavailable hardware, downloads, and optional extras instead of
    weakening validation. For docs, run `git diff --check`.
 7. When package ownership, public API, CLI bridges, or runtime dependencies change significantly,
@@ -43,4 +46,4 @@ description: >-
 8. Before a release, build from a clean tree and inspect the wheel. Reject legacy Vision
    implementation paths such as `vision/models/`, `vision/utils/preprocess/`,
    `vision/utils/postprocess/`, `vision/utils/datasets/`, and `vision/utils/evaluation/`, and any
-   `hf_transformers/models/` or `hf_transformers/utils/` path.
+   `hf_transformers/models/` or `hf_transformers/utils/` path, and any `MeloTTS/` file other than `__init__.py`.
