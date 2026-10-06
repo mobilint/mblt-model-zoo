@@ -32,7 +32,7 @@ jobs:
           rm -rf build dist *.egg-info
           python -m build
 
-      - name: Verify Vision and Transformers facade wheel contents
+      - name: Verify Vision, Transformers, and MeloTTS facade wheel contents
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -53,10 +53,12 @@ jobs:
                   name
                   for name in archive.namelist()
                   if name.startswith(forbidden_prefixes)
+                  # The MeloTTS facade is a single module; any other MeloTTS file is legacy implementation.
+                  or (name.startswith("mblt_model_zoo/MeloTTS/") and name != "mblt_model_zoo/MeloTTS/__init__.py")
               ]
           if forbidden:
               raise SystemExit(
-                  "Wheel contains legacy Vision or Transformers implementation files:\n"
+                  "Wheel contains legacy Vision, Transformers, or MeloTTS implementation files:\n"
                   + "\n".join(forbidden)
               )
           PY
