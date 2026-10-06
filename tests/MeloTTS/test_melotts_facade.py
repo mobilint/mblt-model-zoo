@@ -22,8 +22,9 @@ def test_legacy_module_paths_are_standalone_module_objects(path: str) -> None:
 
 
 def test_legacy_names_are_standalone_objects() -> None:
-    import mblt_model_zoo.MeloTTS as facade
     from mblt_model_zoo.MeloTTS.api import TTS
+
+    import mblt_model_zoo.MeloTTS as facade
 
     assert TTS is melotts_mblt.TTS
     assert facade.TTS is melotts_mblt.TTS
