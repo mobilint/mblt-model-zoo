@@ -16,11 +16,29 @@ TPS and upstream-passthrough CLI, benchmarks, scripts, and Transformers tests. `
 MeloTTS implementation: the TTS API, synthesizer, text processing, the `melotts-mblt` CLI, and MeloTTS tests.
 Model Zoo retains only compatibility facades and CLI bridges for its legacy Vision, Transformers, and MeloTTS APIs.
 
+**`mblt-model-zoo` is deprecated (since 2.13.0) and receives no feature updates.** Accept only deprecation,
+compatibility, packaging, and critical fixes here; route all new work to the standalone packages.
+
 `CLAUDE.md` imports this guide. The Claude entry point at `.claude/skills/mblt-model-zoo/SKILL.md`
 is a symlink to its `.agents/skills/...` counterpart, so editing the `.agents` copy is enough.
 Follow a more-specific `AGENTS.md` when one exists. User and system instructions take precedence.
 
 Before editing, run `git status --short` and preserve unrelated work.
+
+## Deprecation Contract
+
+- `mblt_model_zoo/_deprecation.py` owns every notice. Facades call `warn_deprecated_import(legacy, package,
+  replacement)` at import, which emits `MbltModelZooDeprecationWarning` (a `FutureWarning` subclass, so Python shows
+  it by default). Keep the replacement package and import path accurate when adding or changing a facade.
+- `mblt_model_zoo/__init__.py` imports its subpackages lazily through `__getattr__`, so `import mblt_model_zoo` stays
+  silent and each facade warns only when used. Do not restore eager subpackage imports.
+- `cli/main.py` and `utils/melotts_download.py` call `print_cli_notice` once per process, naming the replacement
+  command (`mblt-vision`, `transformers-mblt`, `melotts-mblt`). The CLI notice suppresses later facade warnings in
+  the same process. Map any new subcommand in `cli/main.py::_REPLACEMENTS`.
+- `MBLT_MODEL_ZOO_SUPPRESS_DEPRECATION=1` silences both. `tests/test_deprecation.py` covers the notices in fresh
+  interpreters; pytest otherwise ignores the warning category through `pyproject.toml` `filterwarnings`.
+- Facades must keep working while deprecated. Hub revisions pinned before the proxy update still import
+  `mblt_model_zoo.hf_transformers`; they now warn but must keep resolving.
 
 ## Repository Map
 

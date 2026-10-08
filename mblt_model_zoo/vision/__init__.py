@@ -7,6 +7,10 @@ from typing import Any
 
 import mblt_vision as _standalone_vision
 
+from .._deprecation import warn_deprecated_import
+
+warn_deprecated_import(__name__, "mblt-vision-python", "mblt_vision")
+
 MBLT_Engine = _standalone_vision.MBLT_Engine
 list_models = _standalone_vision.list_models
 list_tasks = _standalone_vision.list_tasks

@@ -15,6 +15,10 @@ from mblt_npu.npu_target import (
     core_to_int,
 )
 
+from .._deprecation import warn_deprecated_import
+
+warn_deprecated_import(__name__, "mblt-npu-python", "mblt_npu.npu_target")
+
 __all__ = [
     "NPUTargetSpec",
     "NPUTargetSpecPending",

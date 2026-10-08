@@ -10,7 +10,7 @@ authors = [
     {"name" = "Mobilint Inc.", email = "tech-support@mobilint.com"},
 ]
 dynamic = ["version"]
-description = "A codebase for pre-quantized AI models for Mobilint NPUs."
+description = "Deprecated: use mblt-vision-python, transformers-mblt, and melotts-mblt. Compatibility layer for pre-quantized AI models on Mobilint NPUs."
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 requires-python = ">=3.10,<3.13"
@@ -35,7 +35,7 @@ dependencies = [
     "mblt-vision-python>=0.0.2",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 7 - Inactive",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
@@ -107,6 +107,10 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+filterwarnings = [
+    # The compatibility facades warn on import by design; tests/test_deprecation.py checks those warnings.
+    "ignore::mblt_model_zoo._deprecation.MbltModelZooDeprecationWarning",
+]
 markers = [
     "full_matrix: additional transformer model/core matrix cases enabled by --full-matrix.",
     "requires_network: test downloads models, datasets, or other remote artifacts.",

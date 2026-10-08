@@ -15,6 +15,10 @@ from mblt_npu import (
     backend_class_for,
 )
 
+from .._deprecation import warn_deprecated_import
+
+warn_deprecated_import(__name__, "mblt-npu-python", "mblt_npu")
+
 
 def _get_transformers_dispatcher(backend: MobilintNPUBackend):
     """Attach the transformers-mblt multi-slot dispatcher without coupling the NPU wheel to transformers.

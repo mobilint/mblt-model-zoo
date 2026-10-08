@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from .._deprecation import warn_deprecated_import
 from .._standalone_alias import install_alias
 
 try:
@@ -21,10 +22,11 @@ except ModuleNotFoundError as exc:
         raise
     raise ModuleNotFoundError(
         "mblt_model_zoo.hf_transformers now forwards to the standalone transformers-mblt package. "
-        "Install it with: pip install 'mblt-model-zoo[transformers]'",
+        "Install it with: pip install transformers-mblt (or pip install 'mblt-model-zoo[transformers]')",
         name=exc.name,
     ) from exc
 
+warn_deprecated_import(__name__, "transformers-mblt", "transformers_mblt")
 install_alias(__name__, _standalone.__name__)
 
 __all__ = list(_standalone.__all__)
