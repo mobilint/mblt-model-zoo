@@ -9,6 +9,11 @@ description: >-
 
 # Mobilint Model Zoo
 
+`mblt-model-zoo` is deprecated since 2.13.0 and receives no feature updates. Accept only deprecation,
+compatibility, packaging, and critical fixes; route new work to mblt-vision-python, transformers-mblt,
+melotts-mblt, or mblt-npu-python. Keep the notices in `mblt_model_zoo/_deprecation.py` accurate (see the
+`AGENTS.md` Deprecation Contract), keep `mblt_model_zoo/__init__.py` lazy, and keep every facade working.
+
 1. Read `AGENTS.md`, run `git status --short`, and inspect the relevant parser, exports, tests, and
    `pyproject.toml` before editing.
 2. Keep `mblt_model_zoo.vision` and its Vision compilation exports as thin compatibility layers.

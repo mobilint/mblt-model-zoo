@@ -14,6 +14,36 @@
 
 Designed to help developers accelerate deployment, Mobilint's Model Zoo offers access to public, pre-trained, and pre-quantized models for vision, language, and multimodal tasks. Along with performance results, we provide pre- and post-processing tools to help developers evaluate, fine-tune, and integrate the models with ease.
 
+## Deprecation Notice
+
+> [!WARNING]
+> **mblt-model-zoo is deprecated and no longer receives updates.** Version 2.13.0 keeps every existing import path
+> and command working, but new models, features, and fixes ship only in the standalone packages below. Please migrate.
+
+| If you use | Install | Use instead |
+|---|---|---|
+| `mblt_model_zoo.vision`, `mblt_model_zoo.compile` | `pip install mblt-vision-python` | `import mblt_vision`, `mblt_vision.compile` |
+| `mblt_model_zoo.hf_transformers`, `mblt-model-zoo[transformers]` | `pip install transformers-mblt` | `import transformers_mblt` |
+| `mblt_model_zoo.MeloTTS`, `mblt-model-zoo[MeloTTS]` | `pip install melotts-mblt` | `import melotts_mblt` |
+| `mblt_model_zoo.utils.npu_backend`, `npu_target`, `logging` | `pip install mblt-npu-python` | `import mblt_npu` |
+| `mblt-model-zoo predict` / `val` / `compile` | `pip install mblt-vision-python` | `mblt-vision predict` / `val` / `compile` |
+| `mblt-model-zoo tps`, `chat`, `serve`, and other Transformers commands | `pip install transformers-mblt` | `transformers-mblt <command>` |
+| `mblt-model-zoo melo` / `melotts`, `melo-ui`, `mblt-melotts-download` | `pip install melotts-mblt` | `melotts-mblt tts`, `melotts-mblt ui`, `melotts-mblt download` |
+
+Most migrations only change the import prefix, because the compatibility modules are the standalone modules.
+For example, `from mblt_model_zoo.vision import MBLT_Engine` becomes `from mblt_vision import MBLT_Engine`.
+
+Importing a compatibility module emits `MbltModelZooDeprecationWarning`, a `FutureWarning` subclass, that names its
+replacement. Every `mblt-model-zoo` and `mblt-melotts-download` invocation prints one notice to stderr. Set
+`MBLT_MODEL_ZOO_SUPPRESS_DEPRECATION=1` to hide both, for example in CI logs, or filter the warning in Python:
+
+```python
+import warnings
+
+warnings.filterwarnings("ignore", message=r"mblt_model_zoo\..* is deprecated", category=FutureWarning)
+import mblt_model_zoo.vision  # noqa: E402
+```
+
 ## Installation
 
 [![PyPI - Version](https://img.shields.io/pypi/v/mblt-model-zoo?logo=pypi&logoColor=white)](https://pypi.org/project/mblt-model-zoo/)

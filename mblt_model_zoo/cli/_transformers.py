@@ -9,7 +9,7 @@ from typing import Callable, NoReturn
 
 INSTALL_HINT = (
     "Transformers commands are provided by the standalone transformers-mblt package. "
-    "Install it with: pip install 'mblt-model-zoo[transformers]'"
+    "Install it with: pip install transformers-mblt (or pip install 'mblt-model-zoo[transformers]')"
 )
 
 

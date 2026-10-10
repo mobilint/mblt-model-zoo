@@ -1,5 +1,10 @@
 # Model Zoo Vision compatibility layer
 
+> [!WARNING]
+> `mblt-model-zoo` is deprecated and no longer receives updates. Importing `mblt_model_zoo.vision` emits a
+> `FutureWarning`; migrate to `mblt_vision` as shown below. See the
+> [deprecation notice](../../README.md#deprecation-notice).
+
 Vision is maintained in
 [mblt-vision-python](https://github.com/mobilint/mblt-vision-python). This Model
 Zoo module preserves the historical `mblt_model_zoo.vision` import path for

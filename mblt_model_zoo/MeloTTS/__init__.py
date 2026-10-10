@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._deprecation import warn_deprecated_import
 from .._standalone_alias import install_alias
 
 try:
@@ -18,10 +19,11 @@ except ModuleNotFoundError as exc:
         raise
     raise ModuleNotFoundError(
         "mblt_model_zoo.MeloTTS now forwards to the standalone melotts-mblt package. "
-        "Install it with: pip install 'mblt-model-zoo[MeloTTS]'",
+        "Install it with: pip install melotts-mblt (or pip install 'mblt-model-zoo[MeloTTS]')",
         name=exc.name,
     ) from exc
 
+warn_deprecated_import(__name__, "melotts-mblt", "melotts_mblt")
 install_alias(__name__, _standalone.__name__)
 
 __all__ = list(_standalone.__all__)

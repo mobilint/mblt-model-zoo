@@ -1,6 +1,33 @@
 # Changelog
 
-## Unreleased
+## 2.13.0
+
+### Deprecated
+
+- **mblt-model-zoo is deprecated and no longer receives updates.** Migrate to the standalone packages:
+  [mblt-vision-python](https://github.com/mobilint/mblt-vision-python) (`mblt_vision`, `mblt-vision`),
+  [transformers-mblt](https://github.com/mobilint/transformers-mblt) (`transformers_mblt`, `transformers-mblt`),
+  [melotts-mblt](https://github.com/mobilint/MeloTTS-mblt) (`melotts_mblt`, `melotts-mblt`), and
+  [mblt-npu-python](https://github.com/mobilint/mblt-npu-python) (`mblt_npu`). The README
+  [Deprecation Notice](README.md#deprecation-notice) maps every legacy import and command to its replacement.
+- Importing `mblt_model_zoo.vision`, `compile`, `hf_transformers`, `MeloTTS`, `utils.npu_backend`, `utils.npu_target`,
+  or `utils.logging` emits `MbltModelZooDeprecationWarning`, a `FutureWarning` subclass that Python shows by default.
+  The warning names the replacement package and import path.
+- `mblt-model-zoo` and `mblt-melotts-download` print one deprecation notice to stderr that names the replacement
+  command, for example `mblt-vision predict`. `mblt-model-zoo -h` also states the deprecation.
+- Set `MBLT_MODEL_ZOO_SUPPRESS_DEPRECATION=1` to hide the warnings and the CLI notice.
+- The PyPI classifier is now `Development Status :: 7 - Inactive`, and the package description points to the
+  standalone packages.
+
+### Changed
+
+- `import mblt_model_zoo` no longer imports its subpackages eagerly. `mblt_model_zoo.vision`, `utils`, `compile`,
+  `hf_transformers`, and `MeloTTS` load on first attribute access, so each warns only when it is used.
+  `mblt_model_zoo.__all__` still lists `hf_transformers` and `MeloTTS` only when their standalone packages are
+  installed.
+- Missing-extra install hints now recommend `pip install transformers-mblt` and `pip install melotts-mblt` first.
+
+## 2.12.0
 
 ### Breaking Changes
 

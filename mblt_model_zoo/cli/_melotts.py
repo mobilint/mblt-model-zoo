@@ -8,7 +8,7 @@ from types import ModuleType
 
 INSTALL_HINT = (
     "MeloTTS commands are provided by the standalone melotts-mblt package. "
-    "Install it with: pip install 'mblt-model-zoo[MeloTTS]'"
+    "Install it with: pip install melotts-mblt (or pip install 'mblt-model-zoo[MeloTTS]')"
 )
 
 
