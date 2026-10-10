@@ -46,6 +46,37 @@ def test_bare_package_import_is_silent_and_lazy() -> None:
 
 
 @pytest.mark.parametrize(
+    ("attribute", "package"), [("hf_transformers", "transformers_mblt"), ("MeloTTS", "melotts_mblt")]
+)
+def test_missing_optional_subpackage_is_absent_attribute(attribute: str, package: str) -> None:
+    result = _run(
+        f"""
+        import importlib.abc
+        import inspect
+        import sys
+
+
+        class _Block(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == {package!r} or fullname.startswith({package!r} + "."):
+                    raise ModuleNotFoundError(f"No module named {{fullname!r}}", name={package!r})
+                return None
+
+
+        sys.meta_path.insert(0, _Block())
+
+        import mblt_model_zoo
+
+        assert not hasattr(mblt_model_zoo, {attribute!r})
+        assert getattr(mblt_model_zoo, {attribute!r}, None) is None
+        assert {attribute!r} not in dir(mblt_model_zoo)
+        inspect.getmembers(mblt_model_zoo)
+        """
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
     ("module", "package", "replacement"),
     [
         ("mblt_model_zoo.vision", "mblt-vision-python", "mblt_vision"),

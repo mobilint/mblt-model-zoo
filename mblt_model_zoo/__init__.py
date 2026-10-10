@@ -15,6 +15,8 @@ from typing import Any
 __version__ = "2.13.0"
 
 _SUBPACKAGES = frozenset({"utils", "vision", "compile", "hf_transformers", "MeloTTS"})
+# Optional subpackages and the standalone package each one forwards to (installed by an extra).
+_OPTIONAL_SUBPACKAGES = {"hf_transformers": "transformers_mblt", "MeloTTS": "melotts_mblt"}
 
 
 def _is_installed(module_name: str) -> bool:
@@ -26,18 +28,23 @@ def _is_installed(module_name: str) -> bool:
 
 
 __all__ = ["utils", "vision"]
-if _is_installed("transformers_mblt"):
-    __all__.append("hf_transformers")
-if _is_installed("melotts_mblt"):
-    __all__.append("MeloTTS")
+__all__ += [name for name, package in _OPTIONAL_SUBPACKAGES.items() if _is_installed(package)]
 
 
 def __getattr__(name: str) -> Any:
     """Import compatibility subpackages on first attribute access."""
     if name in _SUBPACKAGES:
-        return importlib.import_module(f"{__name__}.{name}")
+        try:
+            return importlib.import_module(f"{__name__}.{name}")
+        except ModuleNotFoundError as exc:
+            # A missing optional extra means the attribute does not exist, so hasattr() and getattr(..., default)
+            # keep working. The facade's install hint is preserved as the cause; import it directly to see it.
+            if exc.name != _OPTIONAL_SUBPACKAGES.get(name):
+                raise
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} ({exc})") from exc
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | _SUBPACKAGES)
+    available = _SUBPACKAGES - {name for name in _OPTIONAL_SUBPACKAGES if name not in __all__}
+    return sorted(set(globals()) | available)
